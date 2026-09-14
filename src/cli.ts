@@ -24,9 +24,17 @@ const maxDepth = Flag.Int("max-depth").pipe(
   Flag.withDefault(12),
 );
 
-const scanCommand = Command.make("scan", { root, json, all, maxDepth }, (config) =>
+const personal = Flag.Boolean("personal").pipe(
+  Flag.withDescription(
+    "Include the personal layer (~/.claude/CLAUDE.md, its imports, ~/.claude/rules). Use --no-personal to skip.",
+  ),
+  Flag.withDefault(true),
+);
+
+const scanCommand = Command.make("scan", { root, json, all, maxDepth, personal }, (config) =>
   Effect.gen(function* () {
-    const report = yield* scan(config.root, { maxDepth: config.maxDepth });
+    const home = config.personal ? (process.env.HOME ?? null) : null;
+    const report = yield* scan(config.root, { maxDepth: config.maxDepth, home });
     if (config.json) {
       yield* Console.log(JSON.stringify(report, null, 2));
       return;

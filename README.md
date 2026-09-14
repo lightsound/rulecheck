@@ -8,6 +8,8 @@ Health check for AI coding agent instruction files across many repositories.
 - **Duplicates**: identical instruction files across repositories.
 - **Context budget**: approximate tokens Cursor and Claude Code load unconditionally at the repo root, including always-on `.cursor/rules` and resolved `@AGENTS.md` imports.
 - **Scope** of each rule file: `alwaysApply`, globs, `paths`, nested.
+- **Rot**: package scripts an instruction tells the agent to run that no `package.json` defines, and repository paths it points at that no longer exist. Each finding carries `file:line`.
+- **Personal layer**: `~/.claude/CLAUDE.md`, its `@imports`, `~/.claude/rules/*.md`, and any managed policy file, with the tokens they add to every Claude Code session.
 
 It is read-only. It never modifies scanned repositories.
 
@@ -15,10 +17,20 @@ It is read-only. It never modifies scanned repositories.
 
 ```sh
 bun install
-bun run dev scan ~/ghq          # text summary
-bun run dev scan ~/ghq --json   # full report for tooling
-bun run dev scan ~/ghq --all    # include repositories with no instruction files
+bun run dev scan ~/ghq                # text summary
+bun run dev scan ~/ghq --json         # full report for tooling
+bun run dev scan ~/ghq --all          # include repositories with no instruction files
+bun run dev scan ~/ghq --no-personal  # skip the ~/.claude layer
 ```
+
+### How rot detection decides
+
+Precision is preferred over recall: a finding asks a human to act, so ambiguous text is skipped instead of guessed at.
+
+- Scripts are taken from shell lines in fenced blocks and inline code: `bun run x`, `pnpm x`, `yarn x`, `npm run x`. Manager builtins (`bun install`, `pnpm dlx`) are not scripts. A script is unknown only if no `package.json` in the repository defines it; bare `bun x` is also accepted when `x` is a dependency or a `node_modules/.bin` entry.
+- Paths are taken from inline code spans containing a `/`. URLs, absolute and `~` paths, globs, placeholders, scoped package names, and `owner/repo` pairs are ignored. A path is missing only when its first segment exists (so `acme/other-repo` is not a path) and it is not matched by the root `.gitignore`.
+- Lines that assert absence ("has no `src/main.tsx`", "は存在しない") are skipped.
+- Known limitation: paths the agent is expected to *create* (`write results to poc-results/x.md`) are reported as missing.
 
 ## Convention
 
@@ -30,7 +42,7 @@ rulecheck recommends and follows one convention for the root pair:
 
 ## Status
 
-Early. The scanner and the first detectors work against real trees; staleness detection (commands and paths mentioned in instructions that no longer exist) and structural fix commands are next.
+Early. The scanner, shape/duplicate/budget detectors, rot detection, and the personal layer work against real trees. Structural fix commands are deliberately not implemented yet: the convention is being validated by hand first.
 
 ## Development
 

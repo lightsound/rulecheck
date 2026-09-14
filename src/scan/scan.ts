@@ -1,28 +1,25 @@
-import { createHash } from "node:crypto";
 import { Effect, FileSystem, Path } from "effect";
 import type { PlatformError } from "effect/PlatformError";
-import {
-  classifyShape,
-  detectWrapperTarget,
-  estimateBudget,
-  parseFrontmatter,
-  usesClaudeImport,
-} from "../domain/classify.ts";
-import { countTokens } from "../domain/tokens.ts";
+import { classifyShape, estimateBudget } from "../domain/classify.ts";
 import type {
   CanonicalShape,
   DuplicateGroup,
-  InstructionFile,
+  PersonalLayer,
   RepoReport,
   ScanReport,
   ScanTotals,
 } from "../domain/types.ts";
+import { analyzeFile } from "./analyze.ts";
+import { scanPersonal } from "./personal.ts";
+import { verifyReferences } from "./verify.ts";
 import { type DiscoveredRepo, walk } from "./walk.ts";
 
 export interface ScanOptions {
   readonly maxDepth?: number;
   /** Files with fewer non-empty lines than this are excluded from duplicate detection. */
   readonly minDuplicateLines?: number;
+  /** Home directory whose `~/.claude` layer should be included, or `null` to skip it. */
+  readonly home?: string | null;
 }
 
 const DEFAULT_MIN_DUPLICATE_LINES = 5;
@@ -39,20 +36,28 @@ export const scan = (
 
     const discovered = yield* walk(resolvedRoot, { maxDepth: options.maxDepth ?? 12 });
 
-    const repos = yield* Effect.forEach(discovered, (repo) => analyzeRepo(repo, resolvedRoot, fs), {
-      concurrency: 8,
-    });
+    const repos = yield* Effect.forEach(
+      discovered,
+      (repo) => analyzeRepo(repo, resolvedRoot, fs, path),
+      { concurrency: 8 },
+    );
 
     const duplicates = findDuplicates(
       repos,
       options.minDuplicateLines ?? DEFAULT_MIN_DUPLICATE_LINES,
     );
 
+    const personal: PersonalLayer | null =
+      options.home === null || options.home === undefined
+        ? null
+        : yield* scanPersonal(options.home);
+
     return {
       root: resolvedRoot,
       scannedAt: new Date().toISOString(),
       repos,
       duplicates,
+      personal,
       totals: summarize(repos),
     } satisfies ScanReport;
   });
@@ -61,40 +66,15 @@ const analyzeRepo = (
   repo: DiscoveredRepo,
   scanRoot: string,
   fs: FileSystem.FileSystem,
-): Effect.Effect<RepoReport, PlatformError> =>
+  path: Path.Path,
+): Effect.Effect<RepoReport> =>
   Effect.gen(function* () {
-    const contents = new Map<string, string>();
-
-    const files = yield* Effect.forEach(
-      repo.files,
-      (file) =>
-        Effect.gen(function* () {
-          const content = yield* fs
-            .readFileString(file.path)
-            .pipe(Effect.catchTag("PlatformError", () => Effect.succeed("")));
-          contents.set(file.relativePath, content);
-          const trimmed = content.trim();
-          const wrapperTarget = detectWrapperTarget(content);
-          const analyzed: InstructionFile = {
-            path: file.path,
-            relativePath: file.relativePath,
-            kind: file.kind,
-            depth: file.depth,
-            bytes: Buffer.byteLength(content, "utf8"),
-            lines: trimmed.length === 0 ? 0 : trimmed.split("\n").length,
-            tokens: countTokens(content),
-            contentHash: createHash("sha256").update(trimmed).digest("hex"),
-            wrapperTarget,
-            wrapperUsesImport: wrapperTarget !== null && usesClaudeImport(content, wrapperTarget),
-            frontmatter:
-              file.kind === "cursor-rule" || file.kind === "claude-rule"
-                ? parseFrontmatter(content)
-                : null,
-          };
-          return analyzed;
-        }),
-      { concurrency: 4 },
-    );
+    const analyzed = yield* Effect.forEach(repo.files, (file) => analyzeFile(fs, file), {
+      concurrency: 4,
+    });
+    const files = analyzed.map((a) => a.file);
+    const contents = new Map(analyzed.map((a) => [a.file.relativePath, a.content] as const));
+    const findings = yield* verifyReferences(fs, path, repo.root, repo.packageJsonPaths, analyzed);
 
     return {
       root: repo.root,
@@ -102,6 +82,7 @@ const analyzeRepo = (
       shape: classifyShape(files),
       files,
       budget: estimateBudget(files, contents),
+      findings,
     } satisfies RepoReport;
   });
 
@@ -158,14 +139,16 @@ function summarize(repos: ReadonlyArray<RepoReport>): ScanTotals {
   };
   let files = 0;
   let tokens = 0;
+  let findings = 0;
   let reposWithInstructions = 0;
 
   for (const repo of repos) {
     shapes[repo.shape] += 1;
     files += repo.files.length;
+    findings += repo.findings.length;
     if (repo.files.length > 0) reposWithInstructions += 1;
     for (const file of repo.files) tokens += file.tokens;
   }
 
-  return { repos: repos.length, reposWithInstructions, files, tokens, shapes };
+  return { repos: repos.length, reposWithInstructions, files, tokens, findings, shapes };
 }

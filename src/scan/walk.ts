@@ -14,6 +14,8 @@ export interface DiscoveredFile {
 export interface DiscoveredRepo {
   readonly root: string;
   readonly files: ReadonlyArray<DiscoveredFile>;
+  /** Absolute paths of every package.json in the repository, used to verify script references. */
+  readonly packageJsonPaths: ReadonlyArray<string>;
 }
 
 export interface WalkOptions {
@@ -40,7 +42,7 @@ export const walk = (
     const path = yield* Path.Path;
     const { maxDepth } = { ...DEFAULT_OPTIONS, ...options };
 
-    const repos = new Map<string, DiscoveredFile[]>();
+    const repos = new Map<string, { files: DiscoveredFile[]; packageJsonPaths: string[] }>();
 
     const visit = (
       dir: string,
@@ -56,7 +58,7 @@ export const walk = (
 
         const isRepo = entries.includes(".git");
         const currentRepo = isRepo ? dir : repoRoot;
-        if (isRepo && !repos.has(dir)) repos.set(dir, []);
+        if (isRepo && !repos.has(dir)) repos.set(dir, { files: [], packageJsonPaths: [] });
 
         const dirName = path.basename(dir);
         for (const name of entries) {
@@ -71,13 +73,19 @@ export const walk = (
           }
           if (info.value.type !== "File" || currentRepo === null) continue;
 
+          const bucket = repos.get(currentRepo);
+          if (!bucket) continue;
+
+          if (name === "package.json") {
+            bucket.packageJsonPaths.push(full);
+            continue;
+          }
+
           const relativePath = path.relative(currentRepo, full).split(path.sep).join("/");
           const kind = detectKind(relativePath);
           if (!kind) continue;
 
-          const bucket = repos.get(currentRepo);
-          if (!bucket) continue;
-          bucket.push({
+          bucket.files.push({
             repoRoot: currentRepo,
             path: full,
             relativePath,
@@ -90,9 +98,10 @@ export const walk = (
     yield* visit(path.resolve(root), 0, null);
 
     return [...repos.entries()]
-      .map(([repoRoot, files]) => ({
+      .map(([repoRoot, bucket]) => ({
         root: repoRoot,
-        files: [...files].sort((a, b) => a.relativePath.localeCompare(b.relativePath)),
+        files: [...bucket.files].sort((a, b) => a.relativePath.localeCompare(b.relativePath)),
+        packageJsonPaths: [...bucket.packageJsonPaths].sort(),
       }))
       .sort((a, b) => a.root.localeCompare(b.root));
   });

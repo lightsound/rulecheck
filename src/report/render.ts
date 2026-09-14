@@ -1,4 +1,4 @@
-import type { CanonicalShape, RepoReport, ScanReport } from "../domain/types.ts";
+import type { CanonicalShape, PersonalLayer, RepoReport, ScanReport } from "../domain/types.ts";
 
 const SHAPE_LABEL: Record<CanonicalShape, string> = {
   "agents-canonical": "AGENTS.md canonical",
@@ -24,9 +24,14 @@ export function renderText(report: ScanReport, options: { readonly all?: boolean
 
   out.push(`rulecheck scan of ${report.root}`);
   out.push(
-    `${report.totals.repos} repositories, ${report.totals.reposWithInstructions} with instruction files, ${report.totals.files} files, ~${fmt(report.totals.tokens)} tokens total`,
+    `${report.totals.repos} repositories, ${report.totals.reposWithInstructions} with instruction files, ${report.totals.files} files, ~${fmt(report.totals.tokens)} tokens total, ${report.totals.findings} findings`,
   );
   out.push("");
+
+  if (report.personal) {
+    out.push(...renderPersonal(report.personal));
+    out.push("");
+  }
 
   out.push("Shapes");
   for (const shape of Object.keys(SHAPE_LABEL) as CanonicalShape[]) {
@@ -73,15 +78,37 @@ function renderRepo(repo: RepoReport): string[] {
     );
   }
 
-  for (const file of repo.files) {
-    const marker = file.wrapperTarget
-      ? ` -> ${file.wrapperTarget}${file.wrapperUsesImport ? "" : " (prose)"}`
-      : "";
-    const scope = describeScope(file);
+  for (const finding of repo.findings) {
+    lines.push(`      ! ${finding.file}:${finding.line}  ${finding.message}`);
+  }
+
+  for (const file of repo.files) lines.push(renderFile(file));
+  return lines;
+}
+
+function renderFile(file: RepoReport["files"][number]): string {
+  const marker = file.wrapperTarget
+    ? ` -> ${file.wrapperTarget}${file.wrapperUsesImport ? "" : " (prose)"}`
+    : "";
+  const scope = describeScope(file);
+  return `      ${pad(file.relativePath, 40)} ${String(file.lines).padStart(4)} lines ${String(file.tokens).padStart(6)} tok${scope}${marker}`;
+}
+
+function renderPersonal(personal: PersonalLayer): string[] {
+  const lines: string[] = [];
+  lines.push(
+    `Personal layer (${personal.home}/.claude, added to every Claude Code session): ~${fmt(personal.claudeCodeTokens)} tokens`,
+  );
+  if (personal.files.length === 0) {
+    lines.push("      (no ~/.claude/CLAUDE.md or ~/.claude/rules)");
+  }
+  for (const file of personal.files) lines.push(renderFile(file));
+  if (personal.managedPolicyPath) {
     lines.push(
-      `      ${pad(file.relativePath, 40)} ${String(file.lines).padStart(4)} lines ${String(file.tokens).padStart(6)} tok${scope}${marker}`,
+      `      managed policy present at ${personal.managedPolicyPath} (cannot be excluded)`,
     );
   }
+  lines.push("      Cursor User Rules live in Cursor settings, not on disk, and are not measured.");
   return lines;
 }
 
@@ -95,6 +122,8 @@ function describeScope(file: RepoReport["files"][number]): string {
   if (file.kind === "claude-rule" && file.frontmatter && file.frontmatter.paths.length > 0) {
     return `  [paths: ${file.frontmatter.paths.join(", ")}]`;
   }
+  if (file.kind === "imported-md") return "  [imported]";
+  if (file.kind === "claude-local-md") return "  [personal, gitignored]";
   if (file.depth > 0 && (file.kind === "agents-md" || file.kind === "claude-md"))
     return "  [nested]";
   return "";

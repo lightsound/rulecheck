@@ -15,15 +15,32 @@ async function put(relative: string, content: string) {
   await writeFile(full, content);
 }
 
+const CANONICAL_AGENTS = [
+  "# Canonical",
+  "",
+  "- build: `bun run build`",
+  "- lint: `bun run lint`",
+  "- tool: `bun biome check`",
+  "- auth state: `src/.auth/`",
+  "- entry: `src/main.ts`",
+  "- old: `src/legacy/old.ts`",
+  "- external: `acme/other-repo`",
+  "",
+].join("\n");
+
 beforeAll(async () => {
   root = await mkdtemp(join(tmpdir(), "rulecheck-"));
 
-  // github.com/acme/canonical: AGENTS.md canonical with an @import wrapper and a scoped cursor rule
+  // github.com/acme/canonical: AGENTS.md canonical with an @import wrapper and a scoped cursor rule.
+  // Its AGENTS.md references one real script, one unknown script, one real path, and one missing path.
   await mkdir(join(root, "github.com/acme/canonical/.git"), { recursive: true });
+  await put("github.com/acme/canonical/AGENTS.md", CANONICAL_AGENTS);
   await put(
-    "github.com/acme/canonical/AGENTS.md",
-    "# Canonical\n\n- build: bun run build\n- test: bun test\n- lint: biome\n",
+    "github.com/acme/canonical/package.json",
+    '{"scripts":{"build":"x"},"devDependencies":{"@biomejs/biome":"1"}}',
   );
+  await put("github.com/acme/canonical/.gitignore", "node_modules\n.auth/\n");
+  await put("github.com/acme/canonical/src/main.ts", "export {};\n");
   await put("github.com/acme/canonical/CLAUDE.md", "@AGENTS.md\n");
   await put(
     "github.com/acme/canonical/.cursor/rules/ui.mdc",
@@ -36,10 +53,14 @@ beforeAll(async () => {
   await mkdir(join(root, "github.com/acme/both/.git"), { recursive: true });
   await put("github.com/acme/both/AGENTS.md", "# Both\n\nline\nline\nline\nline\n");
   await put("github.com/acme/both/CLAUDE.md", "# Both claude\n\nline\nline\nline\nline\n");
-  await put(
-    "github.com/acme/both/packages/x/AGENTS.md",
-    "# Canonical\n\n- build: bun run build\n- test: bun test\n- lint: biome\n",
-  );
+  await put("github.com/acme/both/packages/x/AGENTS.md", CANONICAL_AGENTS);
+
+  // a fake home with a personal layer
+  await put(".home/.claude/CLAUDE.md", "@RTK.md\n@~/notes/global.md\n");
+  await put(".home/.claude/RTK.md", "# RTK\n\nUse rtk.\n");
+  await put(".home/notes/global.md", "Always respond in Japanese.\n");
+  await put(".home/.claude/rules/style.md", "---\npaths:\n  - src/**\n---\nscoped\n");
+  await put(".home/.claude/rules/always.md", "unscoped rule\n");
 
   // github.com/acme/empty: a repo with no instruction files
   await mkdir(join(root, "github.com/acme/empty/.git"), { recursive: true });
@@ -115,6 +136,49 @@ describe("scan", () => {
     expect(report.totals.shapes["agents-canonical"]).toBe(1);
     expect(report.totals.shapes["both-full"]).toBe(1);
     expect(report.totals.shapes.none).toBe(1);
+    expect(report.personal).toBeNull();
+  });
+
+  test("verifies script and path references against the repository", async () => {
+    const report = await run(scan(root));
+    const canonical = report.repos.find((r) => r.name === "acme/canonical");
+    const both = report.repos.find((r) => r.name === "acme/both");
+
+    // `bun biome` resolves to a dependency binary; `src/.auth/` is gitignored. Neither is reported.
+    expect(canonical?.findings.map((f) => `${f.kind}:${f.value}@${f.file}:${f.line}`)).toEqual([
+      "unknown-script:lint@AGENTS.md:4",
+      "missing-path:src/legacy/old.ts@AGENTS.md:8",
+    ]);
+
+    // `both` has no package.json, so scripts cannot be judged; `src/` does not exist there either,
+    // so the path is not judged. Nothing is reported rather than guessing.
+    expect(both?.findings).toEqual([]);
+    expect(report.totals.findings).toBe(2);
+  });
+
+  test("includes the personal layer when a home is given", async () => {
+    const report = await run(scan(root, { home: join(root, ".home") }));
+    const personal = report.personal;
+    expect(personal).not.toBeNull();
+
+    expect(personal?.files.map((f) => `${f.kind}:${f.relativePath}`)).toEqual([
+      "claude-md:CLAUDE.md",
+      "imported-md:RTK.md",
+      "imported-md:~/notes/global.md",
+      "claude-rule:rules/always.md",
+      "claude-rule:rules/style.md",
+    ]);
+
+    const tokensOf = (rel: string) =>
+      personal?.files.find((f) => f.relativePath === rel)?.tokens ?? 0;
+    // Everything except the path-scoped rule counts toward every session.
+    expect(personal?.claudeCodeTokens).toBe(
+      tokensOf("CLAUDE.md") +
+        tokensOf("RTK.md") +
+        tokensOf("~/notes/global.md") +
+        tokensOf("rules/always.md"),
+    );
+    expect(personal?.managedPolicyPath).toBeNull();
   });
 });
 

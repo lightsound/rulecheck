@@ -26,8 +26,8 @@ Health check for AI coding agent instruction files (`AGENTS.md`, `CLAUDE.md`, `.
 
 - `src/main.ts` entry; provides Bun platform services and runs the command tree
 - `src/cli.ts` command and flag definitions only, no logic
-- `src/domain/` pure functions and types: file kind detection, wrapper detection, frontmatter parsing, shape classification, budget estimation, token counting
-- `src/scan/` effectful walking and orchestration
+- `src/domain/` pure functions and types: file kind detection, wrapper detection, frontmatter parsing, shape classification, budget estimation, token counting, reference extraction (`references.ts`)
+- `src/scan/` effectful code: `walk.ts` discovery, `analyze.ts` per-file analysis, `verify.ts` reference verification against the repo, `personal.ts` the `~/.claude` layer, `scan.ts` orchestration
 - `src/report/` rendering of a `ScanReport` to text
 - `tests/` `bun test` files; pure domain functions are tested directly, walking is tested against fixture trees
 
@@ -35,5 +35,7 @@ Health check for AI coding agent instruction files (`AGENTS.md`, `CLAUDE.md`, `.
 
 - Keep `src/domain/` free of Effect and I/O. Anything that touches the filesystem lives in `src/scan/`.
 - Add a new detector as a pure function in `src/domain/` first, with a test, then wire it into `scan.ts` and `render.ts`.
+- Findings favor precision over recall. A finding asks a human to act; when the text is ambiguous, skip it rather than guess. Every finding carries `file:line`.
+- Before changing a heuristic, run `bun run dev scan ~/ghq` and read the findings that appear or disappear; the real tree is the regression suite for false positives.
 - Do not add an editor, watcher, or any write path to scanned repositories without an explicit decision recorded in this file.
 - Effect `unstable/*` modules may break between minor versions; bump `effect` and `@effect/platform-bun` together and re-run `bun run check`.

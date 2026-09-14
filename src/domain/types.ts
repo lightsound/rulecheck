@@ -14,7 +14,9 @@ export type FileKind =
   | "claude-local-md"
   | "claude-rule"
   | "cursor-rule"
-  | "cursorrules";
+  | "cursorrules"
+  /** A markdown file pulled in through a Claude Code `@import`. */
+  | "imported-md";
 
 export type WrapperTarget = "AGENTS.md" | "CLAUDE.md";
 
@@ -73,6 +75,22 @@ export interface ContextBudget {
   readonly claudeCode: number;
 }
 
+export type FindingKind =
+  /** An instruction tells the agent to run a package script that no package.json in the repo defines. */
+  | "unknown-script"
+  /** An instruction points at a repository path that does not exist. */
+  | "missing-path";
+
+export interface Finding {
+  readonly kind: FindingKind;
+  /** Repo-relative path of the instruction file. */
+  readonly file: string;
+  readonly line: number;
+  /** The script name or path as written. */
+  readonly value: string;
+  readonly message: string;
+}
+
 export interface RepoReport {
   readonly root: string;
   /** Short display name, e.g. `owner/repo` when the root lives under a ghq-style tree. */
@@ -80,6 +98,20 @@ export interface RepoReport {
   readonly shape: CanonicalShape;
   readonly files: ReadonlyArray<InstructionFile>;
   readonly budget: ContextBudget;
+  readonly findings: ReadonlyArray<Finding>;
+}
+
+/**
+ * Instruction files that load in every session regardless of repository:
+ * `~/.claude/CLAUDE.md`, its imports, `~/.claude/rules/*.md`, and the managed policy file.
+ * Cursor's User Rules live in application settings, not on disk, and are not measured.
+ */
+export interface PersonalLayer {
+  readonly home: string;
+  readonly files: ReadonlyArray<InstructionFile>;
+  /** Approximate tokens Claude Code adds to every session from this layer. */
+  readonly claudeCodeTokens: number;
+  readonly managedPolicyPath: string | null;
 }
 
 export interface DuplicateMember {
@@ -99,6 +131,7 @@ export interface ScanTotals {
   readonly reposWithInstructions: number;
   readonly files: number;
   readonly tokens: number;
+  readonly findings: number;
   readonly shapes: Readonly<Record<CanonicalShape, number>>;
 }
 
@@ -107,5 +140,6 @@ export interface ScanReport {
   readonly scannedAt: string;
   readonly repos: ReadonlyArray<RepoReport>;
   readonly duplicates: ReadonlyArray<DuplicateGroup>;
+  readonly personal: PersonalLayer | null;
   readonly totals: ScanTotals;
 }
