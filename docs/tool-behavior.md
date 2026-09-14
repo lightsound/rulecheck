@@ -79,9 +79,42 @@ Rule frontmatter accepted by the parser but not documented: `metadata.environmen
 | symlink `CLAUDE.md -> AGENTS.md` | works, but `@AGENTS.md` is recommended (Windows / `core.symlinks=false` turn the link into a 9-byte text file) | docs, community reports |
 | Managed policy | `/Library/Application Support/ClaudeCode/CLAUDE.md` (macOS), `/etc/claude-code/CLAUDE.md` (Linux); cannot be excluded | docs |
 
+### Claude Code on the web (cloud sessions)
+
+Sessions run on a fresh Ubuntu 24.04 VM with a fresh clone of the repository. What carries over
+([cloud-environments](https://code.claude.com/docs/en/cloud-environments), table "What carries over from your setup"):
+
+| Source | Cloud session | Doc wording |
+|---|---|---|
+| repo `CLAUDE.md`, `.claude/rules/`, `.claude/settings.json` hooks, `.claude/skills|agents|commands` | yes | "Part of the clone" |
+| `~/.claude/CLAUDE.md` | **no** | "Lives on your machine, not in the repo" |
+| `~/.claude/settings.json`, `.claude/settings.local.json` | no | "not read. Both stay on your machine" |
+| `~/.claude/skills/` | no, but skills enabled on claude.ai are synced at session start | "Cloud sessions automatically load skills you enable on claude.ai" |
+| organization server-managed settings, including a managed `claudeMd` | yes | "Fetched from Anthropic's servers when the session starts" |
+| Auto memory | no | "machine-local ... not shared across machines or cloud environments" |
+
+There is **no documented per-user instruction channel** for cloud sessions (the equivalent of
+Cursor's User Rules does not exist). The official advice is "To make your own configuration
+available in cloud sessions, commit it to the repo." Hooks do fire in the cloud, from the repo and
+from managed settings; `CLAUDE_CODE_REMOTE=true` identifies a cloud session.
+
+Possible per-user workaround, **unverified**: a cloud environment has a setup script that "runs
+when a new cloud session starts, before Claude Code launches", as root, and its filesystem is
+snapshotted and reused. It could clone the personal pack and write `~/.claude/CLAUDE.md` with an
+`@` import. Unknowns: whether a cloud session honors a `~/.claude/CLAUDE.md` that exists on the VM
+(the docs only say the local one is not copied), and whether the GitHub proxy lets the setup
+script clone a private repository that is not attached to the session ("GitHub API and
+release-asset requests reach only repositories attached to the session"). Verify with a probe
+marker before relying on it.
+
+`--teleport` and Remote Control run on the local machine, so `~/.claude/*` applies normally there.
+
 ## What this means for a personal instructions pack
 
-- Claude Code: `~/.claude/CLAUDE.md` containing `@~/path/to/pack/AGENTS.md`. Zero copies, documented.
+- Claude Code (local, teleport, Remote Control): `~/.claude/CLAUDE.md` containing
+  `@~/path/to/pack/AGENTS.md`. Zero copies, documented.
+- Claude Code on the web: no per-user channel. Either accept that cloud sessions run without the
+  personal pack, or verify the setup-script workaround above. Project instructions still apply.
 - Cursor: one User Rule containing a copy of the pack, because it is the only channel that reaches
   Cloud Agents. Treat the copy as a generated artifact: sync from the file, never edit in place,
   and put the sync procedure next to the file (see `lightsound/agent-rules`).
