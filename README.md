@@ -42,7 +42,7 @@ rulecheck recommends and follows one convention for the root pair:
 
 ## Status
 
-Early. The scanner, shape/duplicate/budget detectors, rot detection, and the personal layer work against real trees. Structural fix commands are deliberately not implemented yet: the convention is being validated by hand first.
+Early. The scanner, shape/duplicate/budget detectors, rot detection, and the personal layer work against real trees. The next step is distribution: shared rule packs delivered into repositories as managed blocks, synced through pull requests. See [docs/decisions.md](docs/decisions.md) for the reasoning and [docs/tool-behavior.md](docs/tool-behavior.md) for the tool facts it rests on.
 
 ## Development
 
