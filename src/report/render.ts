@@ -91,16 +91,16 @@ function renderFile(file: RepoReport["files"][number]): string {
     ? ` -> ${file.wrapperTarget}${file.wrapperUsesImport ? "" : " (prose)"}`
     : "";
   const scope = describeScope(file);
-  return `      ${pad(file.relativePath, 40)} ${String(file.lines).padStart(4)} lines ${String(file.tokens).padStart(6)} tok${scope}${marker}`;
+  return `      ${pad(file.relativePath, 52)} ${String(file.lines).padStart(4)} lines ${String(file.tokens).padStart(6)} tok${scope}${marker}`;
 }
 
 function renderPersonal(personal: PersonalLayer): string[] {
   const lines: string[] = [];
   lines.push(
-    `Personal layer (${personal.home}/.claude, added to every Claude Code session): ~${fmt(personal.claudeCodeTokens)} tokens`,
+    `Personal layer (home: ${personal.home}, added to every session)   cursor ~${fmt(personal.cursorTokens)}  claude ~${fmt(personal.claudeCodeTokens)}`,
   );
   if (personal.files.length === 0) {
-    lines.push("      (no ~/.claude/CLAUDE.md or ~/.claude/rules)");
+    lines.push("      (no ~/.claude/CLAUDE.md, ~/.claude/rules, ~/AGENTS.md, or ~/.cursor/rules)");
   }
   for (const file of personal.files) lines.push(renderFile(file));
   if (personal.managedPolicyPath) {
@@ -108,7 +108,9 @@ function renderPersonal(personal: PersonalLayer): string[] {
       `      managed policy present at ${personal.managedPolicyPath} (cannot be excluded)`,
     );
   }
-  lines.push("      Cursor User Rules live in Cursor settings, not on disk, and are not measured.");
+  lines.push(
+    "      Cursor loads ~/AGENTS.md and ~/.cursor/rules/*.mdc for workspaces under home (ancestor walk, undocumented). User Rules in Cursor settings are not on disk and are not measured.",
+  );
   return lines;
 }
 

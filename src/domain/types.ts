@@ -102,15 +102,24 @@ export interface RepoReport {
 }
 
 /**
- * Instruction files that load in every session regardless of repository:
- * `~/.claude/CLAUDE.md`, its imports, `~/.claude/rules/*.md`, and the managed policy file.
- * Cursor's User Rules live in application settings, not on disk, and are not measured.
+ * Instruction files that load in every session regardless of repository.
+ *
+ * Claude Code: `~/.claude/CLAUDE.md`, its imports, `~/.claude/rules/*.md`, the managed policy file,
+ * and `~/CLAUDE.md` (the home directory is an ancestor of every project, and Claude Code reads
+ * `CLAUDE.md` in ancestors).
+ *
+ * Cursor: `~/AGENTS.md`, `~/CLAUDE.md`, and always-apply `~/.cursor/rules/*.mdc`. Cursor's rule
+ * loader walks from the workspace up through every ancestor directory (verified against the app's
+ * `LocalCursorRulesService`; the ancestor walk is not documented). Cursor's User Rules live in
+ * application settings, not on disk, and are not measured.
  */
 export interface PersonalLayer {
   readonly home: string;
   readonly files: ReadonlyArray<InstructionFile>;
   /** Approximate tokens Claude Code adds to every session from this layer. */
   readonly claudeCodeTokens: number;
+  /** Approximate tokens Cursor adds to every session from this layer, for workspaces under home. */
+  readonly cursorTokens: number;
   readonly managedPolicyPath: string | null;
 }
 

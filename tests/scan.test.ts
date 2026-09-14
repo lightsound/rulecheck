@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BunServices } from "@effect/platform-bun";
@@ -61,6 +61,17 @@ beforeAll(async () => {
   await put(".home/notes/global.md", "Always respond in Japanese.\n");
   await put(".home/.claude/rules/style.md", "---\npaths:\n  - src/**\n---\nscoped\n");
   await put(".home/.claude/rules/always.md", "unscoped rule\n");
+  // Cursor side of the personal layer: ~/AGENTS.md as a symlink to a canonical file, a ~/CLAUDE.md
+  // wrapper, and ~/.cursor/rules with one always-apply and one scoped rule.
+  await put(".home/pack/AGENTS.md", "# Personal\n\nRespond in Japanese.\n");
+  await symlink(join(root, ".home/pack/AGENTS.md"), join(root, ".home/AGENTS.md"));
+  await put(".home/CLAUDE.md", "@AGENTS.md\n");
+  await put(".home/.cursor/rules/always.mdc", "---\nalwaysApply: true\n---\nalways on\n");
+  await put(
+    ".home/.cursor/rules/scoped.mdc",
+    "---\nglobs: *.ts\nalwaysApply: false\n---\nscoped\n",
+  );
+  await put(".home/.cursor/rules/ignored.md", "not an mdc\n");
 
   // github.com/acme/empty: a repo with no instruction files
   await mkdir(join(root, "github.com/acme/empty/.git"), { recursive: true });
@@ -162,22 +173,40 @@ describe("scan", () => {
     expect(personal).not.toBeNull();
 
     expect(personal?.files.map((f) => `${f.kind}:${f.relativePath}`)).toEqual([
-      "claude-md:CLAUDE.md",
-      "imported-md:RTK.md",
+      "claude-md:~/.claude/CLAUDE.md",
+      "imported-md:~/.claude/RTK.md",
       "imported-md:~/notes/global.md",
-      "claude-rule:rules/always.md",
-      "claude-rule:rules/style.md",
+      "claude-rule:~/.claude/rules/always.md",
+      "claude-rule:~/.claude/rules/style.md",
+      "agents-md:~/AGENTS.md",
+      "claude-md:~/CLAUDE.md",
+      "cursor-rule:~/.cursor/rules/always.mdc",
+      "cursor-rule:~/.cursor/rules/scoped.mdc",
     ]);
 
     const tokensOf = (rel: string) =>
       personal?.files.find((f) => f.relativePath === rel)?.tokens ?? 0;
-    // Everything except the path-scoped rule counts toward every session.
+
+    // Claude Code: ~/.claude/CLAUDE.md, its imports, unscoped rules, ~/CLAUDE.md and the
+    // ~/AGENTS.md it imports. Not the path-scoped rule.
     expect(personal?.claudeCodeTokens).toBe(
-      tokensOf("CLAUDE.md") +
-        tokensOf("RTK.md") +
+      tokensOf("~/.claude/CLAUDE.md") +
+        tokensOf("~/.claude/RTK.md") +
         tokensOf("~/notes/global.md") +
-        tokensOf("rules/always.md"),
+        tokensOf("~/.claude/rules/always.md") +
+        tokensOf("~/CLAUDE.md") +
+        tokensOf("~/AGENTS.md"),
     );
+
+    // Cursor: ~/AGENTS.md (through the symlink), ~/CLAUDE.md, and the always-apply .mdc only.
+    expect(tokensOf("~/AGENTS.md")).toBeGreaterThan(0);
+    expect(personal?.cursorTokens).toBe(
+      tokensOf("~/AGENTS.md") + tokensOf("~/CLAUDE.md") + tokensOf("~/.cursor/rules/always.mdc"),
+    );
+
+    const homeWrapper = personal?.files.find((f) => f.relativePath === "~/CLAUDE.md");
+    expect(homeWrapper?.wrapperTarget).toBe("AGENTS.md");
+    expect(homeWrapper?.wrapperUsesImport).toBe(true);
     expect(personal?.managedPolicyPath).toBeNull();
   });
 });
