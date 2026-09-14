@@ -9,7 +9,7 @@ Health check for AI coding agent instruction files across many repositories.
 - **Context budget**: approximate tokens Cursor and Claude Code load unconditionally at the repo root, including always-on `.cursor/rules` and resolved `@AGENTS.md` imports.
 - **Scope** of each rule file: `alwaysApply`, globs, `paths`, nested.
 - **Rot**: package scripts an instruction tells the agent to run that no `package.json` defines, and repository paths it points at that no longer exist. Each finding carries `file:line`.
-- **Personal layer**: what loads in every session regardless of repository. Claude Code: `~/.claude/CLAUDE.md`, its `@imports`, `~/.claude/rules/*.md`, `~/CLAUDE.md`, any managed policy file. Cursor: `~/AGENTS.md`, `~/CLAUDE.md`, always-apply `~/.cursor/rules/*.mdc` (Cursor's rule loader walks up through every ancestor of the workspace; verified against the app, not documented). Cursor User Rules in settings are not on disk and are not measured.
+- **Personal layer**: what loads in every session regardless of repository. Claude Code: `~/.claude/CLAUDE.md`, its `@imports`, `~/.claude/rules/*.md`, `~/CLAUDE.md`, any managed policy file. Cursor: `~/AGENTS.md`, `~/CLAUDE.md`, always-apply `~/.cursor/rules/*.mdc` (loaded through an undocumented ancestor walk; local sessions only). Cursor User Rules in settings are not on disk and are not measured. See [docs/tool-behavior.md](docs/tool-behavior.md) for what each tool loads and how it was verified.
 
 It is read-only. It never modifies scanned repositories.
 

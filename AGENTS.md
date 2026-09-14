@@ -30,6 +30,7 @@ Health check for AI coding agent instruction files (`AGENTS.md`, `CLAUDE.md`, `.
 - `src/scan/` effectful code: `walk.ts` discovery, `analyze.ts` per-file analysis, `verify.ts` reference verification against the repo, `personal.ts` the personal layer (`~/.claude`, `~/AGENTS.md`, `~/CLAUDE.md`, `~/.cursor/rules`), `scan.ts` orchestration
 - `src/report/` rendering of a `ScanReport` to text
 - `tests/` `bun test` files; pure domain functions are tested directly, walking is tested against fixture trees
+- `docs/tool-behavior.md` verified facts about what Cursor and Claude Code load, with evidence and a re-verification method. Update it when a heuristic depends on a new fact about a tool.
 
 ## Rules
 
