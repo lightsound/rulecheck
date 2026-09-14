@@ -1,0 +1,29 @@
+{
+  "name": "rulecheck",
+  "version": "0.0.1",
+  "description": "Health check for AI coding agent instruction files (AGENTS.md, CLAUDE.md, .cursor/rules) across many repositories",
+  "license": "MIT",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "rulecheck": "./src/main.ts"
+  },
+  "scripts": {
+    "dev": "bun run src/main.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "check": "bun run typecheck && bun run lint && bun test"
+  },
+  "dependencies": {
+    "@effect/platform-bun": "4.0.0-rc.115",
+    "effect": "4.0.0-rc.115",
+    "js-tiktoken": "1.0.21"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.13",
+    "@types/bun": "latest",
+    "typescript": "^7"
+  }
+}

@@ -1,0 +1,39 @@
+# rulecheck
+
+Health check for AI coding agent instruction files (`AGENTS.md`, `CLAUDE.md`, `.cursor/rules`, `.claude/rules`) across many repositories.
+
+## What this project is
+
+- A read-only CLI. It scans a directory tree, finds git repositories, and reports how each one arranges its instruction files: canonical shape, duplicates across repos, and the approximate context budget each tool loads.
+- It does not write to scanned repositories. Structural fixes will arrive later as explicit, deterministic commands; content authoring is never in scope.
+- Convention this project enforces on itself and recommends to others: `AGENTS.md` is canonical, `CLAUDE.md` is a one-line `@AGENTS.md` wrapper.
+
+## Stack
+
+- Bun (runtime, package manager, test runner). Use `bun <file>`, `bun test`, `bun add`. Never `node`, `npm`, `pnpm`, `vitest`, `jest`.
+- TypeScript 7, strict. Imports use explicit `.ts` extensions.
+- Effect v4 (release candidate, exact-pinned). CLI is `effect/unstable/cli`; filesystem access goes through `FileSystem` / `Path` services so tests can substitute layers.
+- Biome for lint and format.
+
+## Commands
+
+- `bun run dev scan <dir>` run the CLI against a directory
+- `bun run check` typecheck, lint, and test
+- `bun test` tests only
+- `bun run lint:fix` format and autofix
+
+## Layout
+
+- `src/main.ts` entry; provides Bun platform services and runs the command tree
+- `src/cli.ts` command and flag definitions only, no logic
+- `src/domain/` pure functions and types: file kind detection, wrapper detection, frontmatter parsing, shape classification, budget estimation, token counting
+- `src/scan/` effectful walking and orchestration
+- `src/report/` rendering of a `ScanReport` to text
+- `tests/` `bun test` files; pure domain functions are tested directly, walking is tested against fixture trees
+
+## Rules
+
+- Keep `src/domain/` free of Effect and I/O. Anything that touches the filesystem lives in `src/scan/`.
+- Add a new detector as a pure function in `src/domain/` first, with a test, then wire it into `scan.ts` and `render.ts`.
+- Do not add an editor, watcher, or any write path to scanned repositories without an explicit decision recorded in this file.
+- Effect `unstable/*` modules may break between minor versions; bump `effect` and `@effect/platform-bun` together and re-run `bun run check`.
