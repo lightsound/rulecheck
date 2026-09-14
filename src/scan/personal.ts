@@ -35,7 +35,8 @@ export const scanPersonal = (
         kind: "claude-md",
         depth: 0,
       });
-      files.push(analyzed.file);
+      // "Wrapper of a sibling AGENTS.md" is a repository concept; the global file has no sibling.
+      files.push({ ...analyzed.file, wrapperTarget: null, wrapperUsesImport: false });
       claudeCodeTokens += analyzed.file.tokens;
 
       for (const target of extractClaudeImports(analyzed.content)) {
