@@ -193,6 +193,8 @@ export interface PackDistribution {
   readonly packs: ReadonlyArray<Pack>;
   readonly entries: ReadonlyArray<PackStatusEntry>;
   readonly counts: Readonly<Record<PackStatus, number>>;
+  /** Problems reading the pack repository itself, e.g. an unparseable `subscriptions.json`. */
+  readonly warnings: ReadonlyArray<string>;
 }
 
 /**
@@ -212,8 +214,9 @@ export type SkillIssueKind =
  *
  * - `unlocked` no entry: authored locally or installed without the lock
  * - `match`    the directory hashes to the entry's `computedHash`: unchanged since install
- * - `differs`  the hash differs. Not reported as a finding: `npx skills` may record a server-side
- *              snapshot hash instead of the folder hash, so a difference does not prove an edit
+ * - `differs`  the hash differs. Not reported as a finding: `npx skills` records the hash of the
+ *              downloaded source snapshot, before the installer drops `metadata.json` and dotfiles,
+ *              so a difference does not prove an edit
  * - `locked`   an entry without a hash
  */
 export type SkillLockState = "unlocked" | "match" | "differs" | "locked";
@@ -316,6 +319,8 @@ export interface ScanTotals {
   /** Managed blocks found across all repositories, and how many of them were edited in place. */
   readonly blocks: number;
   readonly modifiedBlocks: number;
+  /** Malformed `agent-rules` markers; foreign markers only count once a pack asks to write the file. */
+  readonly malformedMarkers: number;
   readonly skills: number;
   readonly skillIssues: number;
 }

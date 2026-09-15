@@ -335,29 +335,35 @@ describe("scan", () => {
         (e) => `${e.pack} ${e.repo} ${e.status} ${e.file ?? "-"}:${e.line ?? "-"}`,
       ),
     ).toEqual([
-      "base acme/blocked outdated AGENTS.md:3",
+      "base acme/blocked blocked AGENTS.md:11",
       "base acme/both blocked AGENTS.md:1",
       "base acme/foreign blocked AGENTS.md:1",
       "base acme/canonical eligible AGENTS.md:-",
       "base acme/empty eligible AGENTS.md:-",
       "base acme/restored not-subscribed -:-",
-      "frontend acme/blocked modified AGENTS.md:7",
+      "frontend acme/blocked blocked AGENTS.md:11",
       "frontend acme/canonical eligible AGENTS.md:-",
       "frontend acme/both not-subscribed -:-",
       "frontend acme/empty not-subscribed -:-",
       "frontend acme/foreign not-subscribed -:-",
       "frontend acme/restored not-subscribed -:-",
     ]);
-    const outdated = distribution?.entries.find((e) => e.status === "outdated");
-    expect(outdated?.message).toBe(`rev aaaaaaa -> ${PACK_REV.slice(0, 7)}`);
+    // The unpaired marker at line 11 blocks updating the stale `base` block and the edited
+    // `frontend` block alike; the row still says what the block's own state is.
+    const blockedRows = distribution?.entries.filter((e) => e.repo === "acme/blocked") ?? [];
+    expect(blockedRows.map((e) => e.message)).toEqual([
+      `block at line 3 is outdated (rev aaaaaaa -> ${PACK_REV.slice(0, 7)}); \`agent-rules:begin\` is missing hash=`,
+      "block at line 7 is modified; `agent-rules:begin` is missing hash=",
+    ]);
     expect(distribution?.counts).toEqual({
       current: 0,
-      outdated: 1,
-      modified: 1,
+      outdated: 0,
+      modified: 0,
       eligible: 3,
-      blocked: 2,
+      blocked: 4,
       "not-subscribed": 5,
     });
+    expect(distribution?.warnings).toEqual([]);
 
     const text = renderText(report);
     expect(text).toContain("Pack distribution");
@@ -365,6 +371,28 @@ describe("scan", () => {
     expect(text).toContain("AGENTS.md:1  another tool marks this file");
     expect(text).toContain("AGENTS.md:7-9");
     expect(text).toContain("MODIFIED");
+  });
+
+  test("an unreadable subscriptions.json is a warning, not silence", async () => {
+    const broken = await mkdtemp(join(tmpdir(), "rulecheck-broken-packs-"));
+    try {
+      await put("packs/base/AGENTS.md", "body\n", broken);
+      await put("subscriptions.json", "{ not json", broken);
+      const report = await run(scan(root, { packs: broken }));
+      expect(report.distribution?.warnings).toEqual([
+        'subscriptions.json is not a { "<pack-id>": ["owner/repo", ...] } object; every repository counts as not subscribed',
+        "not a git checkout; pack rev is unknown",
+      ]);
+      // Only the repo that already carries a `base` block gets a status from the block itself.
+      expect(
+        report.distribution?.entries
+          .filter((e) => e.repo !== "acme/blocked")
+          .every((e) => e.status === "not-subscribed"),
+      ).toBe(true);
+      expect(renderText(report)).toContain("! subscriptions.json is not a");
+    } finally {
+      await rm(broken, { recursive: true, force: true });
+    }
   });
 
   test("verifies script and path references against the repository", async () => {

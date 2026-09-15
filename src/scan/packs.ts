@@ -13,12 +13,18 @@ import type { Pack } from "../domain/types.ts";
  * `packs/<id>/**` is the pack's file set, `subscriptions.json` maps pack ids to `owner/repo`.
  * The checkout's git HEAD becomes each pack's `rev`. Read-only.
  */
+export interface LoadedPacks {
+  readonly packs: ReadonlyArray<Pack>;
+  readonly warnings: ReadonlyArray<string>;
+}
+
 export const loadPacks = (
   fs: FileSystem.FileSystem,
   path: Path.Path,
   packsRoot: string,
-): Effect.Effect<ReadonlyArray<Pack>> =>
+): Effect.Effect<LoadedPacks> =>
   Effect.gen(function* () {
+    const warnings: string[] = [];
     const readText = (target: string) =>
       fs
         .readFileString(target)
@@ -29,11 +35,21 @@ export const loadPacks = (
         .pipe(Effect.catchTag("PlatformError", () => Effect.succeed<Array<string>>([])));
 
     const subscriptionsText = yield* readText(path.join(packsRoot, "subscriptions.json"));
-    const subscriptions =
-      subscriptionsText === null
-        ? new Map<string, string[]>()
-        : parseSubscriptions(subscriptionsText);
+    let subscriptions = new Map<string, string[]>();
+    if (subscriptionsText === null) {
+      warnings.push("subscriptions.json not found; every repository counts as not subscribed");
+    } else {
+      const parsed = parseSubscriptions(subscriptionsText);
+      if (parsed === null) {
+        warnings.push(
+          'subscriptions.json is not a { "<pack-id>": ["owner/repo", ...] } object; every repository counts as not subscribed',
+        );
+      } else {
+        subscriptions = parsed;
+      }
+    }
     const rev = yield* gitHead(fs, path, packsRoot);
+    if (rev === null) warnings.push("not a git checkout; pack rev is unknown");
 
     const packsDir = path.join(packsRoot, "packs");
     const packs: Pack[] = [];
@@ -43,9 +59,17 @@ export const loadPacks = (
       if (info._tag === "None" || info.value.type !== "Directory") continue;
       const files = yield* collectSources(fs, path, dir, dir);
       if (files.length === 0) continue;
-      packs.push(packFromFiles(id, rev, files, subscriptions?.get(id) ?? []));
+      packs.push(packFromFiles(id, rev, files, subscriptions.get(id) ?? []));
     }
-    return packs;
+    if (packs.length === 0) warnings.push(`no packs/<id>/ directories under ${packsRoot}`);
+    for (const id of subscriptions.keys()) {
+      if (!packs.some((pack) => pack.id === id)) {
+        warnings.push(
+          `subscriptions.json names pack \`${id}\`, which has no packs/${id}/ directory`,
+        );
+      }
+    }
+    return { packs, warnings };
   });
 
 const collectSources = (

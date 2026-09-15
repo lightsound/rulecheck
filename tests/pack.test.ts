@@ -126,6 +126,24 @@ describe("classifyPackStatus", () => {
     expect(classifyPackStatus(modified, base).status).toBe("modified");
   });
 
+  test("a marker problem in the file carrying the block blocks the update too", () => {
+    const stale = repo("acme/canonical", "agents-canonical", {
+      blocks: [block("base", OLD_BODY)],
+      blockIssues: [
+        { kind: "malformed-marker", file: "AGENTS.md", line: 11, message: "unpaired begin" },
+        { kind: "foreign-marker", file: "CLAUDE.md", line: 1, message: "other file" },
+      ],
+    });
+    expect(classifyPackStatus(stale, base)).toEqual({
+      repo: "acme/canonical",
+      pack: "base",
+      status: "blocked",
+      file: "AGENTS.md",
+      line: 11,
+      message: "block at line 3 is outdated (rev 2222222 -> 1111111); unpaired begin",
+    });
+  });
+
   test("a block for the pack counts even when the repo is not subscribed", () => {
     const stray = repo("other/repo", "agents-only", { blocks: [block("base", BODY)] });
     expect(classifyPackStatus(stray, base).status).toBe("current");
@@ -235,5 +253,9 @@ describe("distribute", () => {
       blocked: 1,
       "not-subscribed": 5,
     });
+    expect(distribution.warnings).toEqual([]);
+    expect(distribute("/packs", [], [], ["bad subscriptions"]).warnings).toEqual([
+      "bad subscriptions",
+    ]);
   });
 });

@@ -52,7 +52,9 @@ const DEFAULT_OPTIONS: WalkOptions = { maxDepth: 12 };
  *
  * Nested repositories (submodules, vendored checkouts) become their own entries;
  * files inside them are attributed to the innermost repository.
- * Directories rejected by {@link isIgnoredDirectory} and symbolic links are never followed.
+ * Directories rejected by {@link isIgnoredDirectory} are never descended into. Symbolic links are
+ * followed (`stat` resolves them), so a linked directory is visited under its link path; the
+ * skills inventory folds such copies back together by real path.
  */
 export const walk = (
   root: string,

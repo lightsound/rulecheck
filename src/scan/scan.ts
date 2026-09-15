@@ -64,8 +64,8 @@ export const scan = (
     let distribution: PackDistribution | null = null;
     if (options.packs) {
       const packsRoot = path.resolve(options.packs);
-      const packs = yield* loadPacks(fs, path, packsRoot);
-      distribution = distribute(packsRoot, repos, packs);
+      const loaded = yield* loadPacks(fs, path, packsRoot);
+      distribution = distribute(packsRoot, repos, loaded.packs, loaded.warnings);
     }
 
     return {
@@ -190,6 +190,7 @@ function summarize(repos: ReadonlyArray<RepoReport>): ScanTotals {
   let reposWithInstructions = 0;
   let blocks = 0;
   let modifiedBlocks = 0;
+  let malformedMarkers = 0;
   let skills = 0;
   let skillIssues = 0;
 
@@ -201,6 +202,7 @@ function summarize(repos: ReadonlyArray<RepoReport>): ScanTotals {
     for (const file of repo.files) tokens += file.tokens;
     blocks += repo.blocks.length;
     modifiedBlocks += repo.blocks.filter((b) => b.modified).length;
+    malformedMarkers += repo.blockIssues.filter((i) => i.kind === "malformed-marker").length;
     skills += repo.skills.skills.length;
     skillIssues += repo.skills.issues.length;
   }
@@ -214,6 +216,7 @@ function summarize(repos: ReadonlyArray<RepoReport>): ScanTotals {
     shapes,
     blocks,
     modifiedBlocks,
+    malformedMarkers,
     skills,
     skillIssues,
   };

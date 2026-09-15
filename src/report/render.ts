@@ -46,7 +46,7 @@ export function renderText(report: ScanReport, options: { readonly all?: boolean
     `${report.totals.repos} repositories, ${report.totals.reposWithInstructions} with instruction files, ${report.totals.files} files, ~${fmt(report.totals.tokens)} tokens total, ${report.totals.findings} findings`,
   );
   out.push(
-    `${report.totals.blocks} managed blocks (${report.totals.modifiedBlocks} modified), ${report.totals.skills} skills (${report.totals.skillIssues} issues)`,
+    `${report.totals.blocks} managed blocks (${report.totals.modifiedBlocks} modified, ${report.totals.malformedMarkers} malformed markers), ${report.totals.skills} skills (${report.totals.skillIssues} issues)`,
   );
   out.push("");
 
@@ -89,10 +89,7 @@ function renderDistribution(distribution: PackDistribution): string[] {
   lines.push(
     `Pack distribution (packs from ${distribution.root}, ${distribution.packs.length} packs)`,
   );
-  if (distribution.packs.length === 0) {
-    lines.push("      (no packs/<id>/ directories found)");
-    return lines;
-  }
+  for (const warning of distribution.warnings) lines.push(`      ! ${warning}`);
 
   for (const pack of distribution.packs) {
     const block = pack.files.find((f) => f.kind === "agents-block");

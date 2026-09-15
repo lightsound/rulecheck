@@ -132,13 +132,23 @@ export function classifyPackStatus(repo: RepoForDistribution, pack: Pack): PackS
   const block = repo.blocks.find((b) => b.source === pack.id && isRootPairFile(b.file));
   if (block) {
     const at = { file: block.file, line: block.line };
+    // A malformed or foreign marker in the file that carries the block makes a rewrite unsafe
+    // too: the block would be replaced inside a file another tool or a broken marker owns.
+    const issue = repo.blockIssues.find((i) => i.file === block.file);
+    if (issue) {
+      return {
+        ...base,
+        status: "blocked",
+        file: issue.file,
+        line: issue.line,
+        message: `${describeBlock(block, pack)}; ${issue.message}`,
+      };
+    }
     if (block.modified) {
       return { ...base, ...at, status: "modified", message: "body no longer matches its hash=" };
     }
     if (packHash !== null && block.hash !== packHash) {
-      const from = block.rev ? shortRev(block.rev) : "?";
-      const to = pack.rev ? shortRev(pack.rev) : "?";
-      return { ...base, ...at, status: "outdated", message: `rev ${from} -> ${to}` };
+      return { ...base, ...at, status: "outdated", message: revChange(block, pack) };
     }
     return { ...base, ...at, status: "current", message: null };
   }
@@ -186,6 +196,23 @@ function shortRev(rev: string): string {
   return rev.slice(0, 7);
 }
 
+function revChange(block: ManagedBlock, pack: Pack): string {
+  const from = block.rev ? shortRev(block.rev) : "?";
+  const to = pack.rev ? shortRev(pack.rev) : "?";
+  return `rev ${from} -> ${to}`;
+}
+
+/** `block at line 3 is outdated (rev a -> b)`: what the row would say if the file were clean. */
+function describeBlock(block: ManagedBlock, pack: Pack): string {
+  const packHash = pack.files.find((f) => f.kind === "agents-block")?.hash ?? null;
+  const state = block.modified
+    ? "modified"
+    : packHash !== null && block.hash !== packHash
+      ? `outdated (${revChange(block, pack)})`
+      : "current";
+  return `block at line ${block.line} is ${state}`;
+}
+
 const STATUS_ORDER: ReadonlyArray<PackStatus> = [
   "modified",
   "outdated",
@@ -211,6 +238,7 @@ export function distribute(
   root: string,
   repos: ReadonlyArray<RepoForDistribution>,
   packs: ReadonlyArray<Pack>,
+  warnings: ReadonlyArray<string> = [],
 ): PackDistribution {
   const entries: PackStatusEntry[] = [];
   const counts = emptyStatusCounts();
@@ -227,5 +255,5 @@ export function distribute(
       STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status) ||
       a.repo.localeCompare(b.repo),
   );
-  return { root, packs, entries, counts };
+  return { root, packs, entries, counts, warnings };
 }
