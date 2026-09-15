@@ -84,17 +84,20 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
   read-only `FileSystem` (`src/github/fs.ts`), so the target is measured with the unchanged `scan`
   before planning and again on the planned tree; `not-subscribed`, `modified`, `blocked`, a
   writer/reader disagreement, and any new `unknown-script` / `missing-path` finding refuse with
-  `file:line`. Branch `agent-rules/<pack>` is tool-owned and force-updated on rerun; the open pull
-  request is reused. The same filesystem view gives `--packs owner/repo[@ref]` (Step 2 carry-over
+  `file:line`. Branch `agent-rules/<pack>` is tool-owned and force-updated on rerun when its tip
+  commit carries rulecheck's `chore(agent-rules):` prefix (otherwise the sync refuses); the open
+  pull request is reused. The same filesystem view gives `--packs owner/repo[@ref]` (Step 2 carry-over
   resolved). Tested against an in-memory GitHub (`tests/fake-github.ts`): all five deterministic
   shapes, in-place update, block ordering by subscription, dry run issuing no write call, every
   refusal. Verified read-only against the real API: `scan --packs lightsound/rulecheck` and
   `sync lightsound/rulecheck --dry-run` with a scratch pack, including a rot refusal
   (`AGENTS.md:49 script "deploy" is not defined`).
-- Open for the done criterion: run `sync` once without `--dry-run` on a solo lightsound repository
-  with `--packs lightsound/agent-rules`, merge, and confirm the next `scan` shows `current`. Also
-  wrap `packs/base/AGENTS.md` in agent-rules in its own markers (Step 1 deferral; the reader
-  accepts both forms).
+- Open for the done criterion: first run `sync` without `--dry-run` against a throwaway
+  repository under the operator's account, one run per shape (the write-side API contracts are
+  documented but not yet exercised; table in `tool-behavior.md`), then once on a solo lightsound
+  repository with `--packs lightsound/agent-rules`, merge, and confirm the next `scan` shows
+  `current`. Also wrap `packs/base/AGENTS.md` in agent-rules in its own markers (Step 1 deferral;
+  the reader accepts both forms).
 
 ## Step 4: Remove the interim wiring
 
@@ -110,7 +113,9 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
   (Step 3); fan-out adds iteration over `subscriptions.json` and a summary.
 - Carried from Step 3: whole managed files in a pack (D8 `file` entries) are inventoried but not
   written; auto-merge as a per-repository opt-in (D6); a stale `agent-rules/<pack>` branch whose
-  pull request was closed without merge is rewritten on the next sync (D10) rather than skipped.
+  pull request was closed without merge is rewritten on the next sync (D10) rather than skipped;
+  written paths always get mode `100644` (an executable or symlinked root file is replaced by a
+  regular file).
 - Later: GitHub App + webhook so status updates without a local tree; the web/desktop UI on top.
 
 ## Not doing

@@ -195,9 +195,12 @@ pack repository's commit sha.
 
 **Branch ownership.** `agent-rules/<pack-id>` is a tool-owned branch: a rerun force-updates it
 to a fresh commit on the current base head and reuses the open pull request if there is one
-(Renovate model). The pull request body says so and points at the pack as the place to edit.
-Consequence: one repository, one pack, one branch, one pull request; two packs in one repository
-are two pull requests.
+(Renovate model). Ownership is verified, not assumed: the branch is rewritten only when its tip
+commit message starts with `chore(agent-rules):`, the prefix every rulecheck commit carries. A
+branch of that name whose tip a human or another tool wrote refuses with the commit sha, before
+any write. The pull request body says the branch is rewritten and points at the pack as the
+place to edit. Consequence: one repository, one pack, one branch, one pull request; two packs in
+one repository are two pull requests.
 
 **A remote repository is a filesystem.** The git tree of a repository at a commit is presented
 as a read-only `FileSystem` layer (`src/github/fs.ts`), mounted at `/github.com/<owner>/<repo>`

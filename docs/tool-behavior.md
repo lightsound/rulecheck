@@ -109,6 +109,27 @@ marker before relying on it.
 
 `--teleport` and Remote Control run on the local machine, so `~/.claude/*` applies normally there.
 
+## GitHub API contracts `rulecheck sync` relies on
+
+`src/github/gh.ts` talks to GitHub through `gh api`. The tests use an in-memory GitHub written
+from the same understanding, so they cannot catch a wrong belief about the real API; this table
+records which contracts have been exercised against api.github.com and which have not.
+
+| Contract | Used for | Status | Evidence |
+|---|---|---|---|
+| `gh api` on a failing request prints the JSON error body on stdout and `gh: <message> (HTTP <status>)` on stderr; `getRef` treats 404 as "no such ref" | every "does this exist?" check | verified 2026-09-15 | `gh api repos/lightsound/rulecheck/git/ref/heads/nope` → stdout `{"message":"Not Found",...}`, stderr `gh: Not Found (HTTP 404)` |
+| `GET git/ref/heads/<branch>` → `object.sha`; `GET git/commits/<sha>` → `tree.sha`, `message`; `GET git/trees/<sha>?recursive=1` → flat `tree[]` with `path`, `type`, `sha`, `mode`, and `truncated` | building the snapshot filesystem | verified 2026-09-15 | `scan --packs lightsound/rulecheck` and `sync lightsound/rulecheck --dry-run` read the real tree and blobs |
+| `GET git/blobs/<sha>` → `content` base64 with embedded newlines, `encoding: "base64"` (`utf-8` is accepted too; anything else fails) | reading files | verified 2026-09-15 | blob of `CLAUDE.md`: `{"content":"QEFHRU5UUy5tZAo=\n","encoding":"base64","size":11}` |
+| `GET pulls?state=open&head=<owner>%3A<branch>` finds the open pull request from a same-repository branch | reusing the open pull request on rerun | verified 2026-09-15 | returned [#5](https://github.com/lightsound/rulecheck/pull/5) for `lightsound:cursor/step3-sync-write-path-33c6` |
+| `POST git/trees` with `base_tree` and entries `{path, mode: "100644", type: "blob", content}`; deletion as `{path, mode, type, sha: null}` | writing the root pair, removing `.claude/CLAUDE.md` in the `claude-only` normalization | **documented, not yet exercised** | [Create a tree](https://docs.github.com/rest/git/trees#create-a-tree): "sha ... use `null` to delete" |
+| `POST git/commits`, `POST git/refs` (`{ref: "refs/heads/<b>", sha}`), `PATCH git/refs/heads/<b>` (`{sha, force: true}`), `POST pulls`, `PATCH pulls/<n>` | commit, branch, pull request | **documented, not yet exercised** | GitHub REST docs for Git Data and Pulls |
+| Written paths always get mode `100644`; a base entry with `100755` or `120000` at that path is replaced by a regular file | writing `AGENTS.md` / `CLAUDE.md` | by design, unverified in the wild | a symlinked `CLAUDE.md -> AGENTS.md` reads as the text `AGENTS.md`, which the wrapper detector treats as a pointer, so the shape is `agents-canonical` and the link is left alone |
+
+Re-verification: the first run of `sync` without `--dry-run` goes to a throwaway repository under
+the operator's own account (one run per shape, `claude-only` with `.claude/CLAUDE.md` included
+because it is the only deleting path), then the rows above move to "verified" with the run as
+evidence. Repeat when `gh` changes its error output or GitHub changes the Git Data API.
+
 ## What this means for a personal instructions pack
 
 - Claude Code (local, teleport, Remote Control): `~/.claude/CLAUDE.md` containing
