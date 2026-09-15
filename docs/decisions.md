@@ -150,6 +150,78 @@ upstream still differed from its lock entry. So a mismatch does not prove drift;
 shown per skill (`matches lock`, `lock hash differs`, `no lock entry`) and the one finding is a
 lock entry whose directory is missing and not gitignored.
 
+## 2026-09-15 D10: First write path, `rulecheck sync`: remote only, measured twice, one branch per pack
+
+D1 said "read-only until an explicit decision". This is that decision. rulecheck gains one write
+command, `sync <owner/repo> --pack <id> --packs <source>`, and it writes to exactly one place.
+
+**What is written, where.** Through the GitHub API (`gh api`, so authentication stays with the
+GitHub CLI and rulecheck holds no token): one commit on top of the target's base branch head that
+contains the normalized root pair (`AGENTS.md` carrying the pack's block, `CLAUDE.md` containing
+`@AGENTS.md`), pushed to the branch `agent-rules/<pack-id>`, and one pull request from that
+branch. Nothing is written to a local checkout, to `~/`, or to the pack repository (D6).
+Auto-merge is not implemented; it stays a per-repository opt-in for a later step (D6, default off).
+
+**Preconditions, all checked against the remote tree at the base sha.** The target is treated as
+a filesystem (below) and `scan` runs on it unchanged, so the status is the one the report shows:
+
+1. The repository appears in the pack's `subscriptions.json` list, or already carries the block.
+   `not-subscribed` refuses: opt-in is explicit (D6).
+2. The status is `eligible` or `outdated`. `current` is a no-op that exits successfully;
+   `modified` refuses (a human edited the body; overwriting is not rulecheck's call); `blocked`
+   refuses with the `file:line` of the reason (D9).
+3. Measure after write: the planned tree (base tree plus the changes) is scanned again. The pack
+   status there must read `current` (writer and reader agree) and no reference finding
+   (`unknown-script`, `missing-path`) may appear that the base tree did not have. A new finding
+   refuses with its `file:line` in the planned file: the pack would introduce rot in that
+   repository (D5, D6 "measure, then write").
+4. Every path the plan writes is either absent or the recognized input of the normalization (the
+   content file, the wrapper). Anything else, for example both `CLAUDE.md` and
+   `.claude/CLAUDE.md` present, refuses instead of overwriting.
+
+`--dry-run` runs every step including both measurements and prints the diff; it issues no
+write call. The same code path runs with or without the flag, so a dry run exercises exactly
+what a real run would do.
+
+**Plan.** Deterministic shapes (D6) are normalized in the same commit: `none` creates both files;
+`agents-only` appends the block and adds the wrapper; `agents-canonical` appends the block;
+`claude-only` moves the content into `AGENTS.md`, appends the block, and turns `CLAUDE.md` into
+the wrapper (a `.claude/CLAUDE.md` content file is removed and a root wrapper created);
+`claude-canonical` swaps the pair the same way. Project-specific content comes first; blocks
+follow in the order of the pack ids in `subscriptions.json` (D7), so a new block is inserted
+before the first existing block of a later pack and otherwise appended. An `outdated` block is
+replaced in place, wherever it is. The block is written as D9 specifies, with `rev=` set to the
+pack repository's commit sha.
+
+**Branch ownership.** `agent-rules/<pack-id>` is a tool-owned branch: a rerun force-updates it
+to a fresh commit on the current base head and reuses the open pull request if there is one
+(Renovate model). Ownership is verified, not assumed: the branch is rewritten only when its tip
+commit message starts with `chore(agent-rules):`, the prefix every rulecheck commit carries. A
+branch of that name whose tip a human or another tool wrote refuses with the commit sha, before
+any write. The pull request body says the branch is rewritten and points at the pack as the
+place to edit. Consequence: one repository, one pack, one branch, one pull request; two packs in
+one repository are two pull requests.
+
+**A remote repository is a filesystem.** The git tree of a repository at a commit is presented
+as a read-only `FileSystem` layer (`src/github/fs.ts`), mounted at `/github.com/<owner>/<repo>`
+so `displayName` yields `owner/repo`, with a synthetic `.git/HEAD` holding the commit sha so
+`walk` sees a repository and `loadPacks` sees a `rev`. `scan`, the reference check, the block
+parser, and `loadPacks` run on remote data without a remote-specific branch in their code. The
+same layer serves `--packs owner/repo[@ref]`, which resolves the Step 2 carry-over (remote pack
+source, D6); the local directory form stays because it costs nothing. Measure-before-write and
+the read-only report are therefore the same code by construction, not by discipline.
+
+**Code placement.** `src/github/` holds the GitHub client service (interface, errors, live layer
+over `gh api`) and the filesystem view; both `scan` (read) and `sync` (write) use it, and tests
+substitute an in-memory layer, never a real repository. `src/sync/` holds the orchestration and
+is the only directory that issues writes. `src/domain/sync.ts` (plan, block rendering, pull
+request text) and `src/domain/diff.ts` stay pure. `src/scan/` remains read-only.
+
+**Not in this step.** Whole managed files in a pack (D8 `file` entries) are inventoried by scan
+but not written; nested `AGENTS.md` blocks are not touched; the pack `AGENTS.md` in
+`lightsound/agent-rules` is not yet wrapped in its own markers (both marker-wrapped and bare
+bodies are read); no fan-out (`--all`, Step 5).
+
 ## Recording rule
 
 Add an entry here whenever a decision changes what rulecheck writes, what it reports, or which

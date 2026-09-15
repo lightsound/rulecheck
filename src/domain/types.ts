@@ -190,7 +190,7 @@ export interface PackStatusEntry {
 }
 
 export interface PackDistribution {
-  /** Directory the packs were loaded from. */
+  /** Where the packs were loaded from: a directory, or `owner/repo@<short sha>`. */
   readonly root: string;
   readonly packs: ReadonlyArray<Pack>;
   readonly entries: ReadonlyArray<PackStatusEntry>;

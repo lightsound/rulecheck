@@ -1,0 +1,550 @@
+import { describe, expect, test } from "bun:test";
+import { BunServices } from "@effect/platform-bun";
+import { Effect, FileSystem, Layer } from "effect";
+import { hashBlockBody } from "../src/domain/block.ts";
+import { type GitHub, GitHubError, parseRepositorySpec } from "../src/github/client.ts";
+import {
+  repositorySnapshot,
+  snapshotFileSystem,
+  textEntry,
+  withChanges,
+} from "../src/github/fs.ts";
+import { type GhResult, makeGh } from "../src/github/gh.ts";
+import { renderSync } from "../src/report/sync.ts";
+import { resolvePacks } from "../src/scan/packs.ts";
+import { scan } from "../src/scan/scan.ts";
+import { type SyncOptions, sync } from "../src/sync/sync.ts";
+import { type FakeRepoInput, fakeGitHub } from "./fake-github.ts";
+
+const BODY = "- Respond in Japanese.\n- Use Bun, never npm.";
+const OLD_BODY = "- Respond in Japanese.";
+const ROTTEN_BODY = "- Lint with `bun run lint`.\n- Entry point: `src/main.ts`.";
+
+function block(source: string, body: string, rev = "aaaaaaa") {
+  return `<!-- agent-rules:begin source=${source} rev=${rev} hash=${hashBlockBody(body)} -->\n${body}\n<!-- agent-rules:end -->`;
+}
+
+const PACK_REPO: FakeRepoInput = {
+  files: {
+    "packs/base/AGENTS.md": `${BODY}\n`,
+    "packs/frontend/AGENTS.md": "React rules.\n",
+    "packs/rotten/AGENTS.md": `${ROTTEN_BODY}\n`,
+    "subscriptions.json": JSON.stringify({
+      base: [
+        "acme/canonical",
+        "acme/empty",
+        "acme/agents-only",
+        "acme/claude-only",
+        "acme/both",
+        "acme/foreign",
+        "acme/outdated",
+        "acme/modified",
+        "acme/ordered",
+      ],
+      frontend: ["acme/ordered"],
+      rotten: ["acme/canonical", "acme/empty"],
+    }),
+  },
+};
+
+const TARGETS: Record<string, FakeRepoInput> = {
+  "acme/canonical": {
+    files: {
+      "AGENTS.md": "# Canonical\n\n- build: `bun run build`\n- entry: `src/main.ts`\n",
+      "CLAUDE.md": "@AGENTS.md\n",
+      "package.json": '{"scripts":{"build":"x"}}',
+      "src/main.ts": "export {};\n",
+      "node_modules/dep/CLAUDE.md": "ignored\n",
+    },
+  },
+  "acme/empty": { defaultBranch: "develop", files: { "README.md": "hi\n" } },
+  "acme/agents-only": { files: { "AGENTS.md": "# Only agents\n" } },
+  "acme/claude-only": { files: { ".claude/CLAUDE.md": "# Nested claude\n" } },
+  "acme/both": { files: { "AGENTS.md": "# A\n", "CLAUDE.md": "# C\n" } },
+  "acme/foreign": {
+    files: {
+      "AGENTS.md": "<!-- managed by ruler; do not edit -->\n# F\n",
+      "CLAUDE.md": "@AGENTS.md\n",
+    },
+  },
+  "acme/outdated": {
+    files: {
+      "AGENTS.md": `# O\n\n${block("base", OLD_BODY)}\n\n## Own\n`,
+      "CLAUDE.md": "@AGENTS.md\n",
+    },
+  },
+  "acme/modified": {
+    files: {
+      "AGENTS.md": `# M\n\n${block("base", BODY).replace("never npm", "never yarn")}\n`,
+      "CLAUDE.md": "@AGENTS.md\n",
+    },
+  },
+  "acme/ordered": {
+    files: {
+      "AGENTS.md": `# Ordered\n\n${block("frontend", "React rules.")}\n`,
+      "CLAUDE.md": "@AGENTS.md\n",
+    },
+  },
+  "acme/unsubscribed": { files: { "AGENTS.md": "# U\n" } },
+};
+
+function world() {
+  const github = fakeGitHub({ "acme/agent-rules": PACK_REPO, ...TARGETS });
+  const run = <A, E>(effect: Effect.Effect<A, E, BunServices.BunServices | GitHub>) =>
+    Effect.runPromise(effect.pipe(Effect.provide(Layer.mergeAll(BunServices.layer, github.layer))));
+  const runSync = (options: Partial<SyncOptions> & { repo: string }) =>
+    run(
+      sync({ pack: "base", packs: "acme/agent-rules", dryRun: false, ...options }).pipe(
+        Effect.catchTag("SyncRefused", (e) =>
+          Effect.succeed({ kind: "refused" as const, message: e.message }),
+        ),
+      ),
+    );
+  return { github, run, runSync };
+}
+
+describe("parseRepositorySpec", () => {
+  test("owner/repo with optional ref", () => {
+    expect(parseRepositorySpec("acme/rules")).toEqual({
+      repo: { owner: "acme", name: "rules" },
+      ref: null,
+    });
+    expect(parseRepositorySpec("acme/rules.git@v1")).toEqual({
+      repo: { owner: "acme", name: "rules" },
+      ref: "v1",
+    });
+    expect(parseRepositorySpec("/tmp/x")).toBeNull();
+    expect(parseRepositorySpec("a/b/c")).toBeNull();
+    expect(parseRepositorySpec("just-a-name")).toBeNull();
+  });
+});
+
+describe("snapshotFileSystem", () => {
+  const snapshot = new Map([
+    ["/github.com/acme/r/.git/HEAD", textEntry("abc\n")],
+    ["/github.com/acme/r/AGENTS.md", textEntry("# R\n")],
+    ["/github.com/acme/r/src/main.ts", textEntry("")],
+  ]);
+  const fs = snapshotFileSystem(snapshot);
+  const runFs = <A, E>(effect: Effect.Effect<A, E>) => Effect.runPromise(effect);
+
+  test("lists implied directories and reads files; missing paths fail with NotFound", async () => {
+    expect(await runFs(fs.readDirectory("/"))).toEqual(["github.com"]);
+    expect(await runFs(fs.readDirectory("/github.com/acme/r"))).toEqual([
+      ".git",
+      "AGENTS.md",
+      "src",
+    ]);
+    expect(await runFs(fs.readFileString("/github.com/acme/r/AGENTS.md"))).toBe("# R\n");
+    expect((await runFs(fs.stat("/github.com/acme/r/src"))).type).toBe("Directory");
+    expect((await runFs(fs.stat("/github.com/acme/r/AGENTS.md"))).type).toBe("File");
+    expect(await runFs(fs.exists("/github.com/acme/r/nope"))).toBe(false);
+    expect(await runFs(fs.realPath("/github.com/acme/r/src/"))).toBe("/github.com/acme/r/src");
+    const failure = await runFs(fs.readFileString("/github.com/acme/r/nope").pipe(Effect.flip));
+    expect(failure.reason._tag).toBe("NotFound");
+    const dirFailure = await runFs(fs.readDirectory("/elsewhere").pipe(Effect.flip));
+    expect(dirFailure.reason._tag).toBe("NotFound");
+  });
+
+  test("withChanges overlays writes and deletions", async () => {
+    const changed = snapshotFileSystem(
+      withChanges(snapshot, "/github.com/acme/r", [
+        { path: "AGENTS.md", before: "# R\n", after: "# R2\n" },
+        { path: "src/main.ts", before: "", after: null },
+        { path: "CLAUDE.md", before: null, after: "@AGENTS.md\n" },
+      ]),
+    );
+    expect(await runFs(changed.readDirectory("/github.com/acme/r"))).toEqual([
+      ".git",
+      "AGENTS.md",
+      "CLAUDE.md",
+    ]);
+    expect(await runFs(changed.readFileString("/github.com/acme/r/AGENTS.md"))).toBe("# R2\n");
+    // The original is untouched.
+    expect(await runFs(fs.exists("/github.com/acme/r/src/main.ts"))).toBe(true);
+  });
+
+  test("the read-only scan runs unchanged on a repository snapshot", async () => {
+    const { github, run } = world();
+    const repo = { owner: "acme", name: "canonical" };
+    const sha = await run(github.service.getRef(repo, "heads/main"));
+    const snapshot = await run(repositorySnapshot(github.service, repo, sha ?? ""));
+    const report = await run(
+      scan("/", { home: null }).pipe(
+        Effect.provideService(FileSystem.FileSystem, snapshotFileSystem(snapshot)),
+      ),
+    );
+    expect(report.repos.map((r) => `${r.name}:${r.shape}`)).toEqual([
+      "acme/canonical:agents-canonical",
+    ]);
+    // `src/main.ts` exists in the tree, `bun run build` is in package.json, node_modules is skipped.
+    expect(report.repos[0]?.findings).toEqual([]);
+    expect(report.repos[0]?.files.map((f) => f.relativePath)).toEqual(["AGENTS.md", "CLAUDE.md"]);
+  });
+});
+
+describe("resolvePacks", () => {
+  test("reads the pack repository from GitHub with the commit sha as rev", async () => {
+    const { github, run } = world();
+    const sha = await run(
+      github.service.getRef({ owner: "acme", name: "agent-rules" }, "heads/main"),
+    );
+    const loaded = await run(resolvePacks("acme/agent-rules"));
+    expect(loaded.source).toBe(`acme/agent-rules@${(sha ?? "").slice(0, 7)}`);
+    expect(loaded.packs.map((p) => `${p.id}:${p.rev === sha}:${p.subscribers.length}`)).toEqual([
+      "base:true:9",
+      "frontend:true:1",
+      "rotten:true:2",
+    ]);
+    expect(loaded.warnings).toEqual([]);
+    expect(
+      await run(resolvePacks("acme/agent-rules@main").pipe(Effect.map((l) => l.packs.length))),
+    ).toBe(3);
+  });
+
+  test("rejects a spec that is neither a directory nor owner/repo, and unknown refs", async () => {
+    const { run } = world();
+    const bad = await run(resolvePacks("nope").pipe(Effect.flip));
+    expect(bad._tag).toBe("PackSourceError");
+    const missingRef = await run(resolvePacks("acme/agent-rules@nope").pipe(Effect.flip));
+    expect(missingRef).toMatchObject({
+      _tag: "PackSourceError",
+      message: "ref `nope` not found in acme/agent-rules",
+    });
+    const missingRepo = await run(resolvePacks("acme/missing").pipe(Effect.flip));
+    expect(missingRepo).toBeInstanceOf(GitHubError);
+  });
+});
+
+describe("sync", () => {
+  test("eligible agents-canonical: one commit, one branch, one pull request; a rerun updates them", async () => {
+    const { github, runSync } = world();
+    const result = await runSync({ repo: "acme/canonical" });
+    expect(result.kind).toBe("written");
+    if (result.kind !== "written") return;
+    expect(result.branch).toBe("agent-rules/base");
+    expect(result.base).toBe("main");
+    expect(result.pullRequestCreated).toBe(true);
+    expect(result.pullRequest.url).toBe("https://github.com/acme/canonical/pull/1");
+    expect(github.fileAt("acme/canonical", "heads/agent-rules/base", "AGENTS.md")).toBe(
+      `# Canonical\n\n- build: \`bun run build\`\n- entry: \`src/main.ts\`\n\n${block("base", BODY, await revOf(github))}\n`,
+    );
+    expect(github.fileAt("acme/canonical", "heads/agent-rules/base", "CLAUDE.md")).toBe(
+      "@AGENTS.md\n",
+    );
+    // main is untouched
+    expect(github.fileAt("acme/canonical", "heads/main", "AGENTS.md")).not.toContain(
+      "agent-rules:begin",
+    );
+    expect(github.commitAt("acme/canonical", "heads/agent-rules/base").message).toContain(
+      "chore(agent-rules): add `base` instruction block",
+    );
+    expect(github.calls).toEqual([
+      "createTree acme/canonical AGENTS.md",
+      "createCommit acme/canonical",
+      "setRef acme/canonical heads/agent-rules/base create",
+      "createPullRequest acme/canonical agent-rules/base -> main",
+    ]);
+    expect(renderSync(result)).toContain("opened from agent-rules/base");
+
+    // Rerun before merge: the tool-owned branch is force-updated and the open PR reused.
+    github.calls.length = 0;
+    const again = await runSync({ repo: "acme/canonical" });
+    expect(again.kind).toBe("written");
+    if (again.kind !== "written") return;
+    expect(again.pullRequestCreated).toBe(false);
+    expect(again.pullRequest.number).toBe(1);
+    expect(github.calls).toEqual([
+      "createTree acme/canonical AGENTS.md",
+      "createCommit acme/canonical",
+      "setRef acme/canonical heads/agent-rules/base force",
+      "updatePullRequest acme/canonical #1",
+    ]);
+    expect(github.pulls("acme/canonical")).toHaveLength(1);
+
+    // After the merge the next sync is a no-op.
+    github.moveRef("acme/canonical", "heads/main", "heads/agent-rules/base");
+    github.calls.length = 0;
+    const merged = await runSync({ repo: "acme/canonical" });
+    expect(merged.kind).toBe("current");
+    expect(github.calls).toEqual([]);
+    if (merged.kind === "current") {
+      expect(renderSync(merged)).toContain("is current (AGENTS.md:6); nothing to do");
+    }
+  });
+
+  test("dry run measures and plans but writes nothing", async () => {
+    const { github, runSync } = world();
+    const result = await runSync({ repo: "acme/empty", dryRun: true });
+    expect(result.kind).toBe("planned");
+    if (result.kind !== "planned") return;
+    expect(result.base).toBe("develop");
+    expect(result.plan.changes.map((c) => c.path)).toEqual(["AGENTS.md", "CLAUDE.md"]);
+    expect(github.calls).toEqual([]);
+    const text = renderSync(result);
+    expect(text).toContain("dry run, nothing written");
+    expect(text).toContain("+++ b/AGENTS.md");
+    expect(text).toContain("+@AGENTS.md");
+  });
+
+  test("normalizes deterministic shapes in the same commit", async () => {
+    const { github, runSync } = world();
+    expect((await runSync({ repo: "acme/empty" })).kind).toBe("written");
+    expect(github.pathsAt("acme/empty", "heads/agent-rules/base")).toEqual([
+      "AGENTS.md",
+      "CLAUDE.md",
+      "README.md",
+    ]);
+
+    expect((await runSync({ repo: "acme/agents-only" })).kind).toBe("written");
+    expect(github.fileAt("acme/agents-only", "heads/agent-rules/base", "CLAUDE.md")).toBe(
+      "@AGENTS.md\n",
+    );
+    expect(github.fileAt("acme/agents-only", "heads/agent-rules/base", "AGENTS.md")).toStartWith(
+      "# Only agents\n\n<!-- agent-rules:begin",
+    );
+
+    expect((await runSync({ repo: "acme/claude-only" })).kind).toBe("written");
+    expect(github.pathsAt("acme/claude-only", "heads/agent-rules/base")).toEqual([
+      "AGENTS.md",
+      "CLAUDE.md",
+    ]);
+    expect(github.fileAt("acme/claude-only", "heads/agent-rules/base", "AGENTS.md")).toStartWith(
+      "# Nested claude\n\n",
+    );
+
+    expect((await runSync({ repo: "acme/outdated" })).kind).toBe("written");
+    const updated = github.fileAt("acme/outdated", "heads/agent-rules/base", "AGENTS.md") ?? "";
+    expect(updated).toStartWith("# O\n\n<!-- agent-rules:begin source=base");
+    expect(updated).toContain(BODY);
+    expect(updated).toEndWith("<!-- agent-rules:end -->\n\n## Own\n");
+    expect(github.pulls("acme/outdated")[0]?.title).toBe(
+      "chore(agent-rules): update `base` instruction block",
+    );
+
+    // `base` precedes `frontend` in subscriptions.json, so its block goes first.
+    expect((await runSync({ repo: "acme/ordered" })).kind).toBe("written");
+    const ordered = github.fileAt("acme/ordered", "heads/agent-rules/base", "AGENTS.md") ?? "";
+    expect(ordered.indexOf("source=base")).toBeLessThan(ordered.indexOf("source=frontend"));
+  });
+
+  test("refuses: not subscribed, both have content, foreign marker, modified block", async () => {
+    const { github, runSync } = world();
+    const messages: Record<string, string> = {};
+    for (const repo of ["acme/unsubscribed", "acme/both", "acme/foreign", "acme/modified"]) {
+      const result = await runSync({ repo });
+      expect(result.kind).toBe("refused");
+      if (result.kind === "refused") messages[repo] = result.message;
+    }
+    expect(messages["acme/unsubscribed"]).toBe(
+      "acme/unsubscribed is not subscribed to `base`; add it to subscriptions.json in acme/agent-rules@" +
+        `${(await revOf(github)).slice(0, 7)} first`,
+    );
+    expect(messages["acme/both"]).toBe(
+      "acme/both AGENTS.md:1: both AGENTS.md and CLAUDE.md have content; decide which one is canonical first",
+    );
+    expect(messages["acme/foreign"]).toBe(
+      "acme/foreign AGENTS.md:1: another tool marks this file: <!-- managed by ruler; do not edit -->",
+    );
+    expect(messages["acme/modified"]).toStartWith(
+      "acme/modified AGENTS.md:3: block `base` was edited in place",
+    );
+    expect(github.calls).toEqual([]);
+  });
+
+  test("refuses a pack that would introduce rot in the target, but not where the references hold", async () => {
+    const { github, runSync } = world();
+    // acme/canonical has package.json without `lint`; `src/main.ts` exists.
+    const rotten = await runSync({ repo: "acme/canonical", pack: "rotten" });
+    expect(rotten.kind).toBe("refused");
+    if (rotten.kind === "refused") {
+      expect(rotten.message).toBe(
+        "acme/canonical: pack `rotten` would introduce rot in this repository:\n" +
+          '  AGENTS.md:7  script "lint" is not defined in any package.json (bun run lint)',
+      );
+    }
+    // acme/empty has no package.json and no src/, so neither reference can be judged: not rot.
+    expect((await runSync({ repo: "acme/empty", pack: "rotten" })).kind).toBe("written");
+    expect(github.calls.filter((c) => c.includes("acme/canonical"))).toEqual([]);
+  });
+
+  test("refuses to rewrite an agent-rules/<pack> branch whose tip was not written by rulecheck", async () => {
+    const { github, run, runSync } = world();
+    const repo = { owner: "acme", name: "canonical" };
+    // A human pushed a branch with the tool's name.
+    const main = (await run(github.service.getRef(repo, "heads/main"))) ?? "";
+    const tree = (await run(github.service.getCommit(repo, main))).tree;
+    const human = await run(
+      github.service.createCommit(repo, { message: "wip: my own rules", tree, parents: [main] }),
+    );
+    await run(github.service.setRef(repo, "heads/agent-rules/base", human, { create: true }));
+    github.calls.length = 0;
+
+    const refusal = {
+      kind: "refused",
+      message: `acme/canonical: branch \`agent-rules/base\` exists but its tip commit (${human.slice(0, 7)}) was not written by rulecheck; delete or rename the branch first`,
+    };
+    expect(await runSync({ repo: "acme/canonical" })).toMatchObject(refusal);
+    // The dry run reports the same refusal instead of previewing a write that would be refused.
+    expect(await runSync({ repo: "acme/canonical", dryRun: true })).toMatchObject(refusal);
+    expect(github.calls).toEqual([]);
+    expect(await run(github.service.getRef(repo, "heads/agent-rules/base"))).toBe(human);
+  });
+
+  test("refuses unknown packs, bad targets, and missing branches", async () => {
+    const { runSync } = world();
+    expect(await runSync({ repo: "acme/canonical", pack: "nope" })).toMatchObject({
+      kind: "refused",
+      message: expect.stringContaining("pack `nope` not found in acme/agent-rules@"),
+    });
+    expect(await runSync({ repo: "not-a-repo" })).toMatchObject({
+      kind: "refused",
+      message: "target must be owner/repo, got `not-a-repo`",
+    });
+    expect(await runSync({ repo: "acme/canonical", base: "release" })).toMatchObject({
+      kind: "refused",
+      message: "branch `release` not found in acme/canonical",
+    });
+  });
+});
+
+async function revOf(github: ReturnType<typeof fakeGitHub>): Promise<string> {
+  return (
+    (await Effect.runPromise(
+      github.service.getRef({ owner: "acme", name: "agent-rules" }, "heads/main"),
+    )) ?? ""
+  );
+}
+
+describe("makeGh", () => {
+  function runner(responses: Record<string, GhResult | ((stdin: string | null) => GhResult)>) {
+    const seen: Array<{ args: ReadonlyArray<string>; stdin: string | null }> = [];
+    const run = async (args: ReadonlyArray<string>, stdin: string | null): Promise<GhResult> => {
+      seen.push({ args, stdin });
+      const path = args[args.indexOf("Accept: application/vnd.github+json") + 1] ?? "";
+      const response = responses[path];
+      if (response === undefined) return { exitCode: 1, stdout: "", stderr: `no fake for ${path}` };
+      return typeof response === "function" ? response(stdin) : response;
+    };
+    return { run, seen };
+  }
+  const repo = { owner: "acme", name: "r" };
+
+  test("maps gh api responses and errors", async () => {
+    const { run, seen } = runner({
+      "repos/acme/r": { exitCode: 0, stdout: '{"default_branch":"trunk"}', stderr: "" },
+      "repos/acme/r/git/ref/heads/missing": {
+        exitCode: 1,
+        stdout: '{"message":"Not Found","status":"404"}',
+        stderr: "gh: Not Found (HTTP 404)",
+      },
+      "repos/acme/r/git/ref/heads/main": {
+        exitCode: 0,
+        stdout: '{"object":{"sha":"abc"}}',
+        stderr: "",
+      },
+      "repos/acme/r/git/blobs/b1": {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          content: `${Buffer.from("hé").toString("base64")}\n`,
+          encoding: "base64",
+        }),
+        stderr: "",
+      },
+      "repos/acme/r/git/trees": (stdin) => ({
+        exitCode: 0,
+        stdout: JSON.stringify({ sha: `tree-of-${JSON.parse(stdin ?? "{}").tree.length}` }),
+        stderr: "",
+      }),
+      "repos/acme/r/git/refs/heads/x": { exitCode: 0, stdout: "", stderr: "" },
+      "repos/acme/r/pulls?state=open&head=acme%3Ax": {
+        exitCode: 0,
+        stdout: JSON.stringify([
+          { number: 7, html_url: "https://github.com/acme/r/pull/7", title: "t", body: "b" },
+        ]),
+        stderr: "",
+      },
+      "repos/acme/r/git/commits/bad": {
+        exitCode: 1,
+        stdout: "",
+        stderr: "gh: Bad credentials (HTTP 401)",
+      },
+      "repos/acme/r/git/commits/silent": { exitCode: 3, stdout: "not json", stderr: "" },
+      "repos/acme/r/git/commits/c1": {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          sha: "c1",
+          tree: { sha: "t1" },
+          message: "chore(agent-rules): add",
+        }),
+        stderr: "",
+      },
+      "repos/acme/r/git/blobs/utf8": {
+        exitCode: 0,
+        stdout: JSON.stringify({ content: "plain", encoding: "utf-8" }),
+        stderr: "",
+      },
+      "repos/acme/r/git/blobs/odd": {
+        exitCode: 0,
+        stdout: JSON.stringify({ content: "x", encoding: "rot13" }),
+        stderr: "",
+      },
+    });
+    const gh = makeGh(run);
+    const runP = <A, E>(e: Effect.Effect<A, E>) => Effect.runPromise(e);
+
+    expect(await runP(gh.getRepository(repo))).toEqual({ defaultBranch: "trunk" });
+    expect(await runP(gh.getRef(repo, "heads/missing"))).toBeNull();
+    expect(await runP(gh.getRef(repo, "heads/main"))).toBe("abc");
+    expect(new TextDecoder().decode(await runP(gh.getBlob(repo, "b1")))).toBe("hé");
+    expect(
+      await runP(
+        gh.createTree(repo, "base", [
+          { path: "a", content: "x" },
+          { path: "b", content: null },
+        ]),
+      ),
+    ).toBe("tree-of-2");
+    const treeCall = seen.find((s) => s.args.includes("repos/acme/r/git/trees"));
+    expect(treeCall?.args.slice(0, 3)).toEqual(["api", "-X", "POST"]);
+    expect(JSON.parse(treeCall?.stdin ?? "{}")).toEqual({
+      base_tree: "base",
+      tree: [
+        { path: "a", mode: "100644", type: "blob", content: "x" },
+        { path: "b", mode: "100644", type: "blob", sha: null },
+      ],
+    });
+    await runP(gh.setRef(repo, "heads/x", "abc", { create: false }));
+    const refCall = seen.at(-1);
+    expect(refCall?.args.slice(0, 3)).toEqual(["api", "-X", "PATCH"]);
+    expect(JSON.parse(refCall?.stdin ?? "{}")).toEqual({ sha: "abc", force: true });
+    expect((await runP(gh.listOpenPullRequests(repo, "acme:x"))).map((p) => p.number)).toEqual([7]);
+
+    const unauthorized = await runP(gh.getCommit(repo, "bad").pipe(Effect.flip));
+    expect(unauthorized).toMatchObject({
+      _tag: "GitHubError",
+      status: 401,
+      message: "gh: Bad credentials (HTTP 401)",
+    });
+    const unknown = await runP(gh.getCommit(repo, "nowhere").pipe(Effect.flip));
+    expect(unknown.status).toBeNull();
+    const silent = await runP(gh.getCommit(repo, "silent").pipe(Effect.flip));
+    expect(silent.message).toBe("gh exited with 3");
+    expect(await runP(gh.getCommit(repo, "c1"))).toEqual({
+      tree: "t1",
+      message: "chore(agent-rules): add",
+    });
+    expect(new TextDecoder().decode(await runP(gh.getBlob(repo, "utf8")))).toBe("plain");
+    expect((await runP(gh.getBlob(repo, "odd").pipe(Effect.flip))).message).toContain(
+      "unsupported encoding",
+    );
+  });
+
+  test("a missing gh binary is a GitHubError, not a crash", async () => {
+    const gh = makeGh(async () => {
+      throw new Error("ENOENT");
+    });
+    const failure = await Effect.runPromise(gh.getRepository(repo).pipe(Effect.flip));
+    expect(failure.message).toContain("install the GitHub CLI");
+  });
+});
