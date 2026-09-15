@@ -289,15 +289,15 @@ describe("classifyBothFull", () => {
     // A line that says more than the import is content, not an import.
     expect(claudeContentBeyondImport("@AGENTS.md and more\n")).toBe("@AGENTS.md and more");
 
-    expect(classifyBothFull(agents, "@AGENTS.md\n\n\n")).toBe("wrapper");
-    expect(classifyBothFull(agents, "")).toBe("wrapper");
+    expect(classifyBothFull(agents, "@AGENTS.md\n\n\n")).toBe("drop");
+    expect(classifyBothFull(agents, "")).toBe("drop");
   });
 
   test("wrapper when the extra text appears verbatim in AGENTS.md, line endings aside", () => {
-    expect(classifyBothFull(agents, "- Use Bun.\n- Respond in Japanese.\n")).toBe("wrapper");
-    expect(classifyBothFull(agents, "@AGENTS.md\r\n\r\n- Use Bun.\r\n")).toBe("wrapper");
-    expect(classifyBothFull(agents.replace(/\n/g, "\r\n"), "- Use Bun.\n")).toBe("wrapper");
-    expect(classifyBothFull(agents, agents)).toBe("wrapper");
+    expect(classifyBothFull(agents, "- Use Bun.\n- Respond in Japanese.\n")).toBe("drop");
+    expect(classifyBothFull(agents, "@AGENTS.md\r\n\r\n- Use Bun.\r\n")).toBe("drop");
+    expect(classifyBothFull(agents.replace(/\n/g, "\r\n"), "- Use Bun.\n")).toBe("drop");
+    expect(classifyBothFull(agents, agents)).toBe("drop");
   });
 
   test("merge as soon as one line differs; no fuzzy matching", () => {
@@ -324,7 +324,7 @@ describe("classifyBothFull", () => {
     const block = `<!-- agent-rules:begin source=frontend hash=${hashBlockBody(body)} -->\n${body}\n<!-- agent-rules:end -->`;
     expect(classifyBothFull(`# P\n\n${block}\n`, `@AGENTS.md\n\n${body}\n`)).toBe("merge");
     expect(classifyBothFull(`# P\n\n${body}\n\n${block}\n`, `@AGENTS.md\n\n${body}\n`)).toBe(
-      "wrapper",
+      "drop",
     );
   });
 });

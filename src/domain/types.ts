@@ -58,7 +58,8 @@ export interface InstructionFile {
 }
 
 /**
- * How a repository arranges its root-level AGENTS.md / CLAUDE.md pair.
+ * How a repository arranges its root-level AGENTS.md / CLAUDE.md pair (glossary in
+ * `docs/status-model.md`).
  *
  * - `agents-canonical` AGENTS.md carries the content, CLAUDE.md is a wrapper pointing at it
  * - `agents-imported`  AGENTS.md carries the content, CLAUDE.md imports it with an `@AGENTS.md`
@@ -81,14 +82,22 @@ export type CanonicalShape =
   | "none";
 
 /**
- * How a sync normalizes a `both-full` pair (D12).
+ * What a sync does to the root pair besides inserting the block, decided by the shape and, for
+ * `both-full`, by the files' content (D10, D12, D17; glossary in `docs/status-model.md`).
  *
- * - `wrapper` CLAUDE.md adds nothing that AGENTS.md does not already contain; it is replaced by
- *             the wrapper
- * - `merge`   CLAUDE.md carries text of its own; it is appended to AGENTS.md under
- *             `## Merged from CLAUDE.md` before any managed block, then replaced by the wrapper
+ * - `keep`        the pair already loads AGENTS.md (`agents-canonical`, `agents-imported`);
+ *                 only AGENTS.md changes
+ * - `add-wrapper` `agents-only`: the CLAUDE.md wrapper is created
+ * - `create`      `none`: AGENTS.md with the block and the CLAUDE.md wrapper are created
+ * - `move`        `claude-only`, `claude-canonical`: CLAUDE.md's content moves into AGENTS.md
+ *                 and CLAUDE.md becomes the wrapper
+ * - `drop`        `both-full` whose CLAUDE.md adds nothing AGENTS.md does not already contain
+ *                 verbatim: its text is dropped and it becomes the wrapper (D12)
+ * - `merge`       `both-full` whose CLAUDE.md carries text of its own: the text is appended to
+ *                 AGENTS.md under `## Merged from CLAUDE.md` before any managed block, then
+ *                 CLAUDE.md becomes the wrapper (D12)
  */
-export type BothFullNormalization = "wrapper" | "merge";
+export type Normalization = "keep" | "add-wrapper" | "create" | "move" | "drop" | "merge";
 
 export interface ContextBudget {
   /** Approximate tokens Cursor loads for every conversation at the repo root. */
@@ -201,7 +210,8 @@ export interface Pack {
 }
 
 /**
- * Status of one repository with respect to one pack's `AGENTS.md` block (D6).
+ * Status of one repository with respect to one pack's `AGENTS.md` block (D6; glossary and
+ * lifecycle in `docs/status-model.md`).
  *
  * - `current`        block present, body untouched, hash equals the pack's current hash
  * - `outdated`       block present, body untouched, pack has moved on
@@ -332,8 +342,8 @@ export interface RepoReport {
   /** Short display name, e.g. `owner/repo` when the root lives under a ghq-style tree. */
   readonly name: string;
   readonly shape: CanonicalShape;
-  /** How a sync would normalize the pair; null unless `shape` is `both-full`. */
-  readonly bothFull: BothFullNormalization | null;
+  /** What a sync would do to the root pair besides inserting a block. */
+  readonly normalization: Normalization;
   readonly files: ReadonlyArray<InstructionFile>;
   readonly budget: ContextBudget;
   readonly findings: ReadonlyArray<Finding>;
@@ -394,7 +404,15 @@ export interface ScanTotals {
   readonly skillIssues: number;
 }
 
+/**
+ * Version of the `scan --json` shape. Bumped when a field is renamed, removed, or changes
+ * meaning; adding a field does not bump it. Reports without the field predate version 1 (they
+ * carried `bothFull` instead of `normalization`).
+ */
+export const SCAN_SCHEMA_VERSION = 1;
+
 export interface ScanReport {
+  readonly schemaVersion: typeof SCAN_SCHEMA_VERSION;
   readonly root: string;
   readonly scannedAt: string;
   readonly repos: ReadonlyArray<RepoReport>;

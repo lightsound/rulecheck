@@ -77,7 +77,7 @@ app, select repositories, press sync, receive PRs (or auto-merge where enabled).
 is the backend of the status view.
 
 Shape normalization is a prerequisite and is itself a PR: deterministic cases (`none`,
-`AGENTS.md only`, `CLAUDE.md only` via rename, reversed canonical) are automated; `both have
+`AGENTS.md only`, `CLAUDE.md only` via rename (D17 names it `move`), reversed canonical) are automated; `both have
 content` and files carrying another tool's managed markers are reported for a human (`both have
 content` is automated since D12; the marker case stands).
 
@@ -247,7 +247,7 @@ canonical, so the only open question was what to do with the text in `CLAUDE.md`
 deterministic answer that loses nothing. `both-full` is therefore `eligible`, and the sync commit
 normalizes the pair in one of two ways, chosen from the files' content:
 
-- **wrapper**: the text `CLAUDE.md` adds beyond an `@AGENTS.md` import line (line endings
+- **wrapper** (renamed `drop` by D17): the text `CLAUDE.md` adds beyond an `@AGENTS.md` import line (line endings
   normalized, surrounding blank lines trimmed; an import line inside a code fence is prose and
   stays) is empty or appears verbatim as a substring of `AGENTS.md` outside its managed blocks.
   `CLAUDE.md` becomes exactly `@AGENTS.md`; nothing else moves. Verbatim containment is the test,
@@ -263,7 +263,8 @@ normalizes the pair in one of two ways, chosen from the files' content:
   content authoring and stays out of scope (D1).
 
 The `eligible` row names the normalization it will apply, the pull request body and commit
-message name the one that was applied, and `scan --json` carries it as `bothFull` per repository.
+message name the one that was applied, and `scan --json` carries it as `bothFull` per repository
+(since D17: `normalization`, on every repository).
 `blocked` keeps its two remaining reasons: a foreign or malformed marker in a root file the sync
 would rewrite (D9; for `both-full` that is both files, as for every shape change) and the
 preconditions D10 lists (two `CLAUDE.md` files, files contradicting the shape). Measure after
@@ -514,8 +515,57 @@ loading the duplicate text. That is content the repository chose, reported by th
 touching it would be authoring (D1). D12's `wrapper` normalization therefore fires only for a
 `CLAUDE.md` without an import line whose text `AGENTS.md` already contains.
 
+## 2026-09-15 D17: One glossary for the distribution state model; identifiers, labels, and `--json` follow it
+
+Skills distribution and a status dashboard are next, and both build on the words `scan` and
+`sync` already print. Those words came from five decisions written one at a time (D6, D9, D10,
+D12, D14, D16) and had drifted: `current` was a pack status and also the `SyncResult` kind for
+"nothing written"; `written` printed as `opened` or `updated`; `planned` was summarized as
+`would write`; the `sync --all` status column showed `refused` or `failed` for some rows and a
+pack status for the others; only `both-full` had normalization identifiers (`wrapper` / `merge`
+in `bothFull`), while the `eligible` row said `rename` or `swap` where the plan said `move` for
+the same operation. [status-model.md](status-model.md) is now the one glossary, with four
+vocabularies (shape, normalization, pack status, sync outcome), a transition table, the
+lifecycle, and the surfaces each word appears on. Rule: a new value is added to the glossary
+first; `tests/status-model.test.ts` fails on an identifier or label the glossary does not name.
+
+**Principle.** A state model has three representations, the identifier in code and `--json`, the
+label in text, and the sentence in a decision, and they must be one thing seen three ways. Where
+a word did two jobs (`current`, `wrapper`), one job got a new word; where two words did one job
+(`rename` / `swap` / `move`; `refused` in a status column), the one word won. Labels for pack
+statuses and sync outcomes are the identifier with `-` replaced by a space, so a reader can go
+from a report line to the JSON field without a table.
+
+**Decisions, with the search rounds behind each** (round n: a round of looking for a strictly
+better option produced nothing new):
+
+| Decision | Chosen | Alternatives considered | Settled in round |
+| --- | --- | --- | --- |
+| `refused` vs `blocked` | Both stay, in different vocabularies: `blocked` is a pack status (a write is pending and a human must look first), `refused` is a sync outcome that results from `blocked`, `modified`, `not-subscribed`, or a check that runs after measurement. `SyncRefused` carries the measured status; the `sync --all` status column always shows the pack status (`-` when unmeasured) and the outcome column starts with `refused:`. | Fold refusals into `blocked` (wrong: rot, a foreign branch, `modified` are not `blocked`); split `refused` into sub-kinds (`refused-status`, `refused-rot`, …; nothing needs the split yet, the message carries the reason) | 2 |
+| Status of a `failed` row | A GitHub error after the base branch was measured becomes `SyncFailed { error, status }`, so the row keeps the status (`eligible failed: GitHub createPullRequest failed …`); an error before measurement stays a bare `GitHubError` and the row reads `-`. The single-target CLI prints `SyncFailed` as the GitHub error it wraps. | Always `-` for `failed` (loses a measurement the run made; raised in review); widen the glossary wording instead of carrying the status; attach the status to `GitHubError` itself (the GitHub layer knows nothing about packs) | 2 |
+| `SyncResult` kind for "base already current" | `nothing-to-do`, the label the reports already printed | keep `current` (collides with the status); `noop` / `no-op`; `skipped` (suggests not evaluated); `unchanged`; `already-current` | 2 |
+| `written` with `pullRequestCreated` | Two kinds, `opened` and `updated`; identifier equals label, summary counts them apart as before | keep `written` plus the boolean and label it `written`; `written (new)` / `written (existing)` | 1 |
+| Label of `planned` | `planned`; row reads `planned +N -M: <actions>` | `would write` (summary only); `would open or update a pull request` (row only) | 1 |
+| Outcome wrapper `done` | Flattened: `SyncOutcome = SyncResult \| refused \| failed`, so `outcome.kind` is the identifier | keep `done` and document two levels | 1 |
+| Normalization identifiers | `keep`, `add-wrapper`, `create`, `move`, `drop`, `merge`; one per shape, `both-full` chooses `drop` / `merge` by content; `repos[].normalization` on every repository replaces `bothFull` | `bothFull` plus prose for the other shapes (the prose had already diverged); `null` for canonical shapes (a dashboard cannot tell "nothing to do" from "unknown"); `none` (collides with the shape); `insert-only`, `as-is` for `keep`; `wrap` / `wrapper` for `add-wrapper`; `create-pair`, `bootstrap` for `create` | 2 |
+| `rename` / `swap` / `move` | `move`: the planner runs the same code for `claude-only` and `claude-canonical`, and it moves content, it does not rename a file (a `.claude/CLAUDE.md` is removed and a root wrapper created; a pointer `AGENTS.md` is overwritten). D6's "via rename" is superseded. | `rename` (D6); `swap` (status row for `claude-canonical`); `promote` | 2 |
+| D12's `wrapper` | `drop`: the text CLAUDE.md adds is dropped because AGENTS.md already contains it verbatim. `wrapper` also named the file every normalization ends with and collided with `add-wrapper`. | keep `wrapper`; `dedupe`; `collapse`; `replace`; `subsumed`; `redundant` | 2 |
+| `--json` versioning | `schemaVersion: 1` on `ScanReport`; bumped on rename, removal, or change of meaning, not on addition; absence means pre-1 (`bothFull`) | start at 2 to mark the break from the unversioned shape; a `version` field name | 1 |
+| Status column when a target was never measured | `-` | `unknown` (reads like a status); blank; `?` | 1 |
+| Shape identifiers and labels | Unchanged; already one-to-one and file-named | rename `both-full` to `both-content` to match the label; not worth a break | 1 |
+| Where label tables live | `src/report/labels.ts` for shape, status, outcome (plus outcome order); normalization sentences in `describeNormalization` (domain, because the `eligible` message is built there) | keep them in `render.ts` and `sync.ts`; move every label into domain (labels are presentation) | 1 |
+| Words outside the model (`PersonalPackCopy.state` `current` / `stale`, `SkillLockState`, `ManagedBlock.modified`, issue and finding kinds) | Listed in the glossary as not part of the model; unchanged | rename `PersonalPackCopy.state` values to avoid `current` (the collision is in a different type with a different subject; no report prints them side by side) | 1 |
+
+**Structural check.** Could the vocabulary problem dissolve rather than be fixed? Only if sync
+outcomes were derived from pack statuses (then one vocabulary would do), but they cannot be: the
+same `eligible` row ends in `planned`, `opened`, `updated`, `up-to-date`, or `refused` depending
+on the dry-run flag, the tool-owned branch, and checks that run after measurement. Two
+vocabularies with an explicit "results from" relation is the minimum, and that relation is what
+the glossary's outcome table records.
+
 ## Recording rule
 
 Add an entry here whenever a decision changes what rulecheck writes, what it reports, or which
 layer a kind of content belongs to. Add a fact to `tool-behavior.md` whenever a decision depends
-on how a tool behaves.
+on how a tool behaves. Add a value to [status-model.md](status-model.md) before adding it to a
+type, a label table, or `--json`.

@@ -17,7 +17,10 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
   unpaired, nested, and file-level markers still block. A content `CLAUDE.md` that holds an
   `@AGENTS.md` line is canonical by import (`agents-imported`, D16): the block goes into
   `AGENTS.md` and `CLAUDE.md` is left as it is, which unblocks `lightsound/cobracket`. `sync --all` fans out over `subscriptions.json` and its `--dry-run` table is the remote
-  distribution report (D14); `scan --packs` reflects local checkouts only.
+  distribution report (D14); `scan --packs` reflects local checkouts only. The words of that
+  model (shape, normalization, pack status, sync outcome) are fixed in one glossary,
+  [status-model.md](status-model.md), which code, labels, and `scan --json` (`schemaVersion: 1`)
+  follow (D17); Skills and a dashboard build on it.
 - `lightsound/agent-rules/packs/base/AGENTS.md`: the portable pack `base` (D7 naming),
   environment-neutral only (Step 1, [agent-rules#1](https://github.com/lightsound/agent-rules/pull/1)).
   The repository's root `AGENTS.md` instructs agents working in agent-rules itself and is not

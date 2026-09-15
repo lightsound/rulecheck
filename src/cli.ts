@@ -6,7 +6,7 @@ import { renderSync, renderSyncAll } from "./report/sync.ts";
 import { resolvePacks } from "./scan/packs.ts";
 import { scan } from "./scan/scan.ts";
 import { syncAll } from "./sync/all.ts";
-import { SyncRefused, sync } from "./sync/sync.ts";
+import { SyncFailed, SyncRefused, sync } from "./sync/sync.ts";
 
 const root = Argument.Directory("root", { mustExist: true }).pipe(
   Argument.withDescription("Directory to scan. Every git repository below it is inspected."),
@@ -111,6 +111,7 @@ const syncCommand = Command.make(
           return yield* new SyncRefused({
             message:
               "--all takes no repository argument and no --base; each subscriber is synced on its default branch",
+            status: null,
           });
         }
         const result = yield* syncAll({ packs: config.packs, pack: packId, dryRun: config.dryRun });
@@ -125,6 +126,7 @@ const syncCommand = Command.make(
       if (repo === null || packId === null) {
         return yield* new SyncRefused({
           message: "sync needs `<owner/repo> --pack <id>`, or `--all [--pack <id>]`",
+          status: null,
         });
       }
       const result = yield* sync({
@@ -138,6 +140,7 @@ const syncCommand = Command.make(
     }).pipe(
       Effect.catchTags({
         SyncRefused: reportFailure,
+        SyncFailed: (e) => reportFailure(e.error),
         PackSourceError: reportFailure,
         GitHubError: reportFailure,
       }),

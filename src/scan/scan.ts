@@ -1,21 +1,22 @@
 import { Effect, FileSystem, Path } from "effect";
 import type { PlatformError } from "effect/PlatformError";
 import { findForeignMarkers, parseBlocks } from "../domain/block.ts";
-import { classifyBothFull, classifyShape, estimateBudget } from "../domain/classify.ts";
+import { classifyNormalization, classifyShape, estimateBudget } from "../domain/classify.ts";
 import { distribute } from "../domain/pack.ts";
-import type {
-  BlockIssue,
-  BothFullNormalization,
-  CanonicalShape,
-  DuplicateGroup,
-  ForeignRegion,
-  InstructionFile,
-  ManagedBlock,
-  PackDistribution,
-  PersonalLayer,
-  RepoReport,
-  ScanReport,
-  ScanTotals,
+import {
+  type BlockIssue,
+  type CanonicalShape,
+  type DuplicateGroup,
+  type ForeignRegion,
+  type InstructionFile,
+  type ManagedBlock,
+  type Normalization,
+  type PackDistribution,
+  type PersonalLayer,
+  type RepoReport,
+  SCAN_SCHEMA_VERSION,
+  type ScanReport,
+  type ScanTotals,
 } from "../domain/types.ts";
 import { type AnalyzedFile, analyzeFile } from "./analyze.ts";
 import { type LoadedPacks, loadPacks } from "./packs.ts";
@@ -83,6 +84,7 @@ export const scan = (
     }
 
     return {
+      schemaVersion: SCAN_SCHEMA_VERSION,
       root: resolvedRoot,
       scannedAt: new Date().toISOString(),
       repos,
@@ -144,7 +146,7 @@ const analyzeRepo = (
       root: repo.root,
       name: displayName(repo.root, scanRoot),
       shape,
-      bothFull: shape === "both-full" ? classifyBothFullPair(files, contents) : null,
+      normalization: normalizationOf(shape, files, contents),
       files,
       budget: estimateBudget(files, contents),
       findings,
@@ -155,13 +157,15 @@ const analyzeRepo = (
     } satisfies RepoReport;
   });
 
-/** D12: which normalization a sync applies to a `both-full` pair, from the root files' content. */
-function classifyBothFullPair(
+/** What a sync would do to the root pair; `both-full` reads the root files' content (D12). */
+function normalizationOf(
+  shape: CanonicalShape,
   files: ReadonlyArray<InstructionFile>,
   contents: ReadonlyMap<string, string>,
-): BothFullNormalization {
+): Normalization {
   const claude = files.find((f) => f.kind === "claude-md" && ROOT_PAIR.has(f.relativePath));
-  return classifyBothFull(
+  return classifyNormalization(
+    shape,
     contents.get("AGENTS.md") ?? "",
     claude ? (contents.get(claude.relativePath) ?? "") : "",
   );
