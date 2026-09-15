@@ -72,7 +72,13 @@ export const scan = (
         typeof options.packs === "string"
           ? yield* loadPacks(fs, path, path.resolve(options.packs))
           : options.packs;
-      distribution = distribute(loaded.source, repos, loaded.packs, loaded.warnings);
+      distribution = distribute(
+        loaded.source,
+        repos,
+        loaded.packs,
+        loaded.warnings,
+        personal?.files ?? [],
+      );
     }
 
     return {

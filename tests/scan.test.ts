@@ -76,9 +76,15 @@ beforeAll(async () => {
   await put("github.com/acme/both/packages/x/AGENTS.md", CANONICAL_AGENTS);
 
   // a fake home with a personal layer
-  await put(".home/.claude/CLAUDE.md", "@RTK.md\n@~/notes/global.md\n");
+  await put(
+    ".home/.claude/CLAUDE.md",
+    "@RTK.md\n@~/notes/global.md\n@~/agent-rules/packs/base/AGENTS.md\n",
+  );
   await put(".home/.claude/RTK.md", "# RTK\n\nUse rtk.\n");
   await put(".home/notes/global.md", "Always respond in Japanese.\n");
+  // The interim wiring (D13): ~/.claude/CLAUDE.md imports a checkout of the pack source that is
+  // one edit behind the pack repository.
+  await put(".home/agent-rules/packs/base/AGENTS.md", `${OLD_PACK_BODY}\n`);
   await put(".home/.claude/rules/style.md", "---\npaths:\n  - src/**\n---\nscoped\n");
   await put(".home/.claude/rules/always.md", "unscoped rule\n");
   // Cursor side of the personal layer: ~/AGENTS.md as a symlink to a canonical file, a ~/CLAUDE.md
@@ -370,6 +376,9 @@ describe("scan", () => {
     });
     expect(distribution?.warnings).toEqual([]);
 
+    // Without a home the personal layer is not scanned, so no copy can be reported.
+    expect(distribution?.personalCopies).toEqual([]);
+
     const text = renderText(report);
     expect(text).toContain("Pack distribution");
     expect(text).toContain("acme/foreign");
@@ -426,6 +435,7 @@ describe("scan", () => {
       "claude-md:~/.claude/CLAUDE.md",
       "imported-md:~/.claude/RTK.md",
       "imported-md:~/notes/global.md",
+      "imported-md:~/agent-rules/packs/base/AGENTS.md",
       "claude-rule:~/.claude/rules/always.md",
       "claude-rule:~/.claude/rules/style.md",
       "agents-md:~/AGENTS.md",
@@ -443,6 +453,7 @@ describe("scan", () => {
       tokensOf("~/.claude/CLAUDE.md") +
         tokensOf("~/.claude/RTK.md") +
         tokensOf("~/notes/global.md") +
+        tokensOf("~/agent-rules/packs/base/AGENTS.md") +
         tokensOf("~/.claude/rules/always.md") +
         tokensOf("~/CLAUDE.md") +
         tokensOf("~/AGENTS.md"),
@@ -458,6 +469,27 @@ describe("scan", () => {
     expect(homeWrapper?.wrapperTarget).toBe("AGENTS.md");
     expect(homeWrapper?.wrapperUsesImport).toBe(true);
     expect(personal?.managedPolicyPath).toBeNull();
+  });
+
+  test("reports pack bodies that also load from the personal layer (D13)", async () => {
+    const report = await run(scan(root, { home: join(root, ".home"), packs: packsRoot }));
+    // The imported checkout is one edit behind the pack: stale, not a false `current`. Only
+    // `acme/blocked` carries a `base` block (outdated behind a malformed marker), and a block is a
+    // block whatever its status.
+    expect(report.distribution?.personalCopies).toEqual([
+      {
+        pack: "base",
+        file: "~/agent-rules/packs/base/AGENTS.md",
+        kind: "imported-md",
+        state: "stale",
+        doubleLoaded: ["acme/blocked"],
+      },
+    ]);
+    const text = renderText(report);
+    expect(text).toContain(
+      "! personal layer ~/agent-rules/packs/base/AGENTS.md is the pack source but differs from the pack as loaded (checkout behind or ahead); loads twice in 1 repository carrying the block (acme/blocked).",
+    );
+    expect(text).toContain("have no headless write path");
   });
 });
 

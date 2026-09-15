@@ -4,6 +4,7 @@ import {
   classifyPackStatus,
   distribute,
   findPackedRef,
+  findPersonalPackCopies,
   packFromFiles,
   parseGitHead,
   parseSubscriptions,
@@ -312,8 +313,79 @@ describe("distribute", () => {
       "not-subscribed": 6,
     });
     expect(distribution.warnings).toEqual([]);
+    expect(distribution.personalCopies).toEqual([]);
     expect(distribute("/packs", [], [], ["bad subscriptions"]).warnings).toEqual([
       "bad subscriptions",
     ]);
+  });
+});
+
+describe("findPersonalPackCopies", () => {
+  const personalFile = (relativePath: string, contentHash: string, kind = "imported-md") =>
+    file(relativePath, { kind: kind as InstructionFile["kind"], contentHash, depth: 0 });
+  const repos = [
+    repo("acme/current", "agents-canonical", { blocks: [block("base", BODY)] }),
+    repo("acme/outdated", "agents-canonical", {
+      blocks: [block("base", OLD_BODY)],
+      blockIssues: [{ kind: "malformed-marker", file: "AGENTS.md", line: 9, message: "m" }],
+    }),
+    repo("acme/nested", "agents-canonical", {
+      blocks: [{ ...block("base", BODY), file: "packages/x/AGENTS.md" }],
+    }),
+    repo("acme/none", "none"),
+  ];
+
+  test("a personal file equal to the pack body is a current copy, wherever it lives", () => {
+    const personal = [
+      personalFile("~/.claude/CLAUDE.md", "other", "claude-md"),
+      personalFile("~/notes/pack-copy.md", hashBlockBody(BODY)),
+      personalFile("~/AGENTS.md", hashBlockBody(BODY), "agents-md"),
+    ];
+    expect(findPersonalPackCopies(personal, [base], repos)).toEqual([
+      {
+        pack: "base",
+        file: "~/notes/pack-copy.md",
+        kind: "imported-md",
+        state: "current",
+        doubleLoaded: ["acme/current", "acme/outdated"],
+      },
+      {
+        pack: "base",
+        file: "~/AGENTS.md",
+        kind: "agents-md",
+        state: "current",
+        doubleLoaded: ["acme/current", "acme/outdated"],
+      },
+    ]);
+  });
+
+  test("the pack's own source path with another hash is stale; other files are not guessed", () => {
+    const personal = [
+      personalFile(
+        "~/ghq/github.com/acme/agent-rules/packs/base/AGENTS.md",
+        hashBlockBody(OLD_BODY),
+      ),
+      personalFile(
+        "~/ghq/github.com/acme/agent-rules/packs/other/AGENTS.md",
+        hashBlockBody(OLD_BODY),
+      ),
+      personalFile("~/notes/global.md", "unrelated"),
+    ];
+    expect(findPersonalPackCopies(personal, [base], repos)).toEqual([
+      {
+        pack: "base",
+        file: "~/ghq/github.com/acme/agent-rules/packs/base/AGENTS.md",
+        kind: "imported-md",
+        state: "stale",
+        doubleLoaded: ["acme/current", "acme/outdated"],
+      },
+    ]);
+  });
+
+  test("a pack without an AGENTS.md block has nothing to copy", () => {
+    const filesOnly = packFromFiles("skills", null, [{ path: "x/SKILL.md", content: "s" }], []);
+    const personal = [personalFile("~/x", hashBlockBody(BODY))];
+    expect(findPersonalPackCopies(personal, [filesOnly], repos)).toEqual([]);
+    expect(distribute("/packs", repos, [base], [], personal).personalCopies).toHaveLength(1);
   });
 });

@@ -17,7 +17,7 @@ Health check for AI coding agent instruction files (`AGENTS.md`, `CLAUDE.md`, `.
 
 ## Commands
 
-- `bun run dev scan <dir>` run the CLI against a directory (text summary). Flags: `--json` full report for tooling, `--all` include repositories with no instruction files, `--no-personal` skip the `~/.claude` layer, `--max-depth <n>` descent limit (default 12), `--packs <dir | owner/repo[@ref]>` pack repository (`packs/<id>/AGENTS.md`, `subscriptions.json`) as a local checkout or read from GitHub through `gh api`, to add the pack distribution report
+- `bun run dev scan <dir>` run the CLI against a directory (text summary). Flags: `--json` full report for tooling, `--all` include repositories with no instruction files, `--no-personal` skip the `~/.claude` layer, `--max-depth <n>` descent limit (default 12), `--packs <dir | owner/repo[@ref]>` pack repository (`packs/<id>/AGENTS.md`, `subscriptions.json`) as a local checkout or read from GitHub through `gh api`, to add the pack distribution report (with the personal layer, it also lists personal files that carry a pack body, D13)
 - `bun run dev sync <owner/repo> --pack <id> --packs <dir | owner/repo[@ref]> --dry-run` measure one target on GitHub and print the planned diff; without `--dry-run` it pushes branch `agent-rules/<id>` and opens or updates the pull request. `--base <branch>` overrides the default branch. Needs `gh auth login`
 - `bun run check` typecheck, lint, and test
 - `bun test` tests only
@@ -27,7 +27,7 @@ Health check for AI coding agent instruction files (`AGENTS.md`, `CLAUDE.md`, `.
 
 - `src/main.ts` entry; provides Bun platform services and runs the command tree
 - `src/cli.ts` command and flag definitions only, no logic
-- `src/domain/` pure functions and types: file kind detection, wrapper detection, frontmatter parsing, shape classification, budget estimation, token counting, reference extraction (`references.ts`), managed-block parsing (`block.ts`), skills inventory and `skills-lock.json` (`skills.ts`), pack loading and distribution status (`pack.ts`), the sync plan, block rendering and pull request text (`sync.ts`), unified diff (`diff.ts`)
+- `src/domain/` pure functions and types: file kind detection, wrapper detection, frontmatter parsing, shape classification, budget estimation, token counting, reference extraction (`references.ts`), managed-block parsing (`block.ts`), skills inventory and `skills-lock.json` (`skills.ts`), pack loading, distribution status, and personal-layer pack copies (`pack.ts`), the sync plan, block rendering and pull request text (`sync.ts`), unified diff (`diff.ts`)
 - `src/scan/` effectful, read-only: `walk.ts` discovery, `analyze.ts` per-file analysis, `verify.ts` reference verification against the repo, `skills.ts` skill directory hashing, `packs.ts` reading a pack repository from a checkout or from GitHub (`resolvePacks`, `--packs`), `personal.ts` the personal layer (`~/.claude`, `~/AGENTS.md`, `~/CLAUDE.md`, `~/.cursor/rules`), `scan.ts` orchestration
 - `src/github/` the `GitHub` Effect service (`client.ts`), its live layer over `gh api` (`gh.ts`), and `fs.ts`, which presents a repository at one commit as a read-only `FileSystem` mounted at `/github.com/<owner>/<repo>` so `scan` and `loadPacks` run unchanged on remote trees
 - `src/sync/` the write path: `sync.ts` measures the target through the snapshot filesystem, plans, measures the planned tree again, then creates one commit, the branch `agent-rules/<pack>`, and the pull request. The only directory that issues GitHub writes

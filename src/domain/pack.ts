@@ -11,6 +11,7 @@ import type {
   PackFile,
   PackStatus,
   PackStatusEntry,
+  PersonalPackCopy,
 } from "./types.ts";
 
 /**
@@ -226,12 +227,56 @@ export function emptyStatusCounts(): Record<PackStatus, number> {
   };
 }
 
+/** The root pair carries the pack's block, whatever its status: the repository loads the pack. */
+function carriesBlock(repo: RepoForDistribution, packId: string): boolean {
+  return repo.blocks.some((b) => b.source === packId && isRootPairFile(b.file));
+}
+
+/**
+ * Pack bodies that also load from the personal layer (D13).
+ *
+ * Two precise signals, nothing fuzzier: a personal file whose content hash equals the pack's
+ * body hash is a `current` copy (the import target, `~/AGENTS.md`, a rule file); a personal file
+ * at the pack's own source path, `packs/<id>/AGENTS.md`, whose hash differs is `stale` (the
+ * checkout the import points at is not the pack as loaded). `contentHash` is the sha256 of the
+ * trimmed content and the block hash the sha256 of the CRLF-normalized, trimmed body, so they
+ * agree for any file with `\n` line endings.
+ */
+export function findPersonalPackCopies(
+  personal: ReadonlyArray<InstructionFile>,
+  packs: ReadonlyArray<Pack>,
+  repos: ReadonlyArray<RepoForDistribution>,
+): PersonalPackCopy[] {
+  const copies: PersonalPackCopy[] = [];
+  for (const pack of packs) {
+    const packHash = pack.files.find((f) => f.kind === "agents-block")?.hash;
+    if (packHash === undefined) continue;
+    const doubleLoaded = repos
+      .filter((repo) => carriesBlock(repo, pack.id))
+      .map((repo) => repo.name)
+      .sort();
+    const sourcePath = `/packs/${pack.id}/AGENTS.md`;
+    for (const file of personal) {
+      const state =
+        file.contentHash === packHash
+          ? "current"
+          : file.relativePath.endsWith(sourcePath)
+            ? "stale"
+            : null;
+      if (state === null) continue;
+      copies.push({ pack: pack.id, file: file.relativePath, kind: file.kind, state, doubleLoaded });
+    }
+  }
+  return copies;
+}
+
 /** Every repository against every pack, sorted by pack, then by how urgently a human should look. */
 export function distribute(
   root: string,
   repos: ReadonlyArray<RepoForDistribution>,
   packs: ReadonlyArray<Pack>,
   warnings: ReadonlyArray<string> = [],
+  personal: ReadonlyArray<InstructionFile> = [],
 ): PackDistribution {
   const entries: PackStatusEntry[] = [];
   const counts = emptyStatusCounts();
@@ -248,5 +293,6 @@ export function distribute(
       STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status) ||
       a.repo.localeCompare(b.repo),
   );
-  return { root, packs, entries, counts, warnings };
+  const personalCopies = findPersonalPackCopies(personal, packs, repos);
+  return { root, packs, entries, counts, personalCopies, warnings };
 }

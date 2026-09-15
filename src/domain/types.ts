@@ -200,12 +200,33 @@ export interface PackStatusEntry {
   readonly message: string | null;
 }
 
+/**
+ * A pack body that also loads from the personal layer (D13). While the interim wiring exists
+ * (`~/.claude/CLAUDE.md` importing the pack source, `~/AGENTS.md` holding a copy), the pack loads
+ * twice in every repository that already carries its block.
+ *
+ * - `current` the personal file equals the pack body
+ * - `stale`   the personal file is the pack's own source path (`packs/<id>/AGENTS.md`) but its
+ *             content differs from the pack as loaded, so the local checkout is behind or ahead
+ */
+export interface PersonalPackCopy {
+  readonly pack: string;
+  /** Personal-layer path as the layer reports it, e.g. `~/ghq/github.com/o/agent-rules/packs/base/AGENTS.md`. */
+  readonly file: string;
+  readonly kind: FileKind;
+  readonly state: "current" | "stale";
+  /** Repositories in the scan whose root pair carries the block, where the pack therefore loads twice. */
+  readonly doubleLoaded: ReadonlyArray<string>;
+}
+
 export interface PackDistribution {
   /** Where the packs were loaded from: a directory, or `owner/repo@<short sha>`. */
   readonly root: string;
   readonly packs: ReadonlyArray<Pack>;
   readonly entries: ReadonlyArray<PackStatusEntry>;
   readonly counts: Readonly<Record<PackStatus, number>>;
+  /** Pack bodies found in the personal layer; empty when the layer was not scanned. */
+  readonly personalCopies: ReadonlyArray<PersonalPackCopy>;
   /** Problems reading the pack repository itself, e.g. an unparseable `subscriptions.json`. */
   readonly warnings: ReadonlyArray<string>;
 }
@@ -300,7 +321,7 @@ export interface RepoReport {
  * Cursor: `~/AGENTS.md`, `~/CLAUDE.md`, and always-apply `~/.cursor/rules/*.mdc`. Cursor's rule
  * loader walks from the workspace up through every ancestor directory (verified against the app's
  * `LocalCursorRulesService`; the ancestor walk is not documented). Cursor's User Rules live in
- * application settings, not on disk, and are not measured.
+ * account storage, not on disk, have no headless write path, and are not measured (D13).
  */
 export interface PersonalLayer {
   readonly home: string;
