@@ -9,6 +9,9 @@ Health check for AI coding agent instruction files across many repositories.
 - **Context budget**: approximate tokens Cursor and Claude Code load unconditionally at the repo root, including always-on `.cursor/rules` and resolved `@AGENTS.md` imports.
 - **Scope** of each rule file: `alwaysApply`, globs, `paths`, nested.
 - **Rot**: package scripts an instruction tells the agent to run that no `package.json` defines, and repository paths it points at that no longer exist. Each finding carries `file:line`.
+- **Managed blocks**: `<!-- agent-rules:begin source=<pack> rev=<sha> hash=<sha256> -->` regions in `AGENTS.md`, with the body hash recomputed so an in-place edit shows as `MODIFIED`. Unpaired or incomplete markers are findings.
+- **Skills**: `SKILL.md` directories under `.agents/skills`, `.claude/skills`, `.cursor/skills` (symlinked copies fold into their target), the `skills-ref` name/description checks, and each skill's relation to `skills-lock.json`. A lock entry whose directory is missing is a finding; a hash that differs from the lock is shown, not reported, because `npx skills` may record a snapshot hash that is not reproducible from disk.
+- **Pack distribution** (`--packs <dir>`): for every repository and every pack in a pack repository checkout (`packs/<id>/AGENTS.md`, `subscriptions.json`), one of `current`, `outdated`, `modified`, `eligible`, `blocked` (with the `file:line` of the reason), `not subscribed`.
 - **Personal layer**: what loads in every session regardless of repository. Claude Code: `~/.claude/CLAUDE.md`, its `@imports`, `~/.claude/rules/*.md`, `~/CLAUDE.md`, any managed policy file. Cursor: `~/AGENTS.md`, `~/CLAUDE.md`, always-apply `~/.cursor/rules/*.mdc` (loaded through an undocumented ancestor walk; local sessions only). Cursor User Rules in settings are not on disk and are not measured. See [docs/tool-behavior.md](docs/tool-behavior.md) for what each tool loads and how it was verified.
 
 It is read-only. It never modifies scanned repositories.
@@ -21,6 +24,7 @@ bun run dev scan ~/ghq                # text summary
 bun run dev scan ~/ghq --json         # full report for tooling
 bun run dev scan ~/ghq --all          # include repositories with no instruction files
 bun run dev scan ~/ghq --no-personal  # skip the ~/.claude layer
+bun run dev scan ~/ghq --packs ~/ghq/github.com/lightsound/agent-rules  # add the pack distribution report
 ```
 
 ### How rot detection decides
@@ -42,7 +46,7 @@ rulecheck recommends and follows one convention for the root pair:
 
 ## Status
 
-Early. The scanner, shape/duplicate/budget detectors, rot detection, and the personal layer work against real trees. The next step is distribution: shared rule packs delivered into repositories as managed blocks, synced through pull requests. See [docs/decisions.md](docs/decisions.md) for the reasoning and [docs/tool-behavior.md](docs/tool-behavior.md) for the tool facts it rests on.
+Early. The scanner, shape/duplicate/budget detectors, rot detection, the personal layer, managed-block detection, the skills inventory, and the pack distribution status work against real trees. The next step is the first write path: shared rule packs delivered into repositories as managed blocks, synced through pull requests. See [docs/roadmap.md](docs/roadmap.md) for the order, [docs/decisions.md](docs/decisions.md) for the reasoning, and [docs/tool-behavior.md](docs/tool-behavior.md) for the tool facts it rests on.
 
 ## Development
 
