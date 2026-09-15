@@ -105,7 +105,8 @@ Rule frontmatter accepted by the parser but not documented: `metadata.environmen
 | Mechanism | Behavior | Evidence |
 |---|---|---|
 | `~/.claude/CLAUDE.md` | loaded in every session | [memory docs](https://code.claude.com/docs/en/memory) |
-| `@path` imports | relative, absolute, and `@~/...` all resolve; one level shown here, recursion up to 5 hops; imports from user scope need no approval dialog, imports from project files pointing outside the project prompt once | docs |
+| `@path` imports | relative, absolute, and `@~/...` all resolve; "Relative paths resolve relative to the file containing the import, not the working directory" (so `@AGENTS.md` in `.claude/CLAUDE.md` points at `.claude/AGENTS.md`); one level shown here, "a maximum depth of four hops" (re-read 2026-09-15; an earlier read said 5); imports from user scope need no approval dialog, imports from project files pointing outside the project prompt once | [memory docs](https://code.claude.com/docs/en/memory) |
+| `@path` import position | the line is resolved wherever it sits in the file, between other text or between another tool's single-line HTML-comment markers; "Import parsing skips Markdown code spans and fenced code blocks", and block-level HTML comments are stripped before injection. Basis of D16: an `@AGENTS.md` line makes `AGENTS.md` load whatever else the root `CLAUDE.md` holds; the same line in a fence or inside a multi-line comment loads nothing | [memory docs](https://code.claude.com/docs/en/memory), "CLAUDE.md imports" |
 | `CLAUDE.md` in ancestors of cwd | loaded (so `~/CLAUDE.md` applies to every project under home) | docs |
 | `CLAUDE.md` in subdirectories | loaded on demand when files there are read | docs |
 | `CLAUDE.local.md` | loaded, meant to be gitignored | docs |
