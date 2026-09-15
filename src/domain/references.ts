@@ -4,6 +4,14 @@
  *
  * Precision matters more than recall here. Every reference that fails verification becomes a
  * finding a human is asked to act on, so ambiguous text is skipped rather than guessed at.
+ *
+ * Scripts come from shell lines in fenced blocks and from inline code: `bun run x`, `pnpm x`,
+ * `yarn x`, `npm run x`. Manager builtins (`bun install`, `pnpm dlx`) are not scripts.
+ * Paths come from inline code spans containing a `/`. URLs, absolute and `~` paths, globs,
+ * placeholders, scoped package names, and `owner/repo` pairs are ignored. Path references on
+ * lines that assert absence ("has no `src/main.tsx`", "は存在しない") are skipped. Known gap: paths the
+ * agent is expected to create are extracted like any other and are reported as missing.
+ * Verification of the extracted references is in `src/scan/verify.ts`.
  */
 
 export type ReferenceKind = "script" | "path";
