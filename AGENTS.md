@@ -39,7 +39,7 @@ Health check for AI coding agent instruction files (`AGENTS.md`, `CLAUDE.md`, `.
 
 - Keep `src/domain/` free of Effect and I/O. Anything that touches the filesystem lives in `src/scan/`.
 - Add a new detector as a pure function in `src/domain/` first, with a test, then wire it into `scan.ts` and `render.ts`.
-- Findings favor precision over recall. A finding asks a human to act; when the text is ambiguous, skip it rather than guess. Every finding carries `file:line`. The rot-detection heuristics are documented in the header comments of `src/domain/references.ts` and `src/scan/verify.ts`; known gap: paths an instruction tells the agent to create are reported as missing.
+- Findings favor precision over recall. A finding asks a human to act; when the text is ambiguous, skip it rather than guess. Every finding carries `file:line`. The rot-detection heuristics (what is extracted, what is skipped, how a reference is verified) are documented in the header comments of `src/domain/references.ts` and `src/scan/verify.ts`.
 - `README.md` is intentionally absent; do not create it unless the user asks.
 - Before changing a heuristic, run `bun run dev scan ~/ghq` and read the findings that appear or disappear; the real tree is the regression suite for false positives.
 - Do not add an editor, watcher, or any write path to scanned repositories without an explicit decision recorded in this file.
