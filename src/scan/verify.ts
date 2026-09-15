@@ -96,7 +96,7 @@ const collectManifests = (
     return { scripts, dependencies };
   });
 
-const loadGitignore = (
+export const loadGitignore = (
   fs: FileSystem.FileSystem,
   path: Path.Path,
   repoRoot: string,
@@ -110,7 +110,7 @@ const loadGitignore = (
   });
 
 /** True when any candidate, expressed relative to the repo root, is matched by .gitignore. */
-function isGitignored(
+export function isGitignored(
   gitignore: Ignore | null,
   path: Path.Path,
   repoRoot: string,

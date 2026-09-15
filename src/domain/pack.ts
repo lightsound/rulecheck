@@ -1,0 +1,231 @@
+import { createHash } from "node:crypto";
+import { hashBlockBody, parseBlocks } from "./block.ts";
+import type {
+  BlockIssue,
+  CanonicalShape,
+  InstructionFile,
+  ManagedBlock,
+  Pack,
+  PackDistribution,
+  PackFile,
+  PackStatus,
+  PackStatusEntry,
+} from "./types.ts";
+
+/**
+ * Packs and their distribution status (decisions D6, D7, D8).
+ *
+ * A pack is the set of files under `packs/<id>/` in the pack repository. `AGENTS.md` there is the
+ * body of the managed block; every other file is a whole managed file. Subscriptions come from
+ * `subscriptions.json` at the pack repository root: `{ "<pack-id>": ["owner/repo", ...] }`.
+ */
+
+export interface PackSourceFile {
+  /** Path relative to `packs/<id>/`, `/` separated. */
+  readonly path: string;
+  readonly content: string;
+}
+
+export function packFromFiles(
+  id: string,
+  rev: string | null,
+  files: ReadonlyArray<PackSourceFile>,
+  subscribers: ReadonlyArray<string>,
+): Pack {
+  const packFiles: PackFile[] = [];
+  for (const file of [...files].sort((a, b) => a.path.localeCompare(b.path))) {
+    if (file.path === "AGENTS.md") {
+      // Once Step 3 wraps the pack body in markers the file *is* the block; until then the whole file is the body.
+      const body = parseBlocks(file.path, file.content).blocks[0]?.body ?? file.content;
+      packFiles.push({ kind: "agents-block", body, hash: hashBlockBody(body) });
+      continue;
+    }
+    packFiles.push({
+      kind: "file",
+      path: file.path,
+      hash: createHash("sha256").update(file.content).digest("hex"),
+    });
+  }
+  return { id, rev, files: packFiles, subscribers: subscribers.map(normalizeRepoName) };
+}
+
+export function normalizeRepoName(name: string): string {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/\.git$/, "");
+}
+
+/** Parse `subscriptions.json`. Returns null when the text is not an object of string arrays. */
+export function parseSubscriptions(text: string): Map<string, string[]> | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
+  const result = new Map<string, string[]>();
+  for (const [pack, repos] of Object.entries(parsed as Record<string, unknown>)) {
+    if (!Array.isArray(repos)) continue;
+    result.set(
+      pack,
+      repos.filter((repo): repo is string => typeof repo === "string"),
+    );
+  }
+  return result;
+}
+
+/** `ref: refs/heads/main` → the ref; a bare sha → the sha. */
+export function parseGitHead(text: string): { ref: string } | { sha: string } | null {
+  const trimmed = text.trim();
+  const ref = /^ref:\s*(\S+)$/.exec(trimmed);
+  if (ref?.[1]) return { ref: ref[1] };
+  if (/^[0-9a-f]{40}$/.test(trimmed)) return { sha: trimmed };
+  return null;
+}
+
+/** Look a ref up in `.git/packed-refs`. */
+export function findPackedRef(packedRefs: string, ref: string): string | null {
+  for (const line of packedRefs.split("\n")) {
+    const match = /^([0-9a-f]{40})\s+(\S+)$/.exec(line.trim());
+    if (match && match[2] === ref) return match[1] ?? null;
+  }
+  return null;
+}
+
+export interface RepoForDistribution {
+  readonly name: string;
+  readonly shape: CanonicalShape;
+  readonly files: ReadonlyArray<InstructionFile>;
+  readonly blocks: ReadonlyArray<ManagedBlock>;
+  readonly blockIssues: ReadonlyArray<BlockIssue>;
+}
+
+const ROOT_CLAUDE = new Set(["CLAUDE.md", ".claude/CLAUDE.md"]);
+
+function isRootPairFile(relativePath: string): boolean {
+  return relativePath === "AGENTS.md" || ROOT_CLAUDE.has(relativePath);
+}
+
+/** The root file a sync would insert the block into, given the current shape. */
+function contentFile(repo: RepoForDistribution): string {
+  if (repo.shape === "claude-only" || repo.shape === "claude-canonical") {
+    return repo.files.find((f) => ROOT_CLAUDE.has(f.relativePath))?.relativePath ?? "CLAUDE.md";
+  }
+  return "AGENTS.md";
+}
+
+const ELIGIBLE_ACTION: Record<Exclude<CanonicalShape, "both-full">, string> = {
+  "agents-canonical": "insert block into AGENTS.md",
+  "agents-only": "insert block into AGENTS.md, add CLAUDE.md wrapper",
+  "claude-only": "rename to AGENTS.md, add CLAUDE.md wrapper, insert block",
+  "claude-canonical": "swap the pair so AGENTS.md is canonical, insert block",
+  none: "create AGENTS.md with the block and a CLAUDE.md wrapper",
+};
+
+/** Status of one repository for one pack. */
+export function classifyPackStatus(repo: RepoForDistribution, pack: Pack): PackStatusEntry {
+  const base = { repo: repo.name, pack: pack.id };
+  const packHash = pack.files.find((f) => f.kind === "agents-block")?.hash ?? null;
+
+  const block = repo.blocks.find((b) => b.source === pack.id && isRootPairFile(b.file));
+  if (block) {
+    const at = { file: block.file, line: block.line };
+    if (block.modified) {
+      return { ...base, ...at, status: "modified", message: "body no longer matches its hash=" };
+    }
+    if (packHash !== null && block.hash !== packHash) {
+      const from = block.rev ? shortRev(block.rev) : "?";
+      const to = pack.rev ? shortRev(pack.rev) : "?";
+      return { ...base, ...at, status: "outdated", message: `rev ${from} -> ${to}` };
+    }
+    return { ...base, ...at, status: "current", message: null };
+  }
+
+  if (!pack.subscribers.includes(normalizeRepoName(repo.name))) {
+    return { ...base, status: "not-subscribed", file: null, line: null, message: null };
+  }
+
+  if (repo.shape === "both-full") {
+    return {
+      ...base,
+      status: "blocked",
+      file: "AGENTS.md",
+      line: 1,
+      message: "both AGENTS.md and CLAUDE.md have content; decide which one is canonical first",
+    };
+  }
+
+  // Files the sync would rewrite: only AGENTS.md when the pair is already canonical, else both.
+  const touched =
+    repo.shape === "agents-canonical" || repo.shape === "agents-only"
+      ? new Set(["AGENTS.md"])
+      : new Set(["AGENTS.md", ...ROOT_CLAUDE]);
+  const issue = repo.blockIssues.find((i) => touched.has(i.file));
+  if (issue) {
+    return {
+      ...base,
+      status: "blocked",
+      file: issue.file,
+      line: issue.line,
+      message: issue.message,
+    };
+  }
+
+  return {
+    ...base,
+    status: "eligible",
+    file: contentFile(repo),
+    line: null,
+    message: ELIGIBLE_ACTION[repo.shape],
+  };
+}
+
+function shortRev(rev: string): string {
+  return rev.slice(0, 7);
+}
+
+const STATUS_ORDER: ReadonlyArray<PackStatus> = [
+  "modified",
+  "outdated",
+  "blocked",
+  "eligible",
+  "current",
+  "not-subscribed",
+];
+
+export function emptyStatusCounts(): Record<PackStatus, number> {
+  return {
+    current: 0,
+    outdated: 0,
+    modified: 0,
+    eligible: 0,
+    blocked: 0,
+    "not-subscribed": 0,
+  };
+}
+
+/** Every repository against every pack, sorted by pack, then by how urgently a human should look. */
+export function distribute(
+  root: string,
+  repos: ReadonlyArray<RepoForDistribution>,
+  packs: ReadonlyArray<Pack>,
+): PackDistribution {
+  const entries: PackStatusEntry[] = [];
+  const counts = emptyStatusCounts();
+  for (const pack of packs) {
+    for (const repo of repos) {
+      const entry = classifyPackStatus(repo, pack);
+      counts[entry.status] += 1;
+      entries.push(entry);
+    }
+  }
+  entries.sort(
+    (a, b) =>
+      a.pack.localeCompare(b.pack) ||
+      STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status) ||
+      a.repo.localeCompare(b.repo),
+  );
+  return { root, packs, entries, counts };
+}

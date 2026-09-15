@@ -1,16 +1,23 @@
 import { Effect, FileSystem, Path } from "effect";
 import type { PlatformError } from "effect/PlatformError";
+import { findForeignMarkers, parseBlocks } from "../domain/block.ts";
 import { classifyShape, estimateBudget } from "../domain/classify.ts";
+import { distribute } from "../domain/pack.ts";
 import type {
+  BlockIssue,
   CanonicalShape,
   DuplicateGroup,
+  ManagedBlock,
+  PackDistribution,
   PersonalLayer,
   RepoReport,
   ScanReport,
   ScanTotals,
 } from "../domain/types.ts";
-import { analyzeFile } from "./analyze.ts";
+import { type AnalyzedFile, analyzeFile } from "./analyze.ts";
+import { loadPacks } from "./packs.ts";
 import { scanPersonal } from "./personal.ts";
+import { inventorySkills } from "./skills.ts";
 import { verifyReferences } from "./verify.ts";
 import { type DiscoveredRepo, walk } from "./walk.ts";
 
@@ -20,6 +27,8 @@ export interface ScanOptions {
   readonly minDuplicateLines?: number;
   /** Home directory whose `~/.claude` layer should be included, or `null` to skip it. */
   readonly home?: string | null;
+  /** Checkout of the pack repository (`packs/<id>/`, `subscriptions.json`), or `null` for no distribution report. */
+  readonly packs?: string | null;
 }
 
 const DEFAULT_MIN_DUPLICATE_LINES = 5;
@@ -52,15 +61,48 @@ export const scan = (
         ? null
         : yield* scanPersonal(options.home);
 
+    let distribution: PackDistribution | null = null;
+    if (options.packs) {
+      const packsRoot = path.resolve(options.packs);
+      const packs = yield* loadPacks(fs, path, packsRoot);
+      distribution = distribute(packsRoot, repos, packs);
+    }
+
     return {
       root: resolvedRoot,
       scannedAt: new Date().toISOString(),
       repos,
       duplicates,
       personal,
+      distribution,
       totals: summarize(repos),
     } satisfies ScanReport;
   });
+
+const ROOT_PAIR = new Set(["AGENTS.md", "CLAUDE.md", ".claude/CLAUDE.md"]);
+
+/**
+ * Managed blocks in every AGENTS.md / CLAUDE.md of the repository. Foreign markers are only
+ * looked for in the root pair, the files a sync would write.
+ */
+function detectBlocks(analyzed: ReadonlyArray<AnalyzedFile>): {
+  blocks: ManagedBlock[];
+  blockIssues: BlockIssue[];
+} {
+  const blocks: ManagedBlock[] = [];
+  const blockIssues: BlockIssue[] = [];
+  for (const { file, content } of analyzed) {
+    if (file.kind !== "agents-md" && file.kind !== "claude-md") continue;
+    const parsed = parseBlocks(file.relativePath, content);
+    blocks.push(...parsed.blocks);
+    blockIssues.push(...parsed.issues);
+    if (ROOT_PAIR.has(file.relativePath)) {
+      blockIssues.push(...findForeignMarkers(file.relativePath, content));
+    }
+  }
+  blockIssues.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
+  return { blocks, blockIssues };
+}
 
 const analyzeRepo = (
   repo: DiscoveredRepo,
@@ -75,6 +117,8 @@ const analyzeRepo = (
     const files = analyzed.map((a) => a.file);
     const contents = new Map(analyzed.map((a) => [a.file.relativePath, a.content] as const));
     const findings = yield* verifyReferences(fs, path, repo.root, repo.packageJsonPaths, analyzed);
+    const { blocks, blockIssues } = detectBlocks(analyzed);
+    const skills = yield* inventorySkills(fs, path, repo);
 
     return {
       root: repo.root,
@@ -83,6 +127,9 @@ const analyzeRepo = (
       files,
       budget: estimateBudget(files, contents),
       findings,
+      blocks,
+      blockIssues,
+      skills,
     } satisfies RepoReport;
   });
 
@@ -141,6 +188,10 @@ function summarize(repos: ReadonlyArray<RepoReport>): ScanTotals {
   let tokens = 0;
   let findings = 0;
   let reposWithInstructions = 0;
+  let blocks = 0;
+  let modifiedBlocks = 0;
+  let skills = 0;
+  let skillIssues = 0;
 
   for (const repo of repos) {
     shapes[repo.shape] += 1;
@@ -148,7 +199,22 @@ function summarize(repos: ReadonlyArray<RepoReport>): ScanTotals {
     findings += repo.findings.length;
     if (repo.files.length > 0) reposWithInstructions += 1;
     for (const file of repo.files) tokens += file.tokens;
+    blocks += repo.blocks.length;
+    modifiedBlocks += repo.blocks.filter((b) => b.modified).length;
+    skills += repo.skills.skills.length;
+    skillIssues += repo.skills.issues.length;
   }
 
-  return { repos: repos.length, reposWithInstructions, files, tokens, findings, shapes };
+  return {
+    repos: repos.length,
+    reposWithInstructions,
+    files,
+    tokens,
+    findings,
+    shapes,
+    blocks,
+    modifiedBlocks,
+    skills,
+    skillIssues,
+  };
 }

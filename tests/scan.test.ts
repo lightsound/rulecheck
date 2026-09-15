@@ -4,13 +4,32 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BunServices } from "@effect/platform-bun";
 import { Effect } from "effect";
+import { hashBlockBody } from "../src/domain/block.ts";
+import { computeSkillHash } from "../src/domain/skills.ts";
+import { renderText } from "../src/report/render.ts";
 import { displayName, scan } from "../src/scan/scan.ts";
 import { walk } from "../src/scan/walk.ts";
 
 let root: string;
+let packsRoot: string;
 
-async function put(relative: string, content: string) {
-  const full = join(root, relative);
+const PACK_BODY = "- Respond in Japanese.\n- Use Bun, never npm.";
+const OLD_PACK_BODY = "- Respond in Japanese.";
+const PACK_REV = "0123456789abcdef0123456789abcdef01234567";
+
+function managedBlock(source: string, body: string, rev = "aaaaaaa") {
+  return `<!-- agent-rules:begin source=${source} rev=${rev} hash=${hashBlockBody(body)} -->\n${body}\n<!-- agent-rules:end -->`;
+}
+
+const SKILL_MD = "---\nname: review\ndescription: Review pull requests.\n---\n# Review\n";
+const SKILL_SCRIPT = "echo review\n";
+const SKILL_HASH = computeSkillHash([
+  { relativePath: "SKILL.md", content: Buffer.from(SKILL_MD) },
+  { relativePath: "scripts/run.sh", content: Buffer.from(SKILL_SCRIPT) },
+]);
+
+async function put(relative: string, content: string, base = root) {
+  const full = join(base, relative);
   await mkdir(join(full, ".."), { recursive: true });
   await writeFile(full, content);
 }
@@ -30,6 +49,7 @@ const CANONICAL_AGENTS = [
 
 beforeAll(async () => {
   root = await mkdtemp(join(tmpdir(), "rulecheck-"));
+  packsRoot = await mkdtemp(join(tmpdir(), "rulecheck-packs-"));
 
   // github.com/acme/canonical: AGENTS.md canonical with an @import wrapper and a scoped cursor rule.
   // Its AGENTS.md references one real script, one unknown script, one real path, and one missing path.
@@ -79,10 +99,89 @@ beforeAll(async () => {
 
   // a directory that is not a repo but contains an AGENTS.md: must not be attributed to anything
   await put("github.com/acme/not-a-repo/AGENTS.md", "orphan\n");
+
+  // github.com/acme/blocked: carries an outdated `base` block, a modified `frontend` block, a
+  // malformed marker, skills in two agent dirs, and a skills-lock.json with one missing entry.
+  await mkdir(join(root, "github.com/acme/blocked/.git"), { recursive: true });
+  await put(
+    "github.com/acme/blocked/AGENTS.md",
+    [
+      "# Blocked",
+      "",
+      managedBlock("base", OLD_PACK_BODY),
+      "",
+      managedBlock("frontend", "React rules.").replace("React rules.", "React rules, edited."),
+      "",
+      "<!-- agent-rules:begin source=late -->",
+      "",
+    ].join("\n"),
+  );
+  await put("github.com/acme/blocked/CLAUDE.md", "@AGENTS.md\n");
+  await put("github.com/acme/blocked/.agents/skills/review/SKILL.md", SKILL_MD);
+  await put("github.com/acme/blocked/.agents/skills/review/scripts/run.sh", SKILL_SCRIPT);
+  // `.claude/skills/review` is the symlink `npx skills` creates; `.cursor/skills/review` is a
+  // separately edited copy.
+  await mkdir(join(root, "github.com/acme/blocked/.claude/skills"), { recursive: true });
+  await symlink(
+    "../../.agents/skills/review",
+    join(root, "github.com/acme/blocked/.claude/skills/review"),
+  );
+  await put("github.com/acme/blocked/.cursor/skills/review/SKILL.md", SKILL_MD);
+  await put(
+    "github.com/acme/blocked/.cursor/skills/review/scripts/run.sh",
+    `${SKILL_SCRIPT}# local edit\n`,
+  );
+  await put("github.com/acme/blocked/.cursor/skills/Untracked/SKILL.md", "no frontmatter\n");
+  await put(
+    "github.com/acme/blocked/skills-lock.json",
+    JSON.stringify(
+      {
+        version: 1,
+        skills: {
+          review: { source: "acme/skills", sourceType: "github", computedHash: SKILL_HASH },
+          gone: { source: "acme/skills", sourceType: "github", computedHash: "0" },
+        },
+      },
+      null,
+      2,
+    ),
+  );
+
+  // github.com/acme/restored: skill directories are gitignored and restored from the lock on install
+  await mkdir(join(root, "github.com/acme/restored/.git"), { recursive: true });
+  await put("github.com/acme/restored/.gitignore", ".agents/skills/\n");
+  await put(
+    "github.com/acme/restored/skills-lock.json",
+    '{"version":1,"skills":{"pdf":{"source":"anthropics/skills","sourceType":"github","computedHash":"0"}}}',
+  );
+
+  // github.com/acme/foreign: canonical shape but AGENTS.md is owned by another generator
+  await mkdir(join(root, "github.com/acme/foreign/.git"), { recursive: true });
+  await put(
+    "github.com/acme/foreign/AGENTS.md",
+    "<!-- managed by ruler; do not edit -->\n# Foreign\n",
+  );
+  await put("github.com/acme/foreign/CLAUDE.md", "@AGENTS.md\n");
+
+  // the pack repository: packs/base (block + one managed file), packs/frontend, subscriptions
+  await put("packs/base/AGENTS.md", `${PACK_BODY}\n`, packsRoot);
+  await put("packs/base/.cursor/skills/review/SKILL.md", SKILL_MD, packsRoot);
+  await put("packs/frontend/AGENTS.md", "React rules.\n", packsRoot);
+  await put(
+    "subscriptions.json",
+    JSON.stringify({
+      base: ["acme/canonical", "acme/both", "acme/empty", "acme/blocked", "acme/foreign"],
+      frontend: ["acme/canonical"],
+    }),
+    packsRoot,
+  );
+  await put(".git/HEAD", "ref: refs/heads/main\n", packsRoot);
+  await put(".git/refs/heads/main", `${PACK_REV}\n`, packsRoot);
 });
 
 afterAll(async () => {
   await rm(root, { recursive: true, force: true });
+  await rm(packsRoot, { recursive: true, force: true });
 });
 
 const run = <A, E>(effect: Effect.Effect<A, E, BunServices.BunServices>) =>
@@ -96,9 +195,12 @@ describe("walk", () => {
     );
 
     expect([...byName.keys()].sort()).toEqual([
+      "github.com/acme/blocked",
       "github.com/acme/both",
       "github.com/acme/canonical",
       "github.com/acme/empty",
+      "github.com/acme/foreign",
+      "github.com/acme/restored",
     ]);
     expect(byName.get("github.com/acme/canonical")).toEqual([
       ".cursor/rules/ui.mdc",
@@ -111,6 +213,22 @@ describe("walk", () => {
       "packages/x/AGENTS.md",
     ]);
     expect(byName.get("github.com/acme/empty")).toEqual([]);
+  });
+
+  test("collects skill directories and the skills lock without treating SKILL.md as a rule", async () => {
+    const repos = await run(walk(root));
+    const blocked = repos.find((r) => r.root.endsWith("/acme/blocked"));
+    expect(blocked?.files.map((f) => f.relativePath)).toEqual(["AGENTS.md", "CLAUDE.md"]);
+    expect(blocked?.skills.map((s) => `${s.agentDir}:${s.name}`)).toEqual([
+      ".agents:review",
+      ".claude:review",
+      ".cursor:review",
+      ".cursor:Untracked",
+    ]);
+    expect(blocked?.skillsLockPath).toBe(join(root, "github.com/acme/blocked/skills-lock.json"));
+    const canonical = repos.find((r) => r.root.endsWith("/acme/canonical"));
+    expect(canonical?.skills).toEqual([]);
+    expect(canonical?.skillsLockPath).toBeNull();
   });
 });
 
@@ -142,12 +260,111 @@ describe("scan", () => {
       "acme/canonical/AGENTS.md",
     ]);
 
-    expect(report.totals.repos).toBe(3);
-    expect(report.totals.reposWithInstructions).toBe(2);
-    expect(report.totals.shapes["agents-canonical"]).toBe(1);
+    expect(report.totals.repos).toBe(6);
+    expect(report.totals.reposWithInstructions).toBe(4);
+    expect(report.totals.shapes["agents-canonical"]).toBe(3);
     expect(report.totals.shapes["both-full"]).toBe(1);
-    expect(report.totals.shapes.none).toBe(1);
+    expect(report.totals.shapes.none).toBe(2);
     expect(report.personal).toBeNull();
+    expect(report.distribution).toBeNull();
+  });
+
+  test("detects managed blocks, malformed markers, and skills drift per repository", async () => {
+    const report = await run(scan(root));
+    const blocked = report.repos.find((r) => r.name === "acme/blocked");
+    const canonical = report.repos.find((r) => r.name === "acme/canonical");
+
+    expect(
+      blocked?.blocks.map((b) => `${b.source}@${b.file}:${b.line}-${b.endLine}:${b.modified}`),
+    ).toEqual(["base@AGENTS.md:3-5:false", "frontend@AGENTS.md:7-9:true"]);
+    expect(blocked?.blocks[0]?.rev).toBe("aaaaaaa");
+    expect(blocked?.blockIssues.map((i) => `${i.kind}@${i.file}:${i.line}`)).toEqual([
+      "malformed-marker@AGENTS.md:11",
+    ]);
+    expect(canonical?.blocks).toEqual([]);
+    expect(canonical?.blockIssues).toEqual([]);
+
+    const foreign = report.repos.find((r) => r.name === "acme/foreign");
+    expect(foreign?.blockIssues.map((i) => `${i.kind}@${i.file}:${i.line}`)).toEqual([
+      "foreign-marker@AGENTS.md:1",
+    ]);
+
+    const skills = blocked?.skills;
+    expect(
+      skills?.skills.map((s) => `${s.relativePath}:${s.files}:${s.hash === SKILL_HASH}`),
+    ).toEqual([
+      ".agents/skills/review:2:true",
+      ".cursor/skills/review:2:false",
+      ".cursor/skills/Untracked:1:false",
+    ]);
+    // The symlinked `.claude` copy folds into the `.agents` directory it points at.
+    expect(
+      skills?.skills.map((s) => `${s.relativePath} ${s.links.join(",")} ${s.lockState}`),
+    ).toEqual([
+      ".agents/skills/review .claude/skills/review match",
+      ".cursor/skills/review  differs",
+      ".cursor/skills/Untracked  unlocked",
+    ]);
+    expect(skills?.lock?.map((e) => e.name)).toEqual(["gone", "review"]);
+    expect(skills?.issues.map((i) => `${i.kind}:${i.skill}@${i.file}:${i.line}`)).toEqual([
+      "invalid-frontmatter:Untracked@.cursor/skills/Untracked/SKILL.md:1",
+      "missing:gone@skills-lock.json:9",
+    ]);
+
+    // A lock entry whose gitignored directory is absent in a fresh checkout is not a finding.
+    const restored = report.repos.find((r) => r.name === "acme/restored");
+    expect(restored?.skills.lock?.map((e) => e.name)).toEqual(["pdf"]);
+    expect(restored?.skills.issues).toEqual([]);
+
+    expect(report.totals.blocks).toBe(2);
+    expect(report.totals.modifiedBlocks).toBe(1);
+    expect(report.totals.skills).toBe(3);
+    expect(report.totals.skillIssues).toBe(2);
+  });
+
+  test("reports pack distribution status for every repository when --packs is given", async () => {
+    const report = await run(scan(root, { packs: packsRoot }));
+    const distribution = report.distribution;
+    expect(distribution).not.toBeNull();
+    expect(
+      distribution?.packs.map((p) => `${p.id}:${p.rev}:${p.files.length}:${p.subscribers.length}`),
+    ).toEqual([`base:${PACK_REV}:2:5`, `frontend:${PACK_REV}:1:1`]);
+
+    expect(
+      distribution?.entries.map(
+        (e) => `${e.pack} ${e.repo} ${e.status} ${e.file ?? "-"}:${e.line ?? "-"}`,
+      ),
+    ).toEqual([
+      "base acme/blocked outdated AGENTS.md:3",
+      "base acme/both blocked AGENTS.md:1",
+      "base acme/foreign blocked AGENTS.md:1",
+      "base acme/canonical eligible AGENTS.md:-",
+      "base acme/empty eligible AGENTS.md:-",
+      "base acme/restored not-subscribed -:-",
+      "frontend acme/blocked modified AGENTS.md:7",
+      "frontend acme/canonical eligible AGENTS.md:-",
+      "frontend acme/both not-subscribed -:-",
+      "frontend acme/empty not-subscribed -:-",
+      "frontend acme/foreign not-subscribed -:-",
+      "frontend acme/restored not-subscribed -:-",
+    ]);
+    const outdated = distribution?.entries.find((e) => e.status === "outdated");
+    expect(outdated?.message).toBe(`rev aaaaaaa -> ${PACK_REV.slice(0, 7)}`);
+    expect(distribution?.counts).toEqual({
+      current: 0,
+      outdated: 1,
+      modified: 1,
+      eligible: 3,
+      blocked: 2,
+      "not-subscribed": 5,
+    });
+
+    const text = renderText(report);
+    expect(text).toContain("Pack distribution");
+    expect(text).toContain("acme/foreign");
+    expect(text).toContain("AGENTS.md:1  another tool marks this file");
+    expect(text).toContain("AGENTS.md:7-9");
+    expect(text).toContain("MODIFIED");
   });
 
   test("verifies script and path references against the repository", async () => {
