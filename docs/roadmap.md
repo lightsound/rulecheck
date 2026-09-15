@@ -2,7 +2,7 @@
 
 Ordered next steps. Each step is small enough for one chat session and ends with a check against
 the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
-[decisions.md](decisions.md) (D4 to D7); tool facts in [tool-behavior.md](tool-behavior.md).
+[decisions.md](decisions.md) (D4 to D8); tool facts in [tool-behavior.md](tool-behavior.md).
 
 ## Current state (2026-09-15)
 
@@ -21,11 +21,15 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
 - Wrap the remaining body in the managed-block markers so the file *is* the block body's source.
 - Done when: the pack references no path or command outside the target repository.
 
-## Step 2: Block detection and distribution report (rulecheck, read-only)
+## Step 2: Block and Skills detection, distribution report (rulecheck, read-only)
 
 - `src/domain/block.ts`: parse `<!-- agent-rules:begin source= rev= hash= -->` ... `end` from an
   `AGENTS.md`; return blocks with `source`, `rev`, `hash`, body, `line` range; recompute hash and
   flag `modified`. Pure, tested.
+- Skills inventory (D8): list `SKILL.md` directories (`.cursor/skills/*`, `.claude/skills/*`,
+  `.agents/skills/*`) per repository and parse `skills-lock.json` (source + hash) when present;
+  report skills installed without a lock entry and lock entries whose directory is missing.
+  Frontmatter validity follows `skills-ref`; no rules of our own.
 - Status per repository per pack: `current` / `outdated` / `modified` / `eligible` (shape allows
   insertion, no block) / `blocked` (shape needs a human: `both have content`, foreign managed
   markers) / `not subscribed`. Subscription source for now: a list in the pack repo
@@ -42,6 +46,8 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
   `AGENTS.md` (with block) and `CLAUDE.md` (`@AGENTS.md`), open a PR. Never touch local checkouts.
   `--dry-run` prints the diff.
 - Shape normalization in the same PR for deterministic shapes (D6). Blocked shapes refuse.
+- A pack is a set of files (D8): the first pack carries only the `AGENTS.md` block; whole managed
+  files (skill directories) follow once Step 2 reports their inventory.
 - Done when: one PR on a solo lightsound repo, merged, and the next `scan` shows `current`.
 
 ## Step 4: Remove the interim wiring

@@ -20,7 +20,7 @@ tree of repositories.
 
 | Name | What it does | Areas | Maturity | Gap versus rulecheck |
 |---|---|---|---|---|
-| [unrot](https://github.com/unrot-dev/unrot) (npm, formerly `agent-config-linter`) | Static linter: staleness (git), oversized, contradictions, broken refs, personal content in committed files, eager `@`-embeds. `unrot fleet gh:<org>` shallow-clones every repo of an org and prints one health report with letter grades, JSON output. Read-only. | A1 | 1 star, pushed 2026-09-10, v0.6.0 | Closest in *shape*: multi-repo, read-only, `file:line`. No shape classification (`AGENTS.md` / `CLAUDE.md` wrapper), no cross-repo duplicate detection, no per-tool budget model, no personal layer. Its [Phase 3 issue](https://github.com/unrot-dev/unrot/issues/5) sketches tagged shared blocks + source repo + PR-only sync, i.e. D4/D6, but nothing is built and the project has no visible adoption. |
+| [unrot](https://github.com/unrot-dev/unrot) (npm, formerly `agent-config-linter`) | Static linter: staleness (git), oversized, contradictions, broken refs, personal content in committed files, eager `@`-embeds. `unrot fleet gh:<org>` shallow-clones every repo of an org and prints one health report with letter grades, JSON output. Read-only. | A1 | 1 star, pushed 2026-09-10, v0.6.0, no visible adoption | Closest prior art in *shape*: multi-repo, read-only, `file:line`. No shape classification (`AGENTS.md` / `CLAUDE.md` wrapper), no cross-repo duplicate detection, no per-tool budget model, no personal layer. Its [Phase 3 issue](https://github.com/unrot-dev/unrot/issues/5) sketches tagged shared blocks + source repo + PR-only sync, which independently confirms the D4/D6 direction; nothing is built. Judged inactive: worth reading, not a competitor. |
 | [agnix](https://github.com/agent-sh/agnix) | 454 rules across Claude Code, Codex, Cursor, Copilot, Gemini, Cline, MCP, `SKILL.md`; autofix; LSP; IDE plugins; GitHub Action. | A1 | 413 stars, pushed 2026-09-14 | Deepest single-repo validator (frontmatter, hooks, MCP schema). Single repo only, no budget or duplicate view across repos, no distribution. rulecheck should not compete on rule count. |
 | [AgentLint](https://github.com/0xmariowu/AgentLint) (`agentlint-ai`) | Claude Code plugin + CLI auditing `AGENTS.md`, `CLAUDE.md`, `.cursor/rules`, Copilot instructions, CI and hooks as "the harness". | A1 | 56 stars, pushed 2026-07-24 | Runs inside one repo; LLM-assisted judgments. No multi-repo, no distribution. |
 | [agentslint](https://github.com/toshi0607/agentslint) | CI linter: broken refs, stale commands, token budget (default 4k), `SKILL.md` frontmatter, `.claude/settings.json` schema, secrets. SARIF output. Explicitly precision-first. | A1 | 0 stars, pushed 2026-09-13 | Same precision philosophy as rulecheck, single repo, no shape/duplicate/distribution. Its SARIF and `github` formats are worth copying later for CI use. |
@@ -79,11 +79,11 @@ none knows what a managed block, a wrapper file, or a token budget is.
 
 ## Verdict
 
-**Direct competitor:** none shipping. The closest is unrot: read-only fleet scan already, and a
-Phase 3 plan that is D4/D6 almost verbatim (tagged blocks, source repo, PR-only, per-block opt-in).
-It has one star and no timeline. agents-md-sync ships PR-based cross-repo sync but owns the whole
-file and works from local checkouts. Everything else is either single-repo lint (agnix and a dozen
-smaller ones) or intra-repo format fan-out (ruler, rulesync), which D2 makes unnecessary.
+**Direct competitor:** none. The closest prior art is unrot (read-only fleet scan, and a Phase 3
+sketch that matches D4/D6), but it is inactive and unadopted, so it is a reference point rather
+than a threat. agents-md-sync ships PR-based cross-repo sync but owns the whole file and works from
+local checkouts. Everything else is either single-repo lint (agnix and a dozen smaller ones) or
+intra-repo format fan-out (ruler, rulesync), which D2 makes unnecessary.
 
 **Whitespace:** the combination rulecheck is building does not exist anywhere:
 
@@ -116,6 +116,7 @@ smaller ones) or intra-repo format fan-out (ruler, rulesync), which D2 makes unn
   than reimplementing retries, rate limits and merge handling.
 
 **Risk to watch:** a vendor adding "org instructions committed to repos as PRs" would erase point 4
-for its own users; unrot or agents-md-sync adopting a marked-block model would erase point 2. Both
-are cheap for them to build; rulecheck's defensible part is the status model and the
-measure-then-write discipline, so those should land first (roadmap steps 2 and 3).
+for its own users; a maintained syncer (agents-md-sync, or a Renovate `file` manager) adopting a
+marked-block model would erase point 2. Both are cheap to build; rulecheck's defensible part is
+the status model and the measure-then-write discipline, so those should land first (roadmap
+steps 2 and 3). Decisions taken from this survey are recorded as D8 in [decisions.md](decisions.md).
