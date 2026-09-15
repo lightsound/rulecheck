@@ -295,7 +295,7 @@ export function pullRequestText(
     "Changes:",
     ...plan.actions.map((action) => `- ${action}`),
     "",
-    "Checks passed before this pull request was opened: the repository is subscribed, its root pair is normalized to `AGENTS.md` canonical by the changes above, and the block adds no reference to a script or path that does not exist here.",
+    "Checks passed before this pull request was opened: the repository is subscribed, its root pair is `AGENTS.md` canonical (already, or by the changes above), and the block adds no reference to a script or path that does not exist here.",
   ].join("\n");
   return { title, body };
 }

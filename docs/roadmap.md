@@ -115,8 +115,9 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
   `AGENTS.md` → wrapper only; otherwise its text is appended under `## Merged from CLAUDE.md`
   before any managed block, then the wrapper). The status row and the pull request name the
   normalization; the planned tree must still measure `current`; the root pair counts as one file
-  when findings are compared, so rot moved out of `CLAUDE.md` is not mistaken for rot the pack
-  introduced while rot elsewhere still does not excuse the block. Covered by
+  when findings are compared, only for plans that move text between its files, so rot moved out
+  of `CLAUDE.md` is not mistaken for rot the pack introduced while rot elsewhere, or in the pair
+  when nothing moves, still does not excuse the block. Covered by
   `tests/fake-github.ts` runs (merge, wrapper, foreign marker in either file, pre-existing rot);
   no live run yet, the first `both-full` subscriber gets it.
 - Remaining: after the block is in the repositories used daily, delete the pack import from

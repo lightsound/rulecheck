@@ -268,11 +268,15 @@ preconditions D10 lists (two `CLAUDE.md` files, files contradicting the shape). 
 plan is unchanged: the planned tree must read `agents-canonical` and `current`.
 
 One reader change follows: the "new finding" check treats the root pair (`AGENTS.md`,
-`CLAUDE.md`, `.claude/CLAUDE.md`) as one file when comparing findings. Moving text from
-`CLAUDE.md` into `AGENTS.md` (`claude-only`, `claude-canonical`, and now the merge) carries any
-rot that text already had into a different file of the pair, and that rot is the repository's,
-not the pack's. Files outside the pair keep their own identity: a stale reference in a nested
-`AGENTS.md` or a rule file does not excuse the same reference inside the block.
+`CLAUDE.md`, `.claude/CLAUDE.md`) as one file when comparing findings, but only for plans that
+move text between files of the pair (`claude-only`, `claude-canonical`, and now the merge).
+Moving text from `CLAUDE.md` into `AGENTS.md` carries any rot that text already had into a
+different file of the pair, and that rot is the repository's, not the pack's. Where nothing
+moves (an `outdated` block being replaced, a plain insert into a canonical `AGENTS.md`), each
+file keeps its identity, so a stale reference sitting in `CLAUDE.md` does not excuse the same
+reference in a new block body. Files outside the pair always keep their own identity: a stale
+reference in a nested `AGENTS.md` or a rule file does not excuse the same reference inside the
+block.
 
 A `CLAUDE.md` that is an `@AGENTS.md` line plus up to three short lines is still a wrapper to the
 scanner (`agents-canonical`), so those lines are not merged; that threshold predates this decision
