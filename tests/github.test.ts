@@ -368,6 +368,27 @@ describe("sync", () => {
     expect(github.calls.filter((c) => c.includes("acme/canonical"))).toEqual([]);
   });
 
+  test("refuses to rewrite an agent-rules/<pack> branch whose tip was not written by rulecheck", async () => {
+    const { github, run, runSync } = world();
+    const repo = { owner: "acme", name: "canonical" };
+    // A human pushed a branch with the tool's name.
+    const main = (await run(github.service.getRef(repo, "heads/main"))) ?? "";
+    const tree = (await run(github.service.getCommit(repo, main))).tree;
+    const human = await run(
+      github.service.createCommit(repo, { message: "wip: my own rules", tree, parents: [main] }),
+    );
+    await run(github.service.setRef(repo, "heads/agent-rules/base", human, { create: true }));
+    github.calls.length = 0;
+
+    const result = await runSync({ repo: "acme/canonical" });
+    expect(result).toMatchObject({
+      kind: "refused",
+      message: `acme/canonical: branch \`agent-rules/base\` exists but its tip commit (${human.slice(0, 7)}) was not written by rulecheck; delete or rename the branch first`,
+    });
+    expect(github.calls).toEqual([]);
+    expect(await run(github.service.getRef(repo, "heads/agent-rules/base"))).toBe(human);
+  });
+
   test("refuses unknown packs, bad targets, and missing branches", async () => {
     const { runSync } = world();
     expect(await runSync({ repo: "acme/canonical", pack: "nope" })).toMatchObject({
@@ -446,6 +467,26 @@ describe("makeGh", () => {
         stdout: "",
         stderr: "gh: Bad credentials (HTTP 401)",
       },
+      "repos/acme/r/git/commits/silent": { exitCode: 3, stdout: "not json", stderr: "" },
+      "repos/acme/r/git/commits/c1": {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          sha: "c1",
+          tree: { sha: "t1" },
+          message: "chore(agent-rules): add",
+        }),
+        stderr: "",
+      },
+      "repos/acme/r/git/blobs/utf8": {
+        exitCode: 0,
+        stdout: JSON.stringify({ content: "plain", encoding: "utf-8" }),
+        stderr: "",
+      },
+      "repos/acme/r/git/blobs/odd": {
+        exitCode: 0,
+        stdout: JSON.stringify({ content: "x", encoding: "rot13" }),
+        stderr: "",
+      },
     });
     const gh = makeGh(run);
     const runP = <A, E>(e: Effect.Effect<A, E>) => Effect.runPromise(e);
@@ -485,6 +526,16 @@ describe("makeGh", () => {
     });
     const unknown = await runP(gh.getCommit(repo, "nowhere").pipe(Effect.flip));
     expect(unknown.status).toBeNull();
+    const silent = await runP(gh.getCommit(repo, "silent").pipe(Effect.flip));
+    expect(silent.message).toBe("gh exited with 3");
+    expect(await runP(gh.getCommit(repo, "c1"))).toEqual({
+      tree: "t1",
+      message: "chore(agent-rules): add",
+    });
+    expect(new TextDecoder().decode(await runP(gh.getBlob(repo, "utf8")))).toBe("plain");
+    expect((await runP(gh.getBlob(repo, "odd").pipe(Effect.flip))).message).toContain(
+      "unsupported encoding",
+    );
   });
 
   test("a missing gh binary is a GitHubError, not a crash", async () => {

@@ -1,6 +1,6 @@
 import { Data, Effect, FileSystem, type Path } from "effect";
 import type { PlatformError } from "effect/PlatformError";
-import { planSync, pullRequestText, type SyncPlan } from "../domain/sync.ts";
+import { isRulecheckCommit, planSync, pullRequestText, type SyncPlan } from "../domain/sync.ts";
 import type { Finding, Pack, PackStatusEntry, RepoReport } from "../domain/types.ts";
 import {
   GitHub,
@@ -24,7 +24,8 @@ import { scan } from "../scan/scan.ts";
 /**
  * The write path (D10): measure the target on GitHub, plan the normalized root pair, measure the
  * planned tree, and only then create one commit, one branch (`agent-rules/<pack>`), and one pull
- * request through the GitHub API. Local checkouts are never touched.
+ * request through the GitHub API. An existing branch of that name is rewritten only when its tip
+ * commit was written by rulecheck. Local checkouts are never touched.
  */
 
 export interface SyncOptions {
@@ -223,9 +224,19 @@ const write = (
   status: PackStatusEntry,
 ): Effect.Effect<
   { commit: string; pullRequest: PullRequest; pullRequestCreated: boolean },
-  GitHubError
+  GitHubError | SyncRefused
 > =>
   Effect.gen(function* () {
+    const existing = yield* github.getRef(target, `heads/${branch}`);
+    if (existing !== null) {
+      const tip = yield* github.getCommit(target, existing);
+      if (!isRulecheckCommit(tip.message)) {
+        return yield* new SyncRefused({
+          message: `${repositoryName(target)}: branch \`${branch}\` exists but its tip commit (${existing.slice(0, 7)}) was not written by rulecheck; delete or rename the branch first`,
+        });
+      }
+    }
+
     const text = pullRequestText(plan, pack, status);
     const baseCommit = yield* github.getCommit(target, baseSha);
     const tree = yield* github.createTree(
@@ -238,7 +249,6 @@ const write = (
       tree,
       parents: [baseSha],
     });
-    const existing = yield* github.getRef(target, `heads/${branch}`);
     yield* github.setRef(target, `heads/${branch}`, commit, { create: existing === null });
 
     const open = yield* github.listOpenPullRequests(target, `${target.owner}:${branch}`);

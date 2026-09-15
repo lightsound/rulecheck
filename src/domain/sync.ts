@@ -209,6 +209,17 @@ function insertBlock(
   return { content: `${head}\n\n${rendered}\n`, line: head.split("\n").length + 2 };
 }
 
+/**
+ * Every commit rulecheck writes starts with this prefix. Before the tool-owned branch is
+ * force-moved, its tip commit must carry it; otherwise a human or another tool put the branch
+ * there and the sync refuses (D10).
+ */
+export const COMMIT_PREFIX = "chore(agent-rules):";
+
+export function isRulecheckCommit(message: string): boolean {
+  return message.startsWith(COMMIT_PREFIX);
+}
+
 /** Title and body of the pull request that carries a plan. */
 export function pullRequestText(
   plan: SyncPlan,
@@ -217,7 +228,7 @@ export function pullRequestText(
 ): { title: string; body: string } {
   const block = pack.files.find((f) => f.kind === "agents-block");
   const verb = status.status === "outdated" ? "update" : "add";
-  const title = `chore(agent-rules): ${verb} \`${pack.id}\` instruction block`;
+  const title = `${COMMIT_PREFIX} ${verb} \`${pack.id}\` instruction block`;
   const body = [
     `Managed by rulecheck. This branch is rewritten on every sync; edit the pack \`${pack.id}\`, not this branch.`,
     "",

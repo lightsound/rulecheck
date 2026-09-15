@@ -52,7 +52,7 @@ export const resolvePacks = (
     const remote = parseRepositorySpec(spec);
     if (remote === null) {
       return yield* new PackSourceError({
-        message: `--packs \`${spec}\` is neither a directory nor owner/repo[@ref]`,
+        message: `--packs \`${spec}\` is neither a directory (${resolved}) nor owner/repo[@ref]`,
       });
     }
     const github = yield* GitHub;

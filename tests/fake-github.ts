@@ -118,7 +118,7 @@ export function fakeGitHub(input: Readonly<Record<string, FakeRepoInput>>): Fake
     getCommit: (repo, sha) =>
       repoOf("getCommit", repo).pipe(
         Effect.flatMap(() => get("getCommit", sha, "commit")),
-        Effect.map((c) => ({ tree: c.tree })),
+        Effect.map((c) => ({ tree: c.tree, message: c.message })),
       ),
     getTree: (repo, treeSha) =>
       repoOf("getTree", repo).pipe(

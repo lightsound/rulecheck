@@ -62,7 +62,7 @@ export interface GitHubService {
   readonly getCommit: (
     repo: RepositoryRef,
     sha: string,
-  ) => Effect.Effect<{ readonly tree: string }, GitHubError>;
+  ) => Effect.Effect<{ readonly tree: string; readonly message: string }, GitHubError>;
   /** Every entry below `treeSha`, recursively. */
   readonly getTree: (
     repo: RepositoryRef,

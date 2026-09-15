@@ -108,7 +108,7 @@ export function makeGh(run: GhRunner): GitHubService {
                 status: null,
                 message: "commit has no tree",
               })
-            : Effect.succeed({ tree });
+            : Effect.succeed({ tree, message: str(field(data, "message")) ?? "" });
         }),
       ),
 
@@ -124,9 +124,20 @@ export function makeGh(run: GhRunner): GitHubService {
 
     getBlob: (repo, sha) =>
       api("getBlob", "GET", `${repos(repo)}/git/blobs/${sha}`).pipe(
-        Effect.map((data) => {
+        Effect.flatMap((data) => {
           const content = str(field(data, "content")) ?? "";
-          return Uint8Array.from(Buffer.from(content.replace(/\n/g, ""), "base64"));
+          const encoding = str(field(data, "encoding")) ?? "base64";
+          if (encoding === "base64") {
+            return Effect.succeed(
+              Uint8Array.from(Buffer.from(content.replace(/\n/g, ""), "base64")),
+            );
+          }
+          if (encoding === "utf-8") return Effect.succeed(new TextEncoder().encode(content));
+          return new GitHubError({
+            operation: "getBlob",
+            status: null,
+            message: `blob ${sha} uses unsupported encoding \`${encoding}\``,
+          });
         }),
       ),
 
@@ -187,9 +198,10 @@ function parseError(result: GhResult): ApiError {
   } catch {
     message = null;
   }
+  const stderr = result.stderr.trim();
   return {
     status: status === undefined ? null : Number(status),
-    message: message ?? result.stderr.trim() ?? `gh exited with ${result.exitCode}`,
+    message: message ?? (stderr.length > 0 ? stderr : `gh exited with ${result.exitCode}`),
   };
 }
 

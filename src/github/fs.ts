@@ -52,9 +52,9 @@ export const repositorySnapshot = (
     files.set(`${mount}/.git/HEAD`, textEntry(`${sha}\n`));
     for (const entry of tree.entries) {
       if (entry.type !== "blob") continue;
-      files.set(`${mount}/${entry.path}`, {
-        size: 0,
-        read: github.getBlob(repo, entry.sha).pipe(
+      // Both scan passes and the plan read the same few files; fetch each blob once.
+      const read = yield* Effect.cached(
+        github.getBlob(repo, entry.sha).pipe(
           Effect.mapError((error) =>
             systemError({
               _tag: "Unknown",
@@ -65,7 +65,8 @@ export const repositorySnapshot = (
             }),
           ),
         ),
-      });
+      );
+      files.set(`${mount}/${entry.path}`, { size: 0, read });
     }
     return files;
   });
