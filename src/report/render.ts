@@ -188,6 +188,11 @@ function renderRepo(repo: RepoReport): string[] {
       `      ${pad(`${block.file}:${block.line}-${block.endLine}`, 52)} block ${block.source}${rev}${state}`,
     );
   }
+  for (const region of repo.foreignRegions) {
+    lines.push(
+      `      ${pad(`${region.file}:${region.line}-${region.endLine}`, 52)} region ${region.name} (another tool; left untouched)`,
+    );
+  }
   for (const skill of repo.skills.skills) {
     const lock = skill.lockState === null ? "" : `  [${LOCK_STATE_LABEL[skill.lockState]}]`;
     const links =

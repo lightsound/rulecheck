@@ -8,6 +8,7 @@ import type {
   BothFullNormalization,
   CanonicalShape,
   DuplicateGroup,
+  ForeignRegion,
   InstructionFile,
   ManagedBlock,
   PackDistribution,
@@ -101,20 +102,25 @@ const ROOT_PAIR = new Set(["AGENTS.md", "CLAUDE.md", ".claude/CLAUDE.md"]);
 function detectBlocks(analyzed: ReadonlyArray<AnalyzedFile>): {
   blocks: ManagedBlock[];
   blockIssues: BlockIssue[];
+  foreignRegions: ForeignRegion[];
 } {
   const blocks: ManagedBlock[] = [];
   const blockIssues: BlockIssue[] = [];
+  const foreignRegions: ForeignRegion[] = [];
   for (const { file, content } of analyzed) {
     if (file.kind !== "agents-md" && file.kind !== "claude-md") continue;
     const parsed = parseBlocks(file.relativePath, content);
     blocks.push(...parsed.blocks);
     blockIssues.push(...parsed.issues);
     if (ROOT_PAIR.has(file.relativePath)) {
-      blockIssues.push(...findForeignMarkers(file.relativePath, content));
+      const foreign = findForeignMarkers(file.relativePath, content);
+      blockIssues.push(...foreign.issues);
+      foreignRegions.push(...foreign.regions);
     }
   }
   blockIssues.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
-  return { blocks, blockIssues };
+  foreignRegions.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
+  return { blocks, blockIssues, foreignRegions };
 }
 
 const analyzeRepo = (
@@ -130,7 +136,7 @@ const analyzeRepo = (
     const files = analyzed.map((a) => a.file);
     const contents = new Map(analyzed.map((a) => [a.file.relativePath, a.content] as const));
     const findings = yield* verifyReferences(fs, path, repo.root, repo.packageJsonPaths, analyzed);
-    const { blocks, blockIssues } = detectBlocks(analyzed);
+    const { blocks, blockIssues, foreignRegions } = detectBlocks(analyzed);
     const skills = yield* inventorySkills(fs, path, repo);
 
     const shape = classifyShape(files);
@@ -144,6 +150,7 @@ const analyzeRepo = (
       findings,
       blocks,
       blockIssues,
+      foreignRegions,
       skills,
     } satisfies RepoReport;
   });

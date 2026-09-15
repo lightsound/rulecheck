@@ -100,7 +100,7 @@ describe("syncAll", () => {
       /acme\/modified\s+base\s+refused\s+acme\/modified AGENTS.md:3: block `base` was edited in place/,
     );
     expect(text).toMatch(
-      /acme\/foreign\s+base\s+refused\s+acme\/foreign AGENTS.md:1: another tool marks this file/,
+      /acme\/foreign\s+base\s+refused\s+acme\/foreign AGENTS.md:1: another tool marks the whole file/,
     );
     expect(text).toMatch(
       /acme\/gone\s+base\s+failed\s+GitHub getRepository failed \(HTTP 404\): Not Found/,

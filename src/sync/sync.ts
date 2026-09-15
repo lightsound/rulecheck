@@ -1,5 +1,6 @@
 import { Data, Effect, FileSystem, type Path, type Semaphore } from "effect";
 import type { PlatformError } from "effect/PlatformError";
+import { foreignRegionDrift } from "../domain/block.ts";
 import { isRulecheckCommit, planSync, pullRequestText, type SyncPlan } from "../domain/sync.ts";
 import type { Finding, Pack, PackStatusEntry, RepoReport } from "../domain/types.ts";
 import {
@@ -194,6 +195,18 @@ export const syncTarget = (
       return yield* new SyncRefused({
         message: `${name}: the planned ${plan.blockFile} would read as ${after.entry.status} (${after.entry.message ?? "no detail"}); refusing to write`,
       });
+    }
+    // D15: the planner already asserted this on its changes; assert it again on the planned tree
+    // as scanned, so the promise holds for what is written, not for what was intended.
+    for (const path of ROOT_PAIR) {
+      const drift = foreignRegionDrift(
+        path,
+        before.contents.get(path) ?? null,
+        after.contents.get(path) ?? null,
+      );
+      if (drift !== null) {
+        return yield* new SyncRefused({ message: `${name}: ${drift}; refusing to write` });
+      }
     }
     const introduced = newFindings(
       before.repo.findings,

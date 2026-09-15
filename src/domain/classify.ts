@@ -1,4 +1,4 @@
-import { parseBlocks } from "./block.ts";
+import { findForeignMarkers, parseBlocks } from "./block.ts";
 import type {
   BothFullNormalization,
   CanonicalShape,
@@ -241,8 +241,9 @@ export function claudeContentBeyondImport(claudeContent: string): string {
  * Decide how a `both-full` pair is normalized (D12). `wrapper` only when the text CLAUDE.md adds
  * appears verbatim in AGENTS.md (a byte-level substring after line-ending normalization), so no
  * sentence is dropped on a guess; every other pair is merged and left for review. Managed blocks
- * in AGENTS.md do not count as a place where the text survives: their bodies belong to a pack and
- * are replaced whole on the next update.
+ * and other tools' regions in AGENTS.md do not count as a place where the text survives: a block
+ * body belongs to a pack and a region to its generator, and both are replaced whole on their next
+ * update (D15).
  */
 export function classifyBothFull(
   agentsContent: string,
@@ -253,14 +254,17 @@ export function classifyBothFull(
   return contentOutsideBlocks(agentsContent).includes(extra) ? "wrapper" : "merge";
 }
 
-/** `content` with every managed block's lines (markers included) blanked, line count preserved. */
+/** `content` with the lines of every managed block and foreign region (markers included) blanked, line count preserved. */
 function contentOutsideBlocks(content: string): string {
   const normalized = content.replace(/\r\n/g, "\n");
-  const blocks = parseBlocks("", normalized).blocks;
-  if (blocks.length === 0) return normalized;
+  const owned = [
+    ...parseBlocks("", normalized).blocks,
+    ...findForeignMarkers("", normalized).regions,
+  ];
+  if (owned.length === 0) return normalized;
   const lines = normalized.split("\n");
-  for (const block of blocks) {
-    for (let index = block.line - 1; index < block.endLine; index += 1) lines[index] = "";
+  for (const span of owned) {
+    for (let index = span.line - 1; index < span.endLine; index += 1) lines[index] = "";
   }
   return lines.join("\n");
 }

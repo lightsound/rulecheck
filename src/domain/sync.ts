@@ -1,4 +1,4 @@
-import { normalizeBody, parseBlocks } from "./block.ts";
+import { foreignRegionDrift, normalizeBody, parseBlocks } from "./block.ts";
 import { classifyBothFull, claudeContentBeyondImport } from "./classify.ts";
 import type { FileChange } from "./diff.ts";
 import type {
@@ -60,16 +60,27 @@ export function planSync(input: SyncPlanInput): SyncPlan | SyncRefusal {
   const rendered = renderBlock(input.pack);
   if (rendered === null) return { reason: `pack \`${input.pack.id}\` has no AGENTS.md block` };
 
+  let plan: SyncPlan | SyncRefusal;
   switch (input.status.status) {
     case "outdated":
-      return planUpdate(input, rendered);
+      plan = planUpdate(input, rendered);
+      break;
     case "eligible":
-      return planInsert(input, rendered);
+      plan = planInsert(input, rendered);
+      break;
     default:
       return {
         reason: `status is ${input.status.status}; only eligible and outdated repositories are written`,
       };
   }
+  if ("reason" in plan) return plan;
+
+  // D15: whatever the plan did, every region another tool owns must read byte for byte as before.
+  for (const change of plan.changes) {
+    const drift = foreignRegionDrift(change.path, change.before, change.after);
+    if (drift !== null) return { reason: `${drift}; refusing to plan` };
+  }
+  return plan;
 }
 
 function planUpdate(input: SyncPlanInput, rendered: string): SyncPlan | SyncRefusal {

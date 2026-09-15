@@ -108,9 +108,17 @@ function repo(
     files: [],
     blocks: [],
     blockIssues: [],
+    foreignRegions: [],
     ...overrides,
   };
 }
+
+const REGION = {
+  file: "AGENTS.md",
+  name: "generated:task-matrix",
+  line: 89,
+  endLine: 105,
+} as const;
 
 describe("classifyPackStatus", () => {
   test("current, outdated, modified from the block in the root file", () => {
@@ -271,6 +279,92 @@ describe("classifyPackStatus", () => {
       status: "not-subscribed",
       file: null,
     });
+  });
+
+  test("D15: well-formed regions in a kept AGENTS.md leave the row eligible or outdated", () => {
+    const regions = [REGION, { ...REGION, name: "convex-ai", line: 173, endLine: 185 }];
+    expect(
+      classifyPackStatus(
+        repo("acme/canonical", "agents-canonical", { foreignRegions: regions }),
+        base,
+      ),
+    ).toEqual({
+      repo: "acme/canonical",
+      pack: "base",
+      status: "eligible",
+      file: "AGENTS.md",
+      line: null,
+      message: "insert block into AGENTS.md; 2 foreign regions stay untouched",
+    });
+    expect(
+      classifyPackStatus(repo("acme/both", "both-full", { foreignRegions: [REGION] }), base)
+        .message,
+    ).toEndWith("insert block; 1 foreign region stays untouched");
+    // An outdated block outside the regions is replaced in place.
+    const outdated = repo("acme/canonical", "agents-canonical", {
+      blocks: [block("base", OLD_BODY)],
+      foreignRegions: regions,
+    });
+    expect(classifyPackStatus(outdated, base)).toMatchObject({
+      status: "outdated",
+      message: "rev 2222222 -> 1111111; 2 foreign regions stay untouched",
+    });
+  });
+
+  test("D15: a region in a file the plan moves, drops, or replaces blocks", () => {
+    const claudeRegion = { ...REGION, file: "CLAUDE.md", name: "convex-ai", line: 3, endLine: 9 };
+    const message =
+      "another tool owns lines 3-9 of CLAUDE.md (region `convex-ai`); the sync would rewrite that file";
+    // both-full: CLAUDE.md becomes the wrapper, so its region would be merged or dropped.
+    expect(
+      classifyPackStatus(repo("acme/both", "both-full", { foreignRegions: [claudeRegion] }), base),
+    ).toEqual({
+      repo: "acme/both",
+      pack: "base",
+      status: "blocked",
+      file: "CLAUDE.md",
+      line: 3,
+      message,
+    });
+    // claude-only / claude-canonical move the content file; a region in either root file blocks.
+    expect(
+      classifyPackStatus(
+        repo("acme/claude", "claude-only", { foreignRegions: [claudeRegion] }),
+        base,
+      ).status,
+    ).toBe("blocked");
+    expect(
+      classifyPackStatus(repo("acme/swap", "claude-canonical", { foreignRegions: [REGION] }), base),
+    ).toMatchObject({ status: "blocked", file: "AGENTS.md", line: 89 });
+    // The untouched wrapper may carry a region.
+    expect(
+      classifyPackStatus(
+        repo("acme/canonical", "agents-canonical", { foreignRegions: [claudeRegion] }),
+        base,
+      ).status,
+    ).toBe("eligible");
+  });
+
+  test("D15: an outdated block inside a region blocks at the region", () => {
+    const inside = repo("acme/canonical", "agents-canonical", {
+      blocks: [block("base", OLD_BODY, { line: 92, endLine: 95 })],
+      foreignRegions: [REGION],
+    });
+    expect(classifyPackStatus(inside, base)).toEqual({
+      repo: "acme/canonical",
+      pack: "base",
+      status: "blocked",
+      file: "AGENTS.md",
+      line: 89,
+      message:
+        "block at line 92 is outdated (rev 2222222 -> 1111111); it sits inside the region `generated:task-matrix` (lines 89-105) another tool owns",
+    });
+    // Current and modified blocks inside a region need no write: no block.
+    const current = repo("acme/canonical", "agents-canonical", {
+      blocks: [block("base", BODY, { line: 92, endLine: 95 })],
+      foreignRegions: [REGION],
+    });
+    expect(classifyPackStatus(current, base).status).toBe("current");
   });
 });
 
