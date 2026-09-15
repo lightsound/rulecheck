@@ -341,26 +341,26 @@ describe("scan", () => {
       "base acme/canonical eligible AGENTS.md:-",
       "base acme/empty eligible AGENTS.md:-",
       "base acme/restored not-subscribed -:-",
-      "frontend acme/blocked blocked AGENTS.md:11",
+      "frontend acme/blocked modified AGENTS.md:7",
       "frontend acme/canonical eligible AGENTS.md:-",
       "frontend acme/both not-subscribed -:-",
       "frontend acme/empty not-subscribed -:-",
       "frontend acme/foreign not-subscribed -:-",
       "frontend acme/restored not-subscribed -:-",
     ]);
-    // The unpaired marker at line 11 blocks updating the stale `base` block and the edited
-    // `frontend` block alike; the row still says what the block's own state is.
-    const blockedRows = distribution?.entries.filter((e) => e.repo === "acme/blocked") ?? [];
-    expect(blockedRows.map((e) => e.message)).toEqual([
-      `block at line 3 is outdated (rev aaaaaaa -> ${PACK_REV.slice(0, 7)}); \`agent-rules:begin\` is missing hash=`,
-      "block at line 7 is modified; `agent-rules:begin` is missing hash=",
+    // The unpaired marker at line 11 blocks updating the stale `base` block; the edited
+    // `frontend` block has no write pending and stays `modified`.
+    const rows = distribution?.entries.filter((e) => e.repo === "acme/blocked") ?? [];
+    expect(rows.map((e) => `${e.status}: ${e.message}`)).toEqual([
+      `blocked: block at line 3 is outdated (rev aaaaaaa -> ${PACK_REV.slice(0, 7)}); \`agent-rules:begin\` is missing hash=`,
+      "modified: body no longer matches its hash=",
     ]);
     expect(distribution?.counts).toEqual({
       current: 0,
       outdated: 0,
-      modified: 0,
+      modified: 1,
       eligible: 3,
-      blocked: 4,
+      blocked: 3,
       "not-subscribed": 5,
     });
     expect(distribution?.warnings).toEqual([]);

@@ -126,13 +126,14 @@ describe("classifyPackStatus", () => {
     expect(classifyPackStatus(modified, base).status).toBe("modified");
   });
 
-  test("a marker problem in the file carrying the block blocks the update too", () => {
+  test("a marker problem in the file carrying an outdated block blocks the update too", () => {
+    const issues = [
+      { kind: "malformed-marker", file: "AGENTS.md", line: 11, message: "unpaired begin" },
+      { kind: "foreign-marker", file: "CLAUDE.md", line: 1, message: "other file" },
+    ] as const;
     const stale = repo("acme/canonical", "agents-canonical", {
       blocks: [block("base", OLD_BODY)],
-      blockIssues: [
-        { kind: "malformed-marker", file: "AGENTS.md", line: 11, message: "unpaired begin" },
-        { kind: "foreign-marker", file: "CLAUDE.md", line: 1, message: "other file" },
-      ],
+      blockIssues: issues,
     });
     expect(classifyPackStatus(stale, base)).toEqual({
       repo: "acme/canonical",
@@ -142,6 +143,18 @@ describe("classifyPackStatus", () => {
       line: 11,
       message: "block at line 3 is outdated (rev 2222222 -> 1111111); unpaired begin",
     });
+
+    // No write is pending for a current or a modified block, so the marker stays a repo note.
+    const current = repo("acme/canonical", "agents-canonical", {
+      blocks: [block("base", BODY)],
+      blockIssues: issues,
+    });
+    expect(classifyPackStatus(current, base).status).toBe("current");
+    const modified = repo("acme/canonical", "agents-canonical", {
+      blocks: [block("base", BODY, { bodyHash: "different", modified: true })],
+      blockIssues: issues,
+    });
+    expect(classifyPackStatus(modified, base).status).toBe("modified");
   });
 
   test("a block for the pack counts even when the repo is not subscribed", () => {

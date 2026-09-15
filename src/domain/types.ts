@@ -166,7 +166,9 @@ export interface Pack {
  * - `outdated`       block present, body untouched, pack has moved on
  * - `modified`       block present but its body no longer matches the hash it carries
  * - `eligible`       subscribed, no block, and the shape allows a deterministic insertion
- * - `blocked`        subscribed, no block, and a human must act first (`both have content`, foreign or malformed markers)
+ * - `blocked`        a write is pending (insertion for a subscriber, or an update of an outdated block)
+ *                    and a human must act first: `both have content`, or a foreign or malformed
+ *                    marker in a file the sync would write
  * - `not-subscribed` no block and the repository is not in the pack's subscription list
  */
 export type PackStatus =

@@ -132,8 +132,15 @@ export function classifyPackStatus(repo: RepoForDistribution, pack: Pack): PackS
   const block = repo.blocks.find((b) => b.source === pack.id && isRootPairFile(b.file));
   if (block) {
     const at = { file: block.file, line: block.line };
-    // A malformed or foreign marker in the file that carries the block makes a rewrite unsafe
-    // too: the block would be replaced inside a file another tool or a broken marker owns.
+    if (block.modified) {
+      return { ...base, ...at, status: "modified", message: "body no longer matches its hash=" };
+    }
+    if (packHash === null || block.hash === packHash) {
+      return { ...base, ...at, status: "current", message: null };
+    }
+    // Only an outdated block has a write pending. A malformed or foreign marker in its file makes
+    // that rewrite unsafe: the block would be replaced inside a file another tool or a broken
+    // marker owns. Current and modified rows need no write, so the marker stays a repo-level note.
     const issue = repo.blockIssues.find((i) => i.file === block.file);
     if (issue) {
       return {
@@ -141,16 +148,10 @@ export function classifyPackStatus(repo: RepoForDistribution, pack: Pack): PackS
         status: "blocked",
         file: issue.file,
         line: issue.line,
-        message: `${describeBlock(block, pack)}; ${issue.message}`,
+        message: `block at line ${block.line} is outdated (${revChange(block, pack)}); ${issue.message}`,
       };
     }
-    if (block.modified) {
-      return { ...base, ...at, status: "modified", message: "body no longer matches its hash=" };
-    }
-    if (packHash !== null && block.hash !== packHash) {
-      return { ...base, ...at, status: "outdated", message: revChange(block, pack) };
-    }
-    return { ...base, ...at, status: "current", message: null };
+    return { ...base, ...at, status: "outdated", message: revChange(block, pack) };
   }
 
   if (!pack.subscribers.includes(normalizeRepoName(repo.name))) {
@@ -200,17 +201,6 @@ function revChange(block: ManagedBlock, pack: Pack): string {
   const from = block.rev ? shortRev(block.rev) : "?";
   const to = pack.rev ? shortRev(pack.rev) : "?";
   return `rev ${from} -> ${to}`;
-}
-
-/** `block at line 3 is outdated (rev a -> b)`: what the row would say if the file were clean. */
-function describeBlock(block: ManagedBlock, pack: Pack): string {
-  const packHash = pack.files.find((f) => f.kind === "agents-block")?.hash ?? null;
-  const state = block.modified
-    ? "modified"
-    : packHash !== null && block.hash !== packHash
-      ? `outdated (${revChange(block, pack)})`
-      : "current";
-  return `block at line ${block.line} is ${state}`;
 }
 
 const STATUS_ORDER: ReadonlyArray<PackStatus> = [
