@@ -5,6 +5,7 @@ import {
   distribute,
   findPackedRef,
   findPersonalPackCopies,
+  IMPORTED_NOTE,
   packFromFiles,
   parseGitHead,
   parseSubscriptions,
@@ -75,6 +76,7 @@ function file(relativePath: string, overrides: Partial<InstructionFile> = {}): I
     contentHash: relativePath,
     wrapperTarget: null,
     wrapperUsesImport: false,
+    importsAgentsMd: false,
     frontmatter: null,
     ...overrides,
   };
@@ -271,6 +273,46 @@ describe("classifyPackStatus", () => {
     expect(classifyPackStatus(swapMarked, base)).toMatchObject({
       status: "blocked",
       file: "CLAUDE.md",
+    });
+  });
+
+  test("D16: canonical by import writes AGENTS.md only; CLAUDE.md markers and regions do not block", () => {
+    const claudeRegion = {
+      ...REGION,
+      file: "CLAUDE.md",
+      name: "solid2-agent-kit:solid-rules",
+      line: 9,
+      endLine: 402,
+    };
+    const imported = repo("acme/canonical", "agents-imported", {
+      foreignRegions: [claudeRegion, REGION],
+      blockIssues: [{ kind: "foreign-marker", file: "CLAUDE.md", line: 5, message: "m" }],
+    });
+    expect(classifyPackStatus(imported, base)).toEqual({
+      repo: "acme/canonical",
+      pack: "base",
+      status: "eligible",
+      file: "AGENTS.md",
+      line: null,
+      message: `insert block into AGENTS.md (${IMPORTED_NOTE}); 1 foreign region stays untouched`,
+    });
+    // AGENTS.md is the file written, so its markers still block.
+    const marked = repo("acme/canonical", "agents-imported", {
+      blockIssues: [{ kind: "foreign-marker", file: "AGENTS.md", line: 1, message: "whole file" }],
+    });
+    expect(classifyPackStatus(marked, base)).toMatchObject({
+      status: "blocked",
+      file: "AGENTS.md",
+      line: 1,
+    });
+    // An outdated block is replaced in place, as in every kept AGENTS.md.
+    const outdated = repo("acme/canonical", "agents-imported", {
+      blocks: [block("base", OLD_BODY)],
+      foreignRegions: [claudeRegion],
+    });
+    expect(classifyPackStatus(outdated, base)).toMatchObject({
+      status: "outdated",
+      message: "rev 2222222 -> 1111111",
     });
   });
 

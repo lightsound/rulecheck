@@ -14,7 +14,9 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
   `current`. Pack sources stay unwrapped; markers are rendered at sync time (D11). Every shape,
   including `both have content`, is normalized by the sync (D12); only marker conflicts block:
   well-formed marker pairs of other tools are opaque regions the sync appends after (D15), while
-  unpaired, nested, and file-level markers still block. `sync --all` fans out over `subscriptions.json` and its `--dry-run` table is the remote
+  unpaired, nested, and file-level markers still block. A content `CLAUDE.md` that holds an
+  `@AGENTS.md` line is canonical by import (`agents-imported`, D16): the block goes into
+  `AGENTS.md` and `CLAUDE.md` is left as it is, which unblocks `lightsound/cobracket`. `sync --all` fans out over `subscriptions.json` and its `--dry-run` table is the remote
   distribution report (D14); `scan --packs` reflects local checkouts only.
 - `lightsound/agent-rules/packs/base/AGENTS.md`: the portable pack `base` (D7 naming),
   environment-neutral only (Step 1, [agent-rules#1](https://github.com/lightsound/agent-rules/pull/1)).
@@ -124,7 +126,13 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
   of `CLAUDE.md` is not mistaken for rot the pack introduced while rot elsewhere, or in the pair
   when nothing moves, still does not excuse the block. Covered by
   `tests/fake-github.ts` runs (merge, wrapper, foreign marker in either file, pre-existing rot);
-  no live run yet, the first `both-full` subscriber gets it.
+  no live run yet, the first `both-full` subscriber gets it. Narrowed 2026-09-15 by D16: a
+  `CLAUDE.md` that already holds an `@AGENTS.md` line is not `both-full` but canonical by import,
+  so the sync writes `AGENTS.md` only and leaves `CLAUDE.md` byte for byte; the real
+  `lightsound/cobracket` pair (420-line `CLAUDE.md`, three foreign regions, the import inside one
+  of them) reads `eligible` and plans the block after the last region of `AGENTS.md`, verified
+  with `sync --dry-run` against the remote and covered by a `tests/fake-github.ts` run over both
+  files as fetched.
 - Done 2026-09-15: the Cursor User Rule question is settled by D13. No headless way to write a
   User Rule exists (Admin API, `agent` CLI, on-disk state, Team Rules all checked; sources in
   tool-behavior.md), so the copy is retired rather than automated: the block is the Cursor

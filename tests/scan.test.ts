@@ -493,6 +493,64 @@ describe("scan", () => {
   });
 });
 
+describe("scan: canonical by import (D16)", () => {
+  test("a content CLAUDE.md with an @AGENTS.md line inside a region reads as agents-imported", async () => {
+    const tree = await mkdtemp(join(tmpdir(), "rulecheck-imported-"));
+    try {
+      const repo = "github.com/acme/cobracket";
+      await mkdir(join(tree, repo, ".git"), { recursive: true });
+      await put(`${repo}/AGENTS.md`, "# Agents\n\nline\nline\nline\nline\n", tree);
+      await put(
+        `${repo}/CLAUDE.md`,
+        [
+          "# CLAUDE.md",
+          "",
+          "Project guidance for Claude Code.",
+          "",
+          "<!-- fallow:agent-install v1 claude-import:start -->",
+          "@AGENTS.md",
+          "<!-- fallow:agent-install v1 claude-import:end -->",
+          "",
+          "<!-- convex-ai-start -->",
+          "Convex.",
+          "<!-- convex-ai-end -->",
+          "",
+        ].join("\n"),
+        tree,
+      );
+      const report = await run(scan(tree));
+      const cobracket = report.repos.find((r) => r.name === "acme/cobracket");
+      expect(cobracket?.shape).toBe("agents-imported");
+      expect(cobracket?.bothFull).toBeNull();
+      const claude = cobracket?.files.find((f) => f.relativePath === "CLAUDE.md");
+      expect(claude?.wrapperTarget).toBeNull();
+      expect(claude?.importsAgentsMd).toBe(true);
+      // Claude Code loads CLAUDE.md and, through the import, AGENTS.md.
+      const agents = cobracket?.files.find((f) => f.relativePath === "AGENTS.md");
+      expect(cobracket?.budget.claudeCode).toBe((claude?.tokens ?? 0) + (agents?.tokens ?? 0));
+      expect(report.totals.shapes["agents-imported"]).toBe(1);
+      expect(report.totals.shapes["both-full"]).toBe(0);
+
+      const text = renderText(report);
+      expect(text).toContain("AGENTS.md via @import");
+      expect(text).toContain(
+        "! CLAUDE.md imports AGENTS.md and carries content of its own; not the strict one-line wrapper",
+      );
+      expect(text).toContain("region fallow:agent-install v1 claude-import");
+
+      // Only the fenced line: prose, so the pair is `both-full` and D12 applies.
+      await put(`${repo}/CLAUDE.md`, "# C\n\nline\nline\nline\n\n```md\n@AGENTS.md\n```\n", tree);
+      const fenced = await run(scan(tree));
+      expect(fenced.repos[0]?.shape).toBe("both-full");
+      expect(
+        fenced.repos[0]?.files.find((f) => f.relativePath === "CLAUDE.md")?.importsAgentsMd,
+      ).toBe(false);
+    } finally {
+      await rm(tree, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("displayName", () => {
   test("strips ghq-style host prefix", () => {
     expect(displayName("/x/ghq/github.com/acme/repo", "/x/ghq")).toBe("acme/repo");

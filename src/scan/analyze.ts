@@ -1,6 +1,11 @@
 import { createHash } from "node:crypto";
 import { Effect, type FileSystem } from "effect";
-import { detectWrapperTarget, parseFrontmatter, usesClaudeImport } from "../domain/classify.ts";
+import {
+  detectWrapperTarget,
+  importsAgentsMd,
+  parseFrontmatter,
+  usesClaudeImport,
+} from "../domain/classify.ts";
 import { countTokens } from "../domain/tokens.ts";
 import type { FileKind, InstructionFile } from "../domain/types.ts";
 
@@ -36,6 +41,9 @@ export const analyzeFile = (
       contentHash: createHash("sha256").update(trimmed).digest("hex"),
       wrapperTarget,
       wrapperUsesImport: wrapperTarget !== null && usesClaudeImport(content, wrapperTarget),
+      // Only the root CLAUDE.md: Claude Code resolves a relative import against the importing
+      // file's directory, so `@AGENTS.md` in `.claude/CLAUDE.md` points at `.claude/AGENTS.md`.
+      importsAgentsMd: input.relativePath === "CLAUDE.md" && importsAgentsMd(content),
       frontmatter:
         input.kind === "cursor-rule" || input.kind === "claude-rule"
           ? parseFrontmatter(content)

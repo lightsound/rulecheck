@@ -212,6 +212,7 @@ function findDuplicates(repos: ReadonlyArray<RepoReport>, minLines: number): Dup
 function summarize(repos: ReadonlyArray<RepoReport>): ScanTotals {
   const shapes: Record<CanonicalShape, number> = {
     "agents-canonical": 0,
+    "agents-imported": 0,
     "claude-canonical": 0,
     "agents-only": 0,
     "claude-only": 0,

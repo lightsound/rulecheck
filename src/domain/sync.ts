@@ -1,6 +1,7 @@
 import { foreignRegionDrift, normalizeBody, parseBlocks } from "./block.ts";
-import { classifyBothFull, claudeContentBeyondImport } from "./classify.ts";
+import { classifyBothFull, claudeContentBeyondImport, importsAgentsMd } from "./classify.ts";
 import type { FileChange } from "./diff.ts";
+import { IMPORTED_NOTE } from "./pack.ts";
 import type {
   CanonicalShape,
   InstructionFile,
@@ -141,13 +142,23 @@ function planInsert(input: SyncPlanInput, rendered: string): SyncPlan | SyncRefu
         blockLine: inserted.line,
       };
     }
-    case "agents-canonical": {
+    case "agents-canonical":
+    case "agents-imported": {
       const before = input.contents.get("AGENTS.md");
-      if (before === undefined) return unexpected("agents-canonical");
+      if (before === undefined) return unexpected(input.shape);
+      // D16: an `agents-imported` CLAUDE.md is never a change; only its import line is required.
+      if (
+        input.shape === "agents-imported" &&
+        !importsAgentsMd(input.contents.get("CLAUDE.md") ?? "")
+      ) {
+        return unexpected(input.shape);
+      }
       const inserted = insertBlock(before, rendered, input);
+      const actions = [`insert block \`${input.pack.id}\` into AGENTS.md`];
+      if (input.shape === "agents-imported") actions.push(IMPORTED_NOTE);
       return {
         changes: [{ path: "AGENTS.md", before, after: inserted.content }],
-        actions: [`insert block \`${input.pack.id}\` into AGENTS.md`],
+        actions,
         blockFile: "AGENTS.md",
         blockLine: inserted.line,
       };

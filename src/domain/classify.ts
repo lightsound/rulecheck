@@ -204,27 +204,51 @@ export function classifyShape(files: ReadonlyArray<InstructionFile>): CanonicalS
   const agentsIsWrapper = agents.wrapperTarget === "CLAUDE.md";
   if (claudeIsWrapper && !agentsIsWrapper) return "agents-canonical";
   if (agentsIsWrapper && !claudeIsWrapper) return "claude-canonical";
+  // D16: Claude Code loads AGENTS.md through the import line wherever it sits in CLAUDE.md, so
+  // the pair is canonical in effect; the text around the line is CLAUDE.md's own and stays there.
+  if (claude.importsAgentsMd && !agentsIsWrapper) return "agents-imported";
   return "both-full";
 }
 
 const AGENTS_IMPORT_LINE = /^\s*@(?:\.\/)?AGENTS\.md\s*$/;
 const FENCE = /^\s{0,3}(`{3,}|~{3,})/;
 
+interface ClassifiedLine {
+  readonly line: string;
+  /**
+   * True where Claude Code does not parse imports: inside a fenced code block (fence lines
+   * included) or inside an HTML comment that spans several lines (its opening and closing lines
+   * included). Single-line comments, such as another tool's region markers, are not spans.
+   */
+  readonly inert: boolean;
+}
+
 /**
- * What CLAUDE.md says beyond importing AGENTS.md: the content with every line that is exactly an
- * `@AGENTS.md` import removed, line endings normalized to `\n`, surrounding blank lines trimmed.
- * Lines inside a fenced code block are kept as they are; a file that documents the wrapper
- * convention shows the import line in a fence, and that is prose, not an import.
+ * The lines of `content` with `\r\n` normalized, each flagged when it sits where Claude Code skips
+ * import parsing: fenced code ("Import parsing skips Markdown code spans and fenced code blocks";
+ * a file that documents the wrapper convention shows the import line in a fence) and multi-line
+ * HTML comments, which are stripped before injection. A fence closes on a fence of the same
+ * character at least as long.
  */
-export function claudeContentBeyondImport(claudeContent: string): string {
-  const kept: string[] = [];
+function classifyLines(content: string): ClassifiedLine[] {
+  const lines: ClassifiedLine[] = [];
   let fence: string | null = null;
-  for (const line of claudeContent.replace(/\r\n/g, "\n").split("\n")) {
+  let comment = false;
+  for (const line of content.replace(/\r\n/g, "\n").split("\n")) {
+    if (comment) {
+      lines.push({ line, inert: true });
+      if (line.includes("-->")) comment = false;
+      continue;
+    }
     const marker = FENCE.exec(line)?.[1];
     if (fence === null) {
       if (marker) fence = marker;
-      else if (AGENTS_IMPORT_LINE.test(line)) continue;
-    } else if (
+      else if (line.includes("<!--") && !line.includes("-->")) comment = true;
+      lines.push({ line, inert: fence !== null || comment });
+      continue;
+    }
+    lines.push({ line, inert: true });
+    if (
       marker &&
       marker[0] === fence[0] &&
       marker.length >= fence.length &&
@@ -232,9 +256,33 @@ export function claudeContentBeyondImport(claudeContent: string): string {
     ) {
       fence = null;
     }
-    kept.push(line);
   }
-  return kept.join("\n").trim();
+  return lines;
+}
+
+/**
+ * Whether `claudeContent` holds a line that is exactly an `@AGENTS.md` (or `@./AGENTS.md`) import
+ * where Claude Code parses imports (D16). Surrounding whitespace is allowed; a line that says
+ * anything more is prose. Where the line sits does not matter otherwise: between another tool's
+ * region markers counts too, because Claude Code resolves it there like anywhere else.
+ */
+export function importsAgentsMd(claudeContent: string): boolean {
+  return classifyLines(claudeContent).some(
+    ({ line, inert }) => !inert && AGENTS_IMPORT_LINE.test(line),
+  );
+}
+
+/**
+ * What CLAUDE.md says beyond importing AGENTS.md: the content with every line that is exactly an
+ * `@AGENTS.md` import (where Claude Code parses imports) removed, line endings normalized to
+ * `\n`, surrounding blank lines trimmed.
+ */
+export function claudeContentBeyondImport(claudeContent: string): string {
+  return classifyLines(claudeContent)
+    .filter(({ line, inert }) => inert || !AGENTS_IMPORT_LINE.test(line))
+    .map(({ line }) => line)
+    .join("\n")
+    .trim();
 }
 
 /**

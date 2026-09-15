@@ -24,6 +24,10 @@ const ROTTEN_BODY = "- Lint with `bun run lint`.\n- Entry point: `src/main.ts`."
 const BOTH_CLAUDE_EXTRA = "# C\n\n- legacy: `src/gone.ts`\n- one\n- two\n- three";
 const REPEATED = "- Use Bun.\n- one\n- two\n- three\n- four";
 const COBRACKET = readFileSync(new URL("./fixtures/cobracket-AGENTS.md", import.meta.url), "utf8");
+const COBRACKET_CLAUDE = readFileSync(
+  new URL("./fixtures/cobracket-CLAUDE.md", import.meta.url),
+  "utf8",
+);
 
 function block(source: string, body: string, rev = "aaaaaaa") {
   return `<!-- agent-rules:begin source=${source} rev=${rev} hash=${hashBlockBody(body)} -->\n${body}\n<!-- agent-rules:end -->`;
@@ -44,6 +48,7 @@ const PACK_REPO: FakeRepoInput = {
         "acme/both-repeat",
         "acme/foreign",
         "acme/regions",
+        "acme/cobracket",
         "acme/outdated",
         "acme/modified",
         "acme/ordered",
@@ -67,18 +72,20 @@ const TARGETS: Record<string, FakeRepoInput> = {
   "acme/empty": { defaultBranch: "develop", files: { "README.md": "hi\n" } },
   "acme/agents-only": { files: { "AGENTS.md": "# Only agents\n" } },
   "acme/claude-only": { files: { ".claude/CLAUDE.md": "# Nested claude\n" } },
+  // A CLAUDE.md with its own text and no `@AGENTS.md` line (one would make the pair canonical by
+  // import, D16, and leave the file alone); D12 merges or drops it.
   "acme/both": {
     files: {
       "AGENTS.md": "# A\n\n- entry: `src/main.ts`\n",
       // Own text plus rot that already exists on main (`src/gone.ts`); the merge must not read it as new.
-      "CLAUDE.md": `@AGENTS.md\n\n${BOTH_CLAUDE_EXTRA}\n`,
+      "CLAUDE.md": `${BOTH_CLAUDE_EXTRA}\n`,
       "src/main.ts": "export {};\n",
     },
   },
   "acme/both-repeat": {
     files: {
       "AGENTS.md": `# A\n\n${REPEATED}\n<!-- END: tail -->\n`,
-      "CLAUDE.md": `@AGENTS.md\n\n${REPEATED}\n`,
+      "CLAUDE.md": `${REPEATED}\n`,
     },
   },
   "acme/foreign": {
@@ -89,6 +96,8 @@ const TARGETS: Record<string, FakeRepoInput> = {
   },
   // `lightsound/cobracket` AGENTS.md: four regions other tools own, the last one ends the file (D15).
   "acme/regions": { files: { "AGENTS.md": COBRACKET, "CLAUDE.md": "@AGENTS.md\n" } },
+  // The real pair: CLAUDE.md is 420 lines, three regions, `@AGENTS.md` inside the second (D16).
+  "acme/cobracket": { files: { "AGENTS.md": COBRACKET, "CLAUDE.md": COBRACKET_CLAUDE } },
   "acme/outdated": {
     files: {
       "AGENTS.md": `# O\n\n${block("base", OLD_BODY)}\n\n## Own\n`,
@@ -122,7 +131,7 @@ const TARGETS: Record<string, FakeRepoInput> = {
       // An outdated `rotten` block next to a CLAUDE.md that already has the stale `bun run lint`.
       // The update rewrites only AGENTS.md; nothing moves, so CLAUDE.md's rot excuses nothing.
       "AGENTS.md": `# S\n\n${block("rotten", OLD_BODY)}\n`,
-      "CLAUDE.md": "@AGENTS.md\n\n# C\n\n- Lint: `bun run lint`\n- one\n- two\n- three\n",
+      "CLAUDE.md": "# C\n\n- Lint: `bun run lint`\n- one\n- two\n- three\n",
       "package.json": '{"scripts":{"build":"x"}}',
       "src/main.ts": "export {};\n",
     },
@@ -233,7 +242,7 @@ describe("resolvePacks", () => {
     const loaded = await run(resolvePacks("acme/agent-rules"));
     expect(loaded.source).toBe(`acme/agent-rules@${(sha ?? "").slice(0, 7)}`);
     expect(loaded.packs.map((p) => `${p.id}:${p.rev === sha}:${p.subscribers.length}`)).toEqual([
-      "base:true:11",
+      "base:true:12",
       "frontend:true:1",
       "rotten:true:3",
     ]);
@@ -429,7 +438,7 @@ describe("sync", () => {
     const clean = fakeGitHub({
       "acme/agent-rules": PACK_REPO,
       "acme/both-repeat": {
-        files: { "AGENTS.md": `# A\n\n${REPEATED}\n`, "CLAUDE.md": `@AGENTS.md\n\n${REPEATED}\n` },
+        files: { "AGENTS.md": `# A\n\n${REPEATED}\n`, "CLAUDE.md": `${REPEATED}\n` },
       },
     });
     const result = await Effect.runPromise(
@@ -487,6 +496,52 @@ describe("sync", () => {
     github.moveRef("acme/regions", "heads/main", "heads/agent-rules/base");
     github.calls.length = 0;
     expect((await runSync({ repo: "acme/regions" })).kind).toBe("current");
+  });
+
+  test("D16: a CLAUDE.md that imports AGENTS.md from inside a region is left byte for byte; the block lands in AGENTS.md", async () => {
+    const { github, runSync } = world();
+    const dry = await runSync({ repo: "acme/cobracket", dryRun: true });
+    expect(dry.kind).toBe("planned");
+    if (dry.kind !== "planned") return;
+    expect(dry.status).toEqual({
+      repo: "acme/cobracket",
+      pack: "base",
+      status: "eligible",
+      file: "AGENTS.md",
+      line: null,
+      message:
+        "insert block into AGENTS.md (CLAUDE.md already imports AGENTS.md; left untouched); 4 foreign regions stay untouched",
+    });
+    expect(dry.plan.changes.map((c) => c.path)).toEqual(["AGENTS.md"]);
+    expect(github.calls).toEqual([]);
+
+    const result = await runSync({ repo: "acme/cobracket" });
+    expect(result.kind).toBe("written");
+    if (result.kind !== "written") return;
+    expect(github.fileAt("acme/cobracket", "heads/agent-rules/base", "CLAUDE.md")).toBe(
+      COBRACKET_CLAUDE,
+    );
+    const written = github.fileAt("acme/cobracket", "heads/agent-rules/base", "AGENTS.md") ?? "";
+    // `<!-- convex-ai-end -->` at line 185 closes the last region; the block follows one blank line later.
+    expect(written).toBe(
+      `${COBRACKET.replace(/\s+$/, "")}\n\n${block("base", BODY, await revOf(github))}\n`,
+    );
+    expect(written.split("\n")[184]).toBe("<!-- convex-ai-end -->");
+    expect(result.plan.blockLine).toBe(187);
+    const pull = github.pulls("acme/cobracket")[0];
+    expect(pull?.body).toContain("- CLAUDE.md already imports AGENTS.md; left untouched");
+    expect(pull?.body).not.toContain("wrapper");
+    expect(github.calls).toEqual([
+      "createTree acme/cobracket AGENTS.md",
+      "createCommit acme/cobracket",
+      "setRef acme/cobracket heads/agent-rules/base create",
+      "createPullRequest acme/cobracket agent-rules/base -> main",
+    ]);
+
+    // The planned tree measured `current` before the write; after the merge the rerun agrees.
+    github.moveRef("acme/cobracket", "heads/main", "heads/agent-rules/base");
+    github.calls.length = 0;
+    expect((await runSync({ repo: "acme/cobracket" })).kind).toBe("current");
   });
 
   test("refuses: not subscribed, foreign marker, modified block", async () => {

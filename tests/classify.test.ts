@@ -8,6 +8,7 @@ import {
   detectWrapperTarget,
   estimateBudget,
   extractClaudeImports,
+  importsAgentsMd,
   isIgnoredDirectory,
   parseFrontmatter,
   usesClaudeImport,
@@ -99,6 +100,58 @@ describe("usesClaudeImport", () => {
   });
 });
 
+describe("importsAgentsMd", () => {
+  test("a line that is exactly the import counts, wherever it sits", () => {
+    expect(importsAgentsMd("@AGENTS.md\n")).toBe(true);
+    expect(importsAgentsMd("@./AGENTS.md")).toBe(true);
+    expect(importsAgentsMd("# Project\n\nOwn rules.\n\n@AGENTS.md\n\nMore.\n")).toBe(true);
+    // Trailing spaces, indentation, and CRLF line endings do not change what Claude Code loads.
+    expect(importsAgentsMd("@AGENTS.md   \n")).toBe(true);
+    expect(importsAgentsMd("  @AGENTS.md\r\n")).toBe(true);
+  });
+
+  test("inside another tool's region counts: Claude Code resolves it there too", () => {
+    const content = [
+      "# CLAUDE.md",
+      "",
+      "Project guidance.",
+      "",
+      "<!-- fallow:agent-install v1 claude-import:start -->",
+      "@AGENTS.md",
+      "<!-- fallow:agent-install v1 claude-import:end -->",
+      "",
+      "<!-- convex-ai-start -->",
+      "Convex.",
+      "<!-- convex-ai-end -->",
+    ].join("\n");
+    expect(importsAgentsMd(content)).toBe(true);
+  });
+
+  test("inside a fenced code block is prose, not an import", () => {
+    expect(importsAgentsMd("The wrapper is:\n\n```md\n@AGENTS.md\n```\n")).toBe(false);
+    expect(importsAgentsMd("~~~\n@AGENTS.md\n~~~\n")).toBe(false);
+    // A shorter or different fence does not close the block; a longer one of the same kind does.
+    expect(importsAgentsMd("````\n```\n@AGENTS.md\n````\n")).toBe(false);
+    expect(importsAgentsMd("```\n~~~\n```\n@AGENTS.md\n")).toBe(true);
+  });
+
+  test("inside a multi-line HTML comment is stripped by Claude Code, so it is not an import", () => {
+    expect(importsAgentsMd("<!--\n@AGENTS.md\n-->\n")).toBe(false);
+    expect(importsAgentsMd("<!-- note\n@AGENTS.md\nend -->\n@AGENTS.md\n")).toBe(true);
+    expect(claudeContentBeyondImport("<!--\n@AGENTS.md\n-->\n@AGENTS.md\n")).toBe(
+      "<!--\n@AGENTS.md\n-->",
+    );
+  });
+
+  test("a line that says more than the import, or no line at all, is not an import", () => {
+    expect(importsAgentsMd("see @AGENTS.md for the rules\n")).toBe(false);
+    expect(importsAgentsMd("@AGENTS.md and @docs/style.md\n")).toBe(false);
+    expect(importsAgentsMd("look at AGENTS.md\n")).toBe(false);
+    expect(importsAgentsMd("@CLAUDE.md\n")).toBe(false);
+    expect(importsAgentsMd("")).toBe(false);
+  });
+});
+
 describe("parseFrontmatter", () => {
   test("cursor mdc with inline quoted globs", () => {
     const fm = parseFrontmatter(
@@ -153,6 +206,7 @@ function file(
     contentHash: overrides.relativePath,
     wrapperTarget: null,
     wrapperUsesImport: false,
+    importsAgentsMd: false,
     frontmatter: null,
     ...overrides,
   };
@@ -181,6 +235,30 @@ describe("classifyShape", () => {
       file({ relativePath: "CLAUDE.md", kind: "claude-md" }),
     ];
     expect(classifyShape(files)).toBe("both-full");
+  });
+
+  test("D16: a content CLAUDE.md that imports AGENTS.md makes the pair canonical by import", () => {
+    const agents = file({ relativePath: "AGENTS.md", kind: "agents-md" });
+    const claude = file({ relativePath: "CLAUDE.md", kind: "claude-md", importsAgentsMd: true });
+    expect(classifyShape([agents, claude])).toBe("agents-imported");
+    // An AGENTS.md that only points back at CLAUDE.md is a wrapper; the pair stays CLAUDE.md canonical.
+    const pointer = file({
+      relativePath: "AGENTS.md",
+      kind: "agents-md",
+      wrapperTarget: "CLAUDE.md",
+      lines: 1,
+    });
+    expect(classifyShape([pointer, claude])).toBe("claude-canonical");
+    // The one-line wrapper stays the strict shape.
+    const wrapper = file({
+      relativePath: "CLAUDE.md",
+      kind: "claude-md",
+      wrapperTarget: "AGENTS.md",
+      wrapperUsesImport: true,
+      importsAgentsMd: true,
+      lines: 1,
+    });
+    expect(classifyShape([agents, wrapper])).toBe("agents-canonical");
   });
 
   test("one side only and none", () => {
