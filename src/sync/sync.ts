@@ -154,7 +154,11 @@ export const sync = (
         message: `${name}: the planned ${plan.blockFile} would read as ${after.entry.status} (${after.entry.message ?? "no detail"}); refusing to write`,
       });
     }
-    const introduced = newFindings(before.repo.findings, after.repo.findings);
+    const introduced = newFindings(
+      before.repo.findings,
+      after.repo.findings,
+      movesRootPairContent(plan),
+    );
     if (introduced.length > 0) {
       const lines = introduced.map((f) => `  ${f.file}:${f.line}  ${f.message}`);
       return yield* new SyncRefused({
@@ -218,19 +222,37 @@ const measure = (
   });
 
 /**
- * A finding is "known" by kind, value, and file, except that the root pair counts as one file: the
- * normalization moves CLAUDE.md text into AGENTS.md (`claude-only`, `claude-canonical`,
- * `both-full`), and rot that already existed there must not read as rot the pack introduced. Rot
- * elsewhere (a nested AGENTS.md, a rule file) does not excuse the same reference in the block.
+ * Whether the plan carries existing text from one root-pair file into another (`claude-only`,
+ * `claude-canonical`, `both-full`): some root-pair file other than the one receiving the block
+ * had content before and is rewritten or removed. A block update or a plain insert touches one
+ * content file, and a wrapper created from nothing carries no text.
  */
-function findingKey(finding: Finding): string {
-  const scope = ROOT_PAIR.includes(finding.file) ? "root-pair" : finding.file;
+function movesRootPairContent(plan: SyncPlan): boolean {
+  return plan.changes.some(
+    (change) =>
+      change.path !== plan.blockFile && ROOT_PAIR.includes(change.path) && change.before !== null,
+  );
+}
+
+/**
+ * A finding is "known" by kind, value, and file. Only when the plan moves root-pair text does the
+ * pair count as one file: rot that already existed in CLAUDE.md and travels into AGENTS.md must
+ * not read as rot the pack introduced. Where nothing moves (an outdated block, a plain insert),
+ * the same reference elsewhere in the pair does not excuse it in the block, and rot outside the
+ * pair (a nested AGENTS.md, a rule file) never does.
+ */
+function findingKey(finding: Finding, pairIsOneFile: boolean): string {
+  const scope = pairIsOneFile && ROOT_PAIR.includes(finding.file) ? "root-pair" : finding.file;
   return `${finding.kind}:${scope}:${finding.value}`;
 }
 
-function newFindings(before: ReadonlyArray<Finding>, after: ReadonlyArray<Finding>): Finding[] {
-  const known = new Set(before.map(findingKey));
-  return after.filter((f) => !known.has(findingKey(f)));
+function newFindings(
+  before: ReadonlyArray<Finding>,
+  after: ReadonlyArray<Finding>,
+  pairIsOneFile: boolean,
+): Finding[] {
+  const known = new Set(before.map((f) => findingKey(f, pairIsOneFile)));
+  return after.filter((f) => !known.has(findingKey(f, pairIsOneFile)));
 }
 
 function where(entry: PackStatusEntry): string {

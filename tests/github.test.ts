@@ -112,6 +112,16 @@ const TARGETS: Record<string, FakeRepoInput> = {
       ".cursor/rules/style.mdc": "---\nalwaysApply: true\n---\nRun `bun run lint` first.\n",
     },
   },
+  "acme/stale-both": {
+    files: {
+      // An outdated `rotten` block next to a CLAUDE.md that already has the stale `bun run lint`.
+      // The update rewrites only AGENTS.md; nothing moves, so CLAUDE.md's rot excuses nothing.
+      "AGENTS.md": `# S\n\n${block("rotten", OLD_BODY)}\n`,
+      "CLAUDE.md": "@AGENTS.md\n\n# C\n\n- Lint: `bun run lint`\n- one\n- two\n- three\n",
+      "package.json": '{"scripts":{"build":"x"}}',
+      "src/main.ts": "export {};\n",
+    },
+  },
 };
 
 function world() {
@@ -456,6 +466,17 @@ describe("sync", () => {
       message: expect.stringContaining('AGENTS.md:4  script "lint" is not defined'),
     });
     expect(github.calls.filter((c) => c.includes("acme/stale-rule"))).toEqual([]);
+
+    // Outdated block in a both-full pair: the update moves no text, so the stale `bun run lint`
+    // already sitting in CLAUDE.md does not excuse the same reference in the new block body.
+    const staleBoth = await runSync({ repo: "acme/stale-both", pack: "rotten" });
+    expect(staleBoth).toMatchObject({
+      kind: "refused",
+      message:
+        "acme/stale-both: pack `rotten` would introduce rot in this repository:\n" +
+        '  AGENTS.md:4  script "lint" is not defined in any package.json (bun run lint)',
+    });
+    expect(github.calls.filter((c) => c.includes("acme/stale-both"))).toEqual([]);
   });
 
   test("refuses to rewrite an agent-rules/<pack> branch whose tip was not written by rulecheck", async () => {
