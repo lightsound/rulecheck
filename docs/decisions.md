@@ -222,6 +222,20 @@ but not written; nested `AGENTS.md` blocks are not touched; the pack `AGENTS.md`
 `lightsound/agent-rules` is not yet wrapped in its own markers (both marker-wrapped and bare
 bodies are read); no fan-out (`--all`, Step 5).
 
+## 2026-09-15 D11: Pack sources stay unwrapped; markers are rendered at sync time
+
+Step 1 deferred wrapping `packs/<id>/AGENTS.md` in its own `agent-rules:` markers so that "the
+file is the block". Decided against it at the first live sync: `hash=` is derived from the body
+and `rev=` is the pack repository's HEAD, which a file cannot contain for the commit that
+includes it. Storing derived values in the source means hand-maintaining a hash that drifts,
+which is the very state rulecheck exists to detect. So the pack file is the bare body,
+`packFromFiles` computes the hash from it, and `renderBlock` writes the markers at sync time
+(D9 syntax, D10 `rev=`). The reader keeps accepting a wrapped pack file (first block's body), so
+a pack repository that wants visible markers may still carry them at its own risk. Consequence:
+what a subscriber's `AGENTS.md` shows between the markers is the pack file verbatim after body
+normalization, and `packs/<id>/AGENTS.md` is also what `~/.claude/CLAUDE.md` imports and the
+Cursor User Rule copies, without comment lines.
+
 ## Recording rule
 
 Add an entry here whenever a decision changes what rulecheck writes, what it reports, or which

@@ -2,14 +2,16 @@
 
 Ordered next steps. Each step is small enough for one chat session and ends with a check against
 the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
-[decisions.md](decisions.md) (D4 to D10); tool facts in [tool-behavior.md](tool-behavior.md).
+[decisions.md](decisions.md) (D4 to D11); tool facts in [tool-behavior.md](tool-behavior.md).
 
 ## Current state (2026-09-15)
 
 - rulecheck: read-only scan works on `~/ghq` (shape, duplicates, budget, rot detection, personal
   layer, managed blocks, skills inventory, pack distribution status via `--packs`, which reads a
   local checkout or `owner/repo[@ref]` from GitHub). One write path: `rulecheck sync` (D10) opens
-  a pull request per repository per pack through `gh api`; not yet run against a real target.
+  a pull request per repository per pack through `gh api`. First real run done: `lightsound/rulecheck`
+  carries block `base` ([rulecheck#6](https://github.com/lightsound/rulecheck/pull/6)) and reads
+  `current`. Pack sources stay unwrapped; markers are rendered at sync time (D11).
 - `lightsound/agent-rules/packs/base/AGENTS.md`: the portable pack `base` (D7 naming),
   environment-neutral only (Step 1, [agent-rules#1](https://github.com/lightsound/agent-rules/pull/1)).
   The repository's root `AGENTS.md` instructs agents working in agent-rules itself and is not
@@ -30,8 +32,8 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
   pack returns nothing, so rot detection cannot flag it in any destination. Machine layer applied
   on the primary machine; `scan ~/ghq` findings unchanged (3 before, 3 after), personal layer
   still imports the pack.
-- Deferred to Step 3: wrapping the body in managed-block markers, so that the file *is* the block
-  body's source. The markers land together with the first write path that consumes them.
+- Deferred to Step 3 and then dropped (D11): wrapping the body in managed-block markers. The pack
+  file stays the bare body; `sync` renders the markers.
 
 ## Step 2: Block and Skills detection, distribution report (rulecheck, read-only) — done 2026-09-15
 
@@ -68,7 +70,7 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
   blocks in nested `AGENTS.md` or in `CLAUDE.md` are listed but do not enter the status.
   (`--packs` remote form resolved in Step 3; the other two remain.)
 
-## Step 3: First write path — code done 2026-09-15, live verification pending
+## Step 3: First write path — done 2026-09-15
 
 - Record in `decisions.md` and `AGENTS.md` that rulecheck gains a remote-only write path (D6).
 - `rulecheck sync <owner/repo> --pack <id>`: via `gh api`, create branch, write the normalized
@@ -92,12 +94,17 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
   refusal. Verified read-only against the real API: `scan --packs lightsound/rulecheck` and
   `sync lightsound/rulecheck --dry-run` with a scratch pack, including a rot refusal
   (`AGENTS.md:49 script "deploy" is not defined`).
-- Open for the done criterion: first run `sync` without `--dry-run` against a throwaway
-  repository under the operator's account, one run per shape (the write-side API contracts are
-  documented but not yet exercised; table in `tool-behavior.md`), then once on a solo lightsound
-  repository with `--packs lightsound/agent-rules`, merge, and confirm the next `scan` shows
-  `current`. Also wrap `packs/base/AGENTS.md` in agent-rules in its own markers (Step 1 deferral;
-  the reader accepts both forms).
+- Live run 2026-09-15: `agent-rules/subscriptions.json` subscribes `lightsound/rulecheck` to
+  `base` ([agent-rules#2](https://github.com/lightsound/agent-rules/pull/2)). `sync
+  lightsound/rulecheck --pack base --packs lightsound/agent-rules` was run with `--dry-run` and
+  then for real against the GitHub API without code changes; the pull request diff was byte-identical
+  to the dry-run diff (project content first, block appended at `AGENTS.md:53`, `CLAUDE.md`
+  untouched). [rulecheck#6](https://github.com/lightsound/rulecheck/pull/6) merged; the next
+  `scan ~/ghq --packs lightsound/agent-rules` shows `current 1`, and a rerun of `sync --dry-run`
+  reports `block base is current; nothing to do`. Only the `agents-canonical` shape was exercised
+  live; the other four deterministic shapes are covered by `tests/fake-github.ts` and get their
+  first live run when a matching repository subscribes.
+- Pack sources are not wrapped in markers (D11); the reader keeps accepting both forms.
 
 ## Step 4: Remove the interim wiring
 
