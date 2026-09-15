@@ -2,7 +2,7 @@
 
 Ordered next steps. Each step is small enough for one chat session and ends with a check against
 the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
-[decisions.md](decisions.md) (D4 to D11); tool facts in [tool-behavior.md](tool-behavior.md).
+[decisions.md](decisions.md) (D4 to D12); tool facts in [tool-behavior.md](tool-behavior.md).
 
 ## Current state (2026-09-15)
 
@@ -11,7 +11,8 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
   local checkout or `owner/repo[@ref]` from GitHub). One write path: `rulecheck sync` (D10) opens
   a pull request per repository per pack through `gh api`. First real run done: `lightsound/rulecheck`
   carries block `base` ([rulecheck#6](https://github.com/lightsound/rulecheck/pull/6)) and reads
-  `current`. Pack sources stay unwrapped; markers are rendered at sync time (D11).
+  `current`. Pack sources stay unwrapped; markers are rendered at sync time (D11). Every shape,
+  including `both have content`, is normalized by the sync (D12); only marker conflicts block.
 - `lightsound/agent-rules/packs/base/AGENTS.md`: the portable pack `base` (D7 naming),
   environment-neutral only (Step 1, [agent-rules#1](https://github.com/lightsound/agent-rules/pull/1)).
   The repository's root `AGENTS.md` instructs agents working in agent-rules itself and is not
@@ -106,9 +107,18 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
   first live run when a matching repository subscribes.
 - Pack sources are not wrapped in markers (D11); the reader keeps accepting both forms.
 
-## Step 4: Remove the interim wiring
+## Step 4: Remove the interim wiring — in progress
 
-- After the block is in the repositories used daily: delete the pack import from
+- Prerequisite, done 2026-09-15: every root-pair shape is now syncable. `both have content` was
+  the one shape that refused (D6, D9) and would have kept daily repositories out of the block
+  rollout; D12 makes it `eligible` with a content-derived normalization (`CLAUDE.md` repeats
+  `AGENTS.md` → wrapper only; otherwise its text is appended under `## Merged from CLAUDE.md`
+  before any managed block, then the wrapper). The status row and the pull request name the
+  normalization; the planned tree must still measure `current`; findings are compared by kind and
+  value so rot moved out of `CLAUDE.md` is not mistaken for rot the pack introduced. Covered by
+  `tests/fake-github.ts` runs (merge, wrapper, foreign marker in either file, pre-existing rot);
+  no live run yet, the first `both-full` subscriber gets it.
+- Remaining: after the block is in the repositories used daily, delete the pack import from
   `~/.claude/CLAUDE.md`, delete the Cursor User Rule copy and `/sync-agent-rules`, set Claude
   Code's `language` setting for third-party repos. Verify with probes (tool-behavior.md method)
   that nothing loads twice.
