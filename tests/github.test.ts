@@ -19,6 +19,9 @@ import { type FakeRepoInput, fakeGitHub } from "./fake-github.ts";
 const BODY = "- Respond in Japanese.\n- Use Bun, never npm.";
 const OLD_BODY = "- Respond in Japanese.";
 const ROTTEN_BODY = "- Lint with `bun run lint`.\n- Entry point: `src/main.ts`.";
+// Long enough that the scanner does not take the file for a wrapper.
+const BOTH_CLAUDE_EXTRA = "# C\n\n- legacy: `src/gone.ts`\n- one\n- two\n- three";
+const REPEATED = "- Use Bun.\n- one\n- two\n- three\n- four";
 
 function block(source: string, body: string, rev = "aaaaaaa") {
   return `<!-- agent-rules:begin source=${source} rev=${rev} hash=${hashBlockBody(body)} -->\n${body}\n<!-- agent-rules:end -->`;
@@ -36,13 +39,14 @@ const PACK_REPO: FakeRepoInput = {
         "acme/agents-only",
         "acme/claude-only",
         "acme/both",
+        "acme/both-repeat",
         "acme/foreign",
         "acme/outdated",
         "acme/modified",
         "acme/ordered",
       ],
       frontend: ["acme/ordered"],
-      rotten: ["acme/canonical", "acme/empty"],
+      rotten: ["acme/canonical", "acme/empty", "acme/stale-rule"],
     }),
   },
 };
@@ -60,7 +64,20 @@ const TARGETS: Record<string, FakeRepoInput> = {
   "acme/empty": { defaultBranch: "develop", files: { "README.md": "hi\n" } },
   "acme/agents-only": { files: { "AGENTS.md": "# Only agents\n" } },
   "acme/claude-only": { files: { ".claude/CLAUDE.md": "# Nested claude\n" } },
-  "acme/both": { files: { "AGENTS.md": "# A\n", "CLAUDE.md": "# C\n" } },
+  "acme/both": {
+    files: {
+      "AGENTS.md": "# A\n\n- entry: `src/main.ts`\n",
+      // Own text plus rot that already exists on main (`src/gone.ts`); the merge must not read it as new.
+      "CLAUDE.md": `@AGENTS.md\n\n${BOTH_CLAUDE_EXTRA}\n`,
+      "src/main.ts": "export {};\n",
+    },
+  },
+  "acme/both-repeat": {
+    files: {
+      "AGENTS.md": `# A\n\n${REPEATED}\n<!-- END: tail -->\n`,
+      "CLAUDE.md": `@AGENTS.md\n\n${REPEATED}\n`,
+    },
+  },
   "acme/foreign": {
     files: {
       "AGENTS.md": "<!-- managed by ruler; do not edit -->\n# F\n",
@@ -86,6 +103,15 @@ const TARGETS: Record<string, FakeRepoInput> = {
     },
   },
   "acme/unsubscribed": { files: { "AGENTS.md": "# U\n" } },
+  "acme/stale-rule": {
+    files: {
+      "AGENTS.md": "# S\n",
+      "CLAUDE.md": "@AGENTS.md\n",
+      "package.json": '{"scripts":{"build":"x"}}',
+      // Rot already present outside the root pair; the same reference in a block is still new.
+      ".cursor/rules/style.mdc": "---\nalwaysApply: true\n---\nRun `bun run lint` first.\n",
+    },
+  },
 };
 
 function world() {
@@ -192,9 +218,9 @@ describe("resolvePacks", () => {
     const loaded = await run(resolvePacks("acme/agent-rules"));
     expect(loaded.source).toBe(`acme/agent-rules@${(sha ?? "").slice(0, 7)}`);
     expect(loaded.packs.map((p) => `${p.id}:${p.rev === sha}:${p.subscribers.length}`)).toEqual([
-      "base:true:9",
+      "base:true:10",
       "frontend:true:1",
-      "rotten:true:2",
+      "rotten:true:3",
     ]);
     expect(loaded.warnings).toEqual([]);
     expect(
@@ -328,10 +354,69 @@ describe("sync", () => {
     expect(ordered.indexOf("source=base")).toBeLessThan(ordered.indexOf("source=frontend"));
   });
 
-  test("refuses: not subscribed, both have content, foreign marker, modified block", async () => {
+  test("both have content: merges CLAUDE.md into AGENTS.md, measures current, keeps old rot old", async () => {
+    const { github, runSync } = world();
+    const dry = await runSync({ repo: "acme/both", dryRun: true });
+    expect(dry.kind).toBe("planned");
+    if (dry.kind !== "planned") return;
+    expect(dry.status.status).toBe("eligible");
+    expect(renderSync(dry)).toContain(
+      "acme/both: eligible (append CLAUDE.md content to AGENTS.md under `## Merged from CLAUDE.md`, add CLAUDE.md wrapper, insert block); dry run",
+    );
+    expect(github.calls).toEqual([]);
+
+    const result = await runSync({ repo: "acme/both" });
+    expect(result.kind).toBe("written");
+    if (result.kind !== "written") return;
+    expect(github.fileAt("acme/both", "heads/agent-rules/base", "AGENTS.md")).toBe(
+      `# A\n\n- entry: \`src/main.ts\`\n\n## Merged from CLAUDE.md\n\n${BOTH_CLAUDE_EXTRA}\n\n${block("base", BODY, await revOf(github))}\n`,
+    );
+    expect(github.fileAt("acme/both", "heads/agent-rules/base", "CLAUDE.md")).toBe("@AGENTS.md\n");
+    const pull = github.pulls("acme/both")[0];
+    expect(pull?.body).toContain(
+      "- append CLAUDE.md content to AGENTS.md under `## Merged from CLAUDE.md` (verbatim, before any managed block; duplicates or conflicts with the text above it are left for review)",
+    );
+    expect(pull?.body).toContain("- replace CLAUDE.md with the wrapper (`@AGENTS.md`)");
+  });
+
+  test("both have content, CLAUDE.md repeats AGENTS.md: only the wrapper is written; a marker in either file blocks", async () => {
+    const { github, runSync } = world();
+    // `<!-- END: tail -->` is a foreign region marker; the pair would be rewritten, so it blocks.
+    expect(await runSync({ repo: "acme/both-repeat" })).toEqual({
+      kind: "refused",
+      message: "acme/both-repeat AGENTS.md:8: another tool marks this file: <!-- END: tail -->",
+    });
+    expect(github.calls).toEqual([]);
+
+    const clean = fakeGitHub({
+      "acme/agent-rules": PACK_REPO,
+      "acme/both-repeat": {
+        files: { "AGENTS.md": `# A\n\n${REPEATED}\n`, "CLAUDE.md": `@AGENTS.md\n\n${REPEATED}\n` },
+      },
+    });
+    const result = await Effect.runPromise(
+      sync({
+        repo: "acme/both-repeat",
+        pack: "base",
+        packs: "acme/agent-rules",
+        dryRun: false,
+      }).pipe(Effect.provide(Layer.mergeAll(BunServices.layer, clean.layer))),
+    );
+    expect(result.kind).toBe("written");
+    if (result.kind !== "written") return;
+    expect(result.plan.actions[0]).toBe("drop CLAUDE.md content, which AGENTS.md already contains");
+    expect(clean.fileAt("acme/both-repeat", "heads/agent-rules/base", "AGENTS.md")).toBe(
+      `# A\n\n${REPEATED}\n\n${block("base", BODY, await revOf(clean))}\n`,
+    );
+    expect(clean.fileAt("acme/both-repeat", "heads/agent-rules/base", "CLAUDE.md")).toBe(
+      "@AGENTS.md\n",
+    );
+  });
+
+  test("refuses: not subscribed, foreign marker, modified block", async () => {
     const { github, runSync } = world();
     const messages: Record<string, string> = {};
-    for (const repo of ["acme/unsubscribed", "acme/both", "acme/foreign", "acme/modified"]) {
+    for (const repo of ["acme/unsubscribed", "acme/foreign", "acme/modified"]) {
       const result = await runSync({ repo });
       expect(result.kind).toBe("refused");
       if (result.kind === "refused") messages[repo] = result.message;
@@ -339,9 +424,6 @@ describe("sync", () => {
     expect(messages["acme/unsubscribed"]).toBe(
       "acme/unsubscribed is not subscribed to `base`; add it to subscriptions.json in acme/agent-rules@" +
         `${(await revOf(github)).slice(0, 7)} first`,
-    );
-    expect(messages["acme/both"]).toBe(
-      "acme/both AGENTS.md:1: both AGENTS.md and CLAUDE.md have content; decide which one is canonical first",
     );
     expect(messages["acme/foreign"]).toBe(
       "acme/foreign AGENTS.md:1: another tool marks this file: <!-- managed by ruler; do not edit -->",
@@ -366,6 +448,14 @@ describe("sync", () => {
     // acme/empty has no package.json and no src/, so neither reference can be judged: not rot.
     expect((await runSync({ repo: "acme/empty", pack: "rotten" })).kind).toBe("written");
     expect(github.calls.filter((c) => c.includes("acme/canonical"))).toEqual([]);
+
+    // The same stale `bun run lint` already flagged in a rule file does not excuse the block.
+    const stale = await runSync({ repo: "acme/stale-rule", pack: "rotten" });
+    expect(stale).toMatchObject({
+      kind: "refused",
+      message: expect.stringContaining('AGENTS.md:4  script "lint" is not defined'),
+    });
+    expect(github.calls.filter((c) => c.includes("acme/stale-rule"))).toEqual([]);
   });
 
   test("refuses to rewrite an agent-rules/<pack> branch whose tip was not written by rulecheck", async () => {

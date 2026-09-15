@@ -22,7 +22,8 @@ const SHAPE_NOTE: Record<CanonicalShape, string | null> = {
   "claude-canonical": "Cursor and Codex read AGENTS.md; consider making it the canonical file",
   "agents-only": "Claude Code does not read AGENTS.md; add a CLAUDE.md wrapper (`@AGENTS.md`)",
   "claude-only": "Codex and most non-Cursor tools do not read CLAUDE.md",
-  "both-full": "Cursor loads both files; content is likely duplicated or conflicting",
+  "both-full":
+    "Cursor loads both files; content is likely duplicated or conflicting (a sync merges CLAUDE.md into AGENTS.md and leaves the wrapper)",
   none: null,
 };
 

@@ -100,7 +100,15 @@ function repo(
   shape: RepoForDistribution["shape"],
   overrides: Partial<RepoForDistribution> = {},
 ): RepoForDistribution {
-  return { name, shape, files: [], blocks: [], blockIssues: [], ...overrides };
+  return {
+    name,
+    shape,
+    bothFull: shape === "both-full" ? "merge" : null,
+    files: [],
+    blocks: [],
+    blockIssues: [],
+    ...overrides,
+  };
 }
 
 describe("classifyPackStatus", () => {
@@ -187,13 +195,45 @@ describe("classifyPackStatus", () => {
     expect(classifyPackStatus(repo("acme/swap", "claude-canonical"), base).status).toBe("eligible");
   });
 
-  test("blocked: both have content, foreign or malformed markers in a file the sync would write", () => {
-    expect(classifyPackStatus(repo("acme/both", "both-full"), base)).toMatchObject({
-      status: "blocked",
-      file: "AGENTS.md",
-      line: 1,
+  test("both have content: eligible, and the message names the D12 normalization", () => {
+    expect(classifyPackStatus(repo("acme/both", "both-full", { bothFull: "merge" }), base)).toEqual(
+      {
+        repo: "acme/both",
+        pack: "base",
+        status: "eligible",
+        file: "AGENTS.md",
+        line: null,
+        message:
+          "append CLAUDE.md content to AGENTS.md under `## Merged from CLAUDE.md`, add CLAUDE.md wrapper, insert block",
+      },
+    );
+    expect(
+      classifyPackStatus(repo("acme/both", "both-full", { bothFull: "wrapper" }), base),
+    ).toMatchObject({
+      status: "eligible",
+      message:
+        "CLAUDE.md repeats AGENTS.md: drop it, add CLAUDE.md wrapper, insert block into AGENTS.md",
     });
+    // The message names the file that actually carries the content.
+    const nested = repo("acme/both", "both-full", {
+      bothFull: "wrapper",
+      files: [file("AGENTS.md"), file(".claude/CLAUDE.md")],
+    });
+    expect(classifyPackStatus(nested, base).message).toStartWith(
+      ".claude/CLAUDE.md repeats AGENTS.md: drop it, add CLAUDE.md wrapper",
+    );
+    // Both files are rewritten, so a marker in either one blocks.
+    const marked = repo("acme/both", "both-full", {
+      blockIssues: [{ kind: "foreign-marker", file: "CLAUDE.md", line: 2, message: "m" }],
+    });
+    expect(classifyPackStatus(marked, base)).toMatchObject({
+      status: "blocked",
+      file: "CLAUDE.md",
+      line: 2,
+    });
+  });
 
+  test("blocked: foreign or malformed markers in a file the sync would write", () => {
     const foreign = repo("acme/foreign", "agents-canonical", {
       blockIssues: [
         {
@@ -243,6 +283,9 @@ describe("distribute", () => {
     );
     const repos = [
       repo("acme/canonical", "agents-canonical", { blocks: [block("base", OLD_BODY)] }),
+      repo("acme/foreign", "agents-canonical", {
+        blockIssues: [{ kind: "foreign-marker", file: "AGENTS.md", line: 1, message: "m" }],
+      }),
       repo("acme/both", "both-full"),
       repo("acme/empty", "none"),
       repo("other/repo", "none"),
@@ -250,21 +293,23 @@ describe("distribute", () => {
     const distribution = distribute("/packs", repos, [base, frontend]);
     expect(distribution.entries.map((e) => `${e.pack}:${e.repo}=${e.status}`)).toEqual([
       "base:acme/canonical=outdated",
-      "base:acme/both=blocked",
+      "base:acme/foreign=blocked",
+      "base:acme/both=eligible",
       "base:acme/empty=eligible",
       "base:other/repo=not-subscribed",
       "frontend:acme/both=not-subscribed",
       "frontend:acme/canonical=not-subscribed",
       "frontend:acme/empty=not-subscribed",
+      "frontend:acme/foreign=not-subscribed",
       "frontend:other/repo=not-subscribed",
     ]);
     expect(distribution.counts).toEqual({
       current: 0,
       outdated: 1,
       modified: 0,
-      eligible: 1,
+      eligible: 2,
       blocked: 1,
-      "not-subscribed": 5,
+      "not-subscribed": 6,
     });
     expect(distribution.warnings).toEqual([]);
     expect(distribute("/packs", [], [], ["bad subscriptions"]).warnings).toEqual([

@@ -1,4 +1,6 @@
+import { parseBlocks } from "./block.ts";
 import type {
+  BothFullNormalization,
   CanonicalShape,
   ContextBudget,
   FileKind,
@@ -203,6 +205,64 @@ export function classifyShape(files: ReadonlyArray<InstructionFile>): CanonicalS
   if (claudeIsWrapper && !agentsIsWrapper) return "agents-canonical";
   if (agentsIsWrapper && !claudeIsWrapper) return "claude-canonical";
   return "both-full";
+}
+
+const AGENTS_IMPORT_LINE = /^\s*@(?:\.\/)?AGENTS\.md\s*$/;
+const FENCE = /^\s{0,3}(`{3,}|~{3,})/;
+
+/**
+ * What CLAUDE.md says beyond importing AGENTS.md: the content with every line that is exactly an
+ * `@AGENTS.md` import removed, line endings normalized to `\n`, surrounding blank lines trimmed.
+ * Lines inside a fenced code block are kept as they are; a file that documents the wrapper
+ * convention shows the import line in a fence, and that is prose, not an import.
+ */
+export function claudeContentBeyondImport(claudeContent: string): string {
+  const kept: string[] = [];
+  let fence: string | null = null;
+  for (const line of claudeContent.replace(/\r\n/g, "\n").split("\n")) {
+    const marker = FENCE.exec(line)?.[1];
+    if (fence === null) {
+      if (marker) fence = marker;
+      else if (AGENTS_IMPORT_LINE.test(line)) continue;
+    } else if (
+      marker &&
+      marker[0] === fence[0] &&
+      marker.length >= fence.length &&
+      line.trim() === marker
+    ) {
+      fence = null;
+    }
+    kept.push(line);
+  }
+  return kept.join("\n").trim();
+}
+
+/**
+ * Decide how a `both-full` pair is normalized (D12). `wrapper` only when the text CLAUDE.md adds
+ * appears verbatim in AGENTS.md (a byte-level substring after line-ending normalization), so no
+ * sentence is dropped on a guess; every other pair is merged and left for review. Managed blocks
+ * in AGENTS.md do not count as a place where the text survives: their bodies belong to a pack and
+ * are replaced whole on the next update.
+ */
+export function classifyBothFull(
+  agentsContent: string,
+  claudeContent: string,
+): BothFullNormalization {
+  const extra = claudeContentBeyondImport(claudeContent);
+  if (extra.length === 0) return "wrapper";
+  return contentOutsideBlocks(agentsContent).includes(extra) ? "wrapper" : "merge";
+}
+
+/** `content` with every managed block's lines (markers included) blanked, line count preserved. */
+function contentOutsideBlocks(content: string): string {
+  const normalized = content.replace(/\r\n/g, "\n");
+  const blocks = parseBlocks("", normalized).blocks;
+  if (blocks.length === 0) return normalized;
+  const lines = normalized.split("\n");
+  for (const block of blocks) {
+    for (let index = block.line - 1; index < block.endLine; index += 1) lines[index] = "";
+  }
+  return lines.join("\n");
 }
 
 /** Extract `@file` imports (Claude Code syntax) that point to local markdown files. */
