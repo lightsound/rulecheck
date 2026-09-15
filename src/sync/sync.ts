@@ -218,12 +218,14 @@ const measure = (
   });
 
 /**
- * A finding is "known" by kind and value, not by file: the normalization moves CLAUDE.md text into
- * AGENTS.md (`claude-only`, `claude-canonical`, `both-full`), and rot that already existed there
- * must not read as rot the pack introduced.
+ * A finding is "known" by kind, value, and file, except that the root pair counts as one file: the
+ * normalization moves CLAUDE.md text into AGENTS.md (`claude-only`, `claude-canonical`,
+ * `both-full`), and rot that already existed there must not read as rot the pack introduced. Rot
+ * elsewhere (a nested AGENTS.md, a rule file) does not excuse the same reference in the block.
  */
 function findingKey(finding: Finding): string {
-  return `${finding.kind}:${finding.value}`;
+  const scope = ROOT_PAIR.includes(finding.file) ? "root-pair" : finding.file;
+  return `${finding.kind}:${scope}:${finding.value}`;
 }
 
 function newFindings(before: ReadonlyArray<Finding>, after: ReadonlyArray<Finding>): Finding[] {

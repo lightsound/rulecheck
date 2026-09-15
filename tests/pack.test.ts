@@ -204,7 +204,7 @@ describe("classifyPackStatus", () => {
         file: "AGENTS.md",
         line: null,
         message:
-          "append CLAUDE.md content to AGENTS.md under `## Merged from CLAUDE.md`, replace CLAUDE.md with the `@AGENTS.md` wrapper, insert block",
+          "append CLAUDE.md content to AGENTS.md under `## Merged from CLAUDE.md`, add CLAUDE.md wrapper, insert block",
       },
     );
     expect(
@@ -212,8 +212,16 @@ describe("classifyPackStatus", () => {
     ).toMatchObject({
       status: "eligible",
       message:
-        "CLAUDE.md repeats AGENTS.md: replace it with the `@AGENTS.md` wrapper, insert block into AGENTS.md",
+        "CLAUDE.md repeats AGENTS.md: drop it, add CLAUDE.md wrapper, insert block into AGENTS.md",
     });
+    // The message names the file that actually carries the content.
+    const nested = repo("acme/both", "both-full", {
+      bothFull: "wrapper",
+      files: [file("AGENTS.md"), file(".claude/CLAUDE.md")],
+    });
+    expect(classifyPackStatus(nested, base).message).toStartWith(
+      ".claude/CLAUDE.md repeats AGENTS.md: drop it, add CLAUDE.md wrapper",
+    );
     // Both files are rewritten, so a marker in either one blocks.
     const marked = repo("acme/both", "both-full", {
       blockIssues: [{ kind: "foreign-marker", file: "CLAUDE.md", line: 2, message: "m" }],

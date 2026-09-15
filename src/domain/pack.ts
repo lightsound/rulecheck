@@ -127,16 +127,13 @@ const ELIGIBLE_ACTION: Record<Exclude<CanonicalShape, "both-full">, string> = {
   none: "create AGENTS.md with the block and a CLAUDE.md wrapper",
 };
 
-const BOTH_FULL_ACTION: Record<BothFullNormalization, string> = {
-  wrapper:
-    "CLAUDE.md repeats AGENTS.md: replace it with the `@AGENTS.md` wrapper, insert block into AGENTS.md",
-  merge:
-    "append CLAUDE.md content to AGENTS.md under `## Merged from CLAUDE.md`, replace CLAUDE.md with the `@AGENTS.md` wrapper, insert block",
-};
-
 function eligibleAction(repo: RepoForDistribution): string {
   if (repo.shape !== "both-full") return ELIGIBLE_ACTION[repo.shape];
-  return BOTH_FULL_ACTION[repo.bothFull ?? "merge"];
+  const claude =
+    repo.files.find((f) => ROOT_CLAUDE.has(f.relativePath))?.relativePath ?? "CLAUDE.md";
+  return repo.bothFull === "wrapper"
+    ? `${claude} repeats AGENTS.md: drop it, add CLAUDE.md wrapper, insert block into AGENTS.md`
+    : `append ${claude} content to AGENTS.md under \`## Merged from CLAUDE.md\`, add CLAUDE.md wrapper, insert block`;
 }
 
 /** Status of one repository for one pack. */

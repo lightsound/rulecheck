@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { hashBlockBody } from "../src/domain/block.ts";
 import {
   classifyBothFull,
   classifyShape,
@@ -222,6 +223,27 @@ describe("classifyBothFull", () => {
     expect(classifyBothFull(agents, "- use bun.\n")).toBe("merge");
     expect(classifyBothFull(agents, "- Respond in Japanese.\n- Use Bun.\n")).toBe("merge");
     expect(classifyBothFull("", "# Only here\n")).toBe("merge");
+  });
+
+  test("an import line inside a code fence is prose and survives", () => {
+    const documented = "# Conventions\n\n- The wrapper is exactly:\n\n```md\n@AGENTS.md\n```\n";
+    expect(claudeContentBeyondImport(`@AGENTS.md\n\n${documented}`)).toBe(documented.trim());
+    expect(claudeContentBeyondImport("~~~\n@AGENTS.md\n~~~\n@AGENTS.md\n")).toBe(
+      "~~~\n@AGENTS.md\n~~~",
+    );
+    // A longer fence closes a shorter one; a shorter or different one does not.
+    expect(
+      claudeContentBeyondImport("```\n``\n@AGENTS.md\n~~~\n@AGENTS.md\n````\n@AGENTS.md\n"),
+    ).toBe("```\n``\n@AGENTS.md\n~~~\n@AGENTS.md\n````");
+  });
+
+  test("text that survives only inside a managed block does not make CLAUDE.md redundant", () => {
+    const body = "- one\n- two\n- three\n- four\n- five";
+    const block = `<!-- agent-rules:begin source=frontend hash=${hashBlockBody(body)} -->\n${body}\n<!-- agent-rules:end -->`;
+    expect(classifyBothFull(`# P\n\n${block}\n`, `@AGENTS.md\n\n${body}\n`)).toBe("merge");
+    expect(classifyBothFull(`# P\n\n${body}\n\n${block}\n`, `@AGENTS.md\n\n${body}\n`)).toBe(
+      "wrapper",
+    );
   });
 });
 

@@ -246,11 +246,13 @@ deterministic answer that loses nothing. `both-full` is therefore `eligible`, an
 normalizes the pair in one of two ways, chosen from the files' content:
 
 - **wrapper**: the text `CLAUDE.md` adds beyond an `@AGENTS.md` import line (line endings
-  normalized, surrounding blank lines trimmed) is empty or appears verbatim as a substring of
-  `AGENTS.md`. `CLAUDE.md` becomes exactly `@AGENTS.md`; nothing else moves. Verbatim containment
-  is the test, not a line set or a similarity score: dropping a file is only safe when every byte
-  of it provably survives, so a reordered or reworded copy is merged instead (precision over
-  recall, as for findings).
+  normalized, surrounding blank lines trimmed; an import line inside a code fence is prose and
+  stays) is empty or appears verbatim as a substring of `AGENTS.md` outside its managed blocks.
+  `CLAUDE.md` becomes exactly `@AGENTS.md`; nothing else moves. Verbatim containment is the test,
+  not a line set or a similarity score: dropping a file is only safe when every byte of it
+  provably survives, so a reordered or reworded copy is merged instead (precision over recall, as
+  for findings). Block bodies do not count as survival because they belong to a pack and are
+  replaced whole on its next update.
 - **merge**: otherwise the same text is appended to `AGENTS.md` under the heading
   `## Merged from CLAUDE.md`, placed before the first managed block so project text stays ahead
   of distributed text (D10), then `CLAUDE.md` becomes `@AGENTS.md`. The text is copied verbatim;
@@ -265,11 +267,12 @@ would rewrite (D9; for `both-full` that is both files, as for every shape change
 preconditions D10 lists (two `CLAUDE.md` files, files contradicting the shape). Measure after
 plan is unchanged: the planned tree must read `agents-canonical` and `current`.
 
-One reader change follows: the "new finding" check compares findings by kind and value, no
-longer by file. Moving text from `CLAUDE.md` into `AGENTS.md` (`claude-only`, `claude-canonical`,
-and now the merge) carries any rot that text already had into a different file, and that rot is
-the repository's, not the pack's. A finding is new only when its script or path was not flagged
-anywhere in the base tree.
+One reader change follows: the "new finding" check treats the root pair (`AGENTS.md`,
+`CLAUDE.md`, `.claude/CLAUDE.md`) as one file when comparing findings. Moving text from
+`CLAUDE.md` into `AGENTS.md` (`claude-only`, `claude-canonical`, and now the merge) carries any
+rot that text already had into a different file of the pair, and that rot is the repository's,
+not the pack's. Files outside the pair keep their own identity: a stale reference in a nested
+`AGENTS.md` or a rule file does not excuse the same reference inside the block.
 
 A `CLAUDE.md` that is an `@AGENTS.md` line plus up to three short lines is still a wrapper to the
 scanner (`agents-canonical`), so those lines are not merged; that threshold predates this decision

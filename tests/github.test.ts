@@ -46,7 +46,7 @@ const PACK_REPO: FakeRepoInput = {
         "acme/ordered",
       ],
       frontend: ["acme/ordered"],
-      rotten: ["acme/canonical", "acme/empty"],
+      rotten: ["acme/canonical", "acme/empty", "acme/stale-rule"],
     }),
   },
 };
@@ -103,6 +103,15 @@ const TARGETS: Record<string, FakeRepoInput> = {
     },
   },
   "acme/unsubscribed": { files: { "AGENTS.md": "# U\n" } },
+  "acme/stale-rule": {
+    files: {
+      "AGENTS.md": "# S\n",
+      "CLAUDE.md": "@AGENTS.md\n",
+      "package.json": '{"scripts":{"build":"x"}}',
+      // Rot already present outside the root pair; the same reference in a block is still new.
+      ".cursor/rules/style.mdc": "---\nalwaysApply: true\n---\nRun `bun run lint` first.\n",
+    },
+  },
 };
 
 function world() {
@@ -211,7 +220,7 @@ describe("resolvePacks", () => {
     expect(loaded.packs.map((p) => `${p.id}:${p.rev === sha}:${p.subscribers.length}`)).toEqual([
       "base:true:10",
       "frontend:true:1",
-      "rotten:true:2",
+      "rotten:true:3",
     ]);
     expect(loaded.warnings).toEqual([]);
     expect(
@@ -352,7 +361,7 @@ describe("sync", () => {
     if (dry.kind !== "planned") return;
     expect(dry.status.status).toBe("eligible");
     expect(renderSync(dry)).toContain(
-      "acme/both: eligible (append CLAUDE.md content to AGENTS.md under `## Merged from CLAUDE.md`, replace CLAUDE.md with the `@AGENTS.md` wrapper, insert block); dry run",
+      "acme/both: eligible (append CLAUDE.md content to AGENTS.md under `## Merged from CLAUDE.md`, add CLAUDE.md wrapper, insert block); dry run",
     );
     expect(github.calls).toEqual([]);
 
@@ -439,6 +448,14 @@ describe("sync", () => {
     // acme/empty has no package.json and no src/, so neither reference can be judged: not rot.
     expect((await runSync({ repo: "acme/empty", pack: "rotten" })).kind).toBe("written");
     expect(github.calls.filter((c) => c.includes("acme/canonical"))).toEqual([]);
+
+    // The same stale `bun run lint` already flagged in a rule file does not excuse the block.
+    const stale = await runSync({ repo: "acme/stale-rule", pack: "rotten" });
+    expect(stale).toMatchObject({
+      kind: "refused",
+      message: expect.stringContaining('AGENTS.md:4  script "lint" is not defined'),
+    });
+    expect(github.calls.filter((c) => c.includes("acme/stale-rule"))).toEqual([]);
   });
 
   test("refuses to rewrite an agent-rules/<pack> branch whose tip was not written by rulecheck", async () => {
