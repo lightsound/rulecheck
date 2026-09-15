@@ -44,9 +44,10 @@ export interface FakeGitHub {
   readonly calls: string[];
   /**
    * Scheduling evidence: every call yields once, so concurrent fibers interleave here as they
-   * would on a network. `maxInFlight` is the most calls open at one moment; `maxWriters` the most
-   * repositories that were between their first write (`createTree`) and their pull request at
-   * one moment, which the write lock must keep at 1.
+   * would on a network. `maxInFlight` is the most distinct repositories with a call open at one
+   * moment (not the most calls); `maxWriters` the most repositories that were between their
+   * first write (`createTree`) and their pull request at one moment, which the write lock must
+   * keep at 1. A write sequence that fails midway leaves the writer set with its error.
    */
   readonly maxInFlight: () => number;
   readonly maxWriters: () => number;
@@ -130,6 +131,8 @@ export function fakeGitHub(input: Readonly<Record<string, FakeRepoInput>>): Fake
       maxInFlight = Math.max(maxInFlight, inFlight.size);
       return Effect.yieldNow.pipe(
         Effect.andThen(effect),
+        // A failed write call ends the repository's write sequence: the sync stops there.
+        Effect.tapError(() => Effect.sync(() => writers.delete(name))),
         Effect.ensuring(
           Effect.sync(() => {
             const open = (inFlight.get(name) ?? 1) - 1;
