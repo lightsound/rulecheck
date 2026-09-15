@@ -91,6 +91,179 @@ export interface Finding {
   readonly message: string;
 }
 
+/**
+ * A managed block inside an instruction file (decisions D4, D7):
+ *
+ *     <!-- agent-rules:begin source=<pack-id> rev=<git sha> hash=<sha256 of body> -->
+ *     ...
+ *     <!-- agent-rules:end -->
+ *
+ * `hash` is what the marker records; `bodyHash` is recomputed from the body found in the file.
+ * They differ when a human edited the block after it was distributed.
+ */
+export interface ManagedBlock {
+  /** Repo-relative path of the file that carries the block. */
+  readonly file: string;
+  /** Pack id from `source=`. */
+  readonly source: string;
+  /** Git sha of the pack repository from `rev=`, or null when the marker omits it. */
+  readonly rev: string | null;
+  readonly hash: string;
+  readonly bodyHash: string;
+  /** 1-based line of the begin marker. */
+  readonly line: number;
+  /** 1-based line of the end marker. */
+  readonly endLine: number;
+  readonly body: string;
+  readonly modified: boolean;
+}
+
+export type BlockIssueKind =
+  /** An `agent-rules` marker that could not be paired or parsed. */
+  | "malformed-marker"
+  /** A managed-region marker written by another tool, which a sync must not overwrite. */
+  | "foreign-marker";
+
+export interface BlockIssue {
+  readonly kind: BlockIssueKind;
+  readonly file: string;
+  readonly line: number;
+  readonly message: string;
+}
+
+/**
+ * One file that a pack distributes (D8: a pack is a set of files).
+ *
+ * - `agents-block` a fragment inserted into the target repository's root `AGENTS.md` as a managed block
+ * - `file`         a whole managed file, e.g. `.cursor/skills/<name>/SKILL.md`, at the same repo-relative path
+ */
+export type PackFile =
+  | {
+      readonly kind: "agents-block";
+      readonly body: string;
+      /** sha256 of the normalized body, the value a fresh block would carry in `hash=`. */
+      readonly hash: string;
+    }
+  | {
+      readonly kind: "file";
+      readonly path: string;
+      readonly hash: string;
+    };
+
+export interface Pack {
+  readonly id: string;
+  /** Git HEAD of the pack repository, or null when it is not a git checkout. */
+  readonly rev: string | null;
+  readonly files: ReadonlyArray<PackFile>;
+  /** Repositories subscribed to this pack, as `owner/repo`, lowercased. */
+  readonly subscribers: ReadonlyArray<string>;
+}
+
+/**
+ * Status of one repository with respect to one pack's `AGENTS.md` block (D6).
+ *
+ * - `current`        block present, body untouched, hash equals the pack's current hash
+ * - `outdated`       block present, body untouched, pack has moved on
+ * - `modified`       block present but its body no longer matches the hash it carries
+ * - `eligible`       subscribed, no block, and the shape allows a deterministic insertion
+ * - `blocked`        a write is pending (insertion for a subscriber, or an update of an outdated block)
+ *                    and a human must act first: `both have content`, or a foreign or malformed
+ *                    marker in a file the sync would write
+ * - `not-subscribed` no block and the repository is not in the pack's subscription list
+ */
+export type PackStatus =
+  | "current"
+  | "outdated"
+  | "modified"
+  | "eligible"
+  | "blocked"
+  | "not-subscribed";
+
+export interface PackStatusEntry {
+  readonly repo: string;
+  readonly pack: string;
+  readonly status: PackStatus;
+  /** Repo-relative file the status refers to (the block, or the file that blocks insertion). */
+  readonly file: string | null;
+  readonly line: number | null;
+  readonly message: string | null;
+}
+
+export interface PackDistribution {
+  /** Directory the packs were loaded from. */
+  readonly root: string;
+  readonly packs: ReadonlyArray<Pack>;
+  readonly entries: ReadonlyArray<PackStatusEntry>;
+  readonly counts: Readonly<Record<PackStatus, number>>;
+  /** Problems reading the pack repository itself, e.g. an unparseable `subscriptions.json`. */
+  readonly warnings: ReadonlyArray<string>;
+}
+
+/**
+ * Skill directories rulecheck understands: `<agentDir>/skills/<name>/SKILL.md`.
+ * `.agents/skills` is the canonical location `npx skills` installs into and symlinks from.
+ */
+export type SkillAgentDir = ".agents" | ".claude" | ".cursor";
+
+export type SkillIssueKind =
+  /** SKILL.md does not start with frontmatter, or `name` / `description` fail skills-ref validation. */
+  | "invalid-frontmatter"
+  /** `skills-lock.json` lists a skill whose directory is missing. */
+  | "missing";
+
+/**
+ * How an installed skill relates to `skills-lock.json`.
+ *
+ * - `unlocked` no entry: authored locally or installed without the lock
+ * - `match`    the directory hashes to the entry's `computedHash`: unchanged since install
+ * - `differs`  the hash differs. Not reported as a finding: `npx skills` records the hash of the
+ *              downloaded source snapshot, before the installer drops `metadata.json` and dotfiles,
+ *              so a difference does not prove an edit
+ * - `locked`   an entry without a hash
+ */
+export type SkillLockState = "unlocked" | "match" | "differs" | "locked";
+
+export interface SkillIssue {
+  readonly kind: SkillIssueKind;
+  /** Repo-relative path: the SKILL.md, or `skills-lock.json` for missing entries. */
+  readonly file: string;
+  readonly line: number;
+  readonly skill: string;
+  readonly message: string;
+}
+
+export interface InstalledSkill {
+  readonly name: string;
+  readonly agentDir: SkillAgentDir;
+  /** Repo-relative path of the skill directory. */
+  readonly relativePath: string;
+  /** Frontmatter `name`, or null when absent. */
+  readonly frontmatterName: string | null;
+  /** sha256 over every file in the directory, in the `skills-lock.json` `computedHash` format. */
+  readonly hash: string;
+  readonly files: number;
+  /** Other agent directories that symlink to this one (`npx skills` links `.claude/skills/x` to `.agents/skills/x`). */
+  readonly links: ReadonlyArray<string>;
+  /** Null when the repository has no `skills-lock.json`. */
+  readonly lockState: SkillLockState | null;
+}
+
+export interface SkillLockEntry {
+  readonly name: string;
+  readonly source: string;
+  readonly sourceType: string;
+  readonly computedHash: string | null;
+  /** 1-based line of the entry key in `skills-lock.json`. */
+  readonly line: number;
+}
+
+export interface SkillsInventory {
+  readonly skills: ReadonlyArray<InstalledSkill>;
+  /** Null when the repository has no `skills-lock.json`. */
+  readonly lock: ReadonlyArray<SkillLockEntry> | null;
+  readonly issues: ReadonlyArray<SkillIssue>;
+}
+
 export interface RepoReport {
   readonly root: string;
   /** Short display name, e.g. `owner/repo` when the root lives under a ghq-style tree. */
@@ -99,6 +272,9 @@ export interface RepoReport {
   readonly files: ReadonlyArray<InstructionFile>;
   readonly budget: ContextBudget;
   readonly findings: ReadonlyArray<Finding>;
+  readonly blocks: ReadonlyArray<ManagedBlock>;
+  readonly blockIssues: ReadonlyArray<BlockIssue>;
+  readonly skills: SkillsInventory;
 }
 
 /**
@@ -142,6 +318,13 @@ export interface ScanTotals {
   readonly tokens: number;
   readonly findings: number;
   readonly shapes: Readonly<Record<CanonicalShape, number>>;
+  /** Managed blocks found across all repositories, and how many of them were edited in place. */
+  readonly blocks: number;
+  readonly modifiedBlocks: number;
+  /** Malformed `agent-rules` markers; foreign markers only count once a pack asks to write the file. */
+  readonly malformedMarkers: number;
+  readonly skills: number;
+  readonly skillIssues: number;
 }
 
 export interface ScanReport {
@@ -150,5 +333,7 @@ export interface ScanReport {
   readonly repos: ReadonlyArray<RepoReport>;
   readonly duplicates: ReadonlyArray<DuplicateGroup>;
   readonly personal: PersonalLayer | null;
+  /** Null unless a pack directory was given. */
+  readonly distribution: PackDistribution | null;
   readonly totals: ScanTotals;
 }

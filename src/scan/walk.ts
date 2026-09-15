@@ -1,7 +1,8 @@
 import { Effect, FileSystem, Path } from "effect";
 import type { PlatformError } from "effect/PlatformError";
 import { detectKind, isIgnoredDirectory } from "../domain/classify.ts";
-import type { FileKind } from "../domain/types.ts";
+import { detectSkill } from "../domain/skills.ts";
+import type { FileKind, SkillAgentDir } from "../domain/types.ts";
 
 export interface DiscoveredFile {
   readonly repoRoot: string;
@@ -11,11 +12,31 @@ export interface DiscoveredFile {
   readonly depth: number;
 }
 
+export interface DiscoveredSkill {
+  readonly name: string;
+  readonly agentDir: SkillAgentDir;
+  /** Absolute path of the skill directory. */
+  readonly path: string;
+  /** Repo-relative path of the skill directory. */
+  readonly relativePath: string;
+}
+
 export interface DiscoveredRepo {
   readonly root: string;
   readonly files: ReadonlyArray<DiscoveredFile>;
   /** Absolute paths of every package.json in the repository, used to verify script references. */
   readonly packageJsonPaths: ReadonlyArray<string>;
+  /** `<agentDir>/skills/<name>/` directories at the repository root that contain a SKILL.md. */
+  readonly skills: ReadonlyArray<DiscoveredSkill>;
+  /** Absolute path of the root `skills-lock.json`, when present. */
+  readonly skillsLockPath: string | null;
+}
+
+interface Bucket {
+  files: DiscoveredFile[];
+  packageJsonPaths: string[];
+  skills: DiscoveredSkill[];
+  skillsLockPath: string | null;
 }
 
 export interface WalkOptions {
@@ -31,7 +52,9 @@ const DEFAULT_OPTIONS: WalkOptions = { maxDepth: 12 };
  *
  * Nested repositories (submodules, vendored checkouts) become their own entries;
  * files inside them are attributed to the innermost repository.
- * Directories rejected by {@link isIgnoredDirectory} and symbolic links are never followed.
+ * Directories rejected by {@link isIgnoredDirectory} are never descended into. Symbolic links are
+ * followed (`stat` resolves them), so a linked directory is visited under its link path; the
+ * skills inventory folds such copies back together by real path.
  */
 export const walk = (
   root: string,
@@ -42,7 +65,7 @@ export const walk = (
     const path = yield* Path.Path;
     const { maxDepth } = { ...DEFAULT_OPTIONS, ...options };
 
-    const repos = new Map<string, { files: DiscoveredFile[]; packageJsonPaths: string[] }>();
+    const repos = new Map<string, Bucket>();
 
     const visit = (
       dir: string,
@@ -58,7 +81,9 @@ export const walk = (
 
         const isRepo = entries.includes(".git");
         const currentRepo = isRepo ? dir : repoRoot;
-        if (isRepo && !repos.has(dir)) repos.set(dir, { files: [], packageJsonPaths: [] });
+        if (isRepo && !repos.has(dir)) {
+          repos.set(dir, { files: [], packageJsonPaths: [], skills: [], skillsLockPath: null });
+        }
 
         const dirName = path.basename(dir);
         for (const name of entries) {
@@ -82,6 +107,20 @@ export const walk = (
           }
 
           const relativePath = path.relative(currentRepo, full).split(path.sep).join("/");
+          if (relativePath === "skills-lock.json") {
+            bucket.skillsLockPath = full;
+            continue;
+          }
+          const skill = detectSkill(relativePath);
+          if (skill) {
+            bucket.skills.push({
+              name: skill.name,
+              agentDir: skill.agentDir,
+              path: path.dirname(full),
+              relativePath: skill.dir,
+            });
+            continue;
+          }
           const kind = detectKind(relativePath);
           if (!kind) continue;
 
@@ -102,6 +141,8 @@ export const walk = (
         root: repoRoot,
         files: [...bucket.files].sort((a, b) => a.relativePath.localeCompare(b.relativePath)),
         packageJsonPaths: [...bucket.packageJsonPaths].sort(),
+        skills: [...bucket.skills].sort((a, b) => a.relativePath.localeCompare(b.relativePath)),
+        skillsLockPath: bucket.skillsLockPath,
       }))
       .sort((a, b) => a.root.localeCompare(b.root));
   });

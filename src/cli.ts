@@ -1,4 +1,4 @@
-import { Console, Effect } from "effect";
+import { Console, Effect, Option } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { renderText } from "./report/render.ts";
 import { scan } from "./scan/scan.ts";
@@ -31,10 +31,21 @@ const personal = Flag.Boolean("personal").pipe(
   Flag.withDefault(true),
 );
 
-const scanCommand = Command.make("scan", { root, json, all, maxDepth, personal }, (config) =>
+const packs = Flag.Directory("packs", { mustExist: true }).pipe(
+  Flag.withDescription(
+    "Checkout of the pack repository (packs/<id>/AGENTS.md, subscriptions.json). Adds the pack distribution report.",
+  ),
+  Flag.optional,
+);
+
+const scanCommand = Command.make("scan", { root, json, all, maxDepth, personal, packs }, (config) =>
   Effect.gen(function* () {
     const home = config.personal ? (process.env.HOME ?? null) : null;
-    const report = yield* scan(config.root, { maxDepth: config.maxDepth, home });
+    const report = yield* scan(config.root, {
+      maxDepth: config.maxDepth,
+      home,
+      packs: Option.getOrNull(config.packs),
+    });
     if (config.json) {
       yield* Console.log(JSON.stringify(report, null, 2));
       return;

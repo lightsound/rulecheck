@@ -1,4 +1,12 @@
-import type { CanonicalShape, PersonalLayer, RepoReport, ScanReport } from "../domain/types.ts";
+import type {
+  CanonicalShape,
+  PackDistribution,
+  PackStatus,
+  PersonalLayer,
+  RepoReport,
+  ScanReport,
+  SkillLockState,
+} from "../domain/types.ts";
 
 const SHAPE_LABEL: Record<CanonicalShape, string> = {
   "agents-canonical": "AGENTS.md canonical",
@@ -18,13 +26,27 @@ const SHAPE_NOTE: Record<CanonicalShape, string | null> = {
   none: null,
 };
 
+const STATUS_LABEL: Record<PackStatus, string> = {
+  current: "current",
+  outdated: "outdated",
+  modified: "modified",
+  eligible: "eligible",
+  blocked: "blocked",
+  "not-subscribed": "not subscribed",
+};
+
 export function renderText(report: ScanReport, options: { readonly all?: boolean } = {}): string {
   const out: string[] = [];
-  const repos = options.all ? report.repos : report.repos.filter((r) => r.files.length > 0);
+  const repos = options.all
+    ? report.repos
+    : report.repos.filter((r) => r.files.length > 0 || r.skills.skills.length > 0);
 
   out.push(`rulecheck scan of ${report.root}`);
   out.push(
     `${report.totals.repos} repositories, ${report.totals.reposWithInstructions} with instruction files, ${report.totals.files} files, ~${fmt(report.totals.tokens)} tokens total, ${report.totals.findings} findings`,
+  );
+  out.push(
+    `${report.totals.blocks} managed blocks (${report.totals.modifiedBlocks} modified, ${report.totals.malformedMarkers} malformed markers), ${report.totals.skills} skills (${report.totals.skillIssues} issues)`,
   );
   out.push("");
 
@@ -54,7 +76,49 @@ export function renderText(report: ScanReport, options: { readonly all?: boolean
     out.push("");
   }
 
+  if (report.distribution) {
+    out.push(...renderDistribution(report.distribution));
+    out.push("");
+  }
+
   return out.join("\n");
+}
+
+function renderDistribution(distribution: PackDistribution): string[] {
+  const lines: string[] = [];
+  lines.push(
+    `Pack distribution (packs from ${distribution.root}, ${distribution.packs.length} packs)`,
+  );
+  for (const warning of distribution.warnings) lines.push(`      ! ${warning}`);
+
+  for (const pack of distribution.packs) {
+    const block = pack.files.find((f) => f.kind === "agents-block");
+    const managedFiles = pack.files.filter((f) => f.kind === "file").length;
+    const parts = [
+      pack.rev ? `rev ${pack.rev.slice(0, 7)}` : "rev unknown",
+      block ? "AGENTS.md block" : "no AGENTS.md block",
+      `${managedFiles} managed files`,
+      `${pack.subscribers.length} subscribed`,
+    ];
+    lines.push(`  ${pad(pack.id, 22)} ${parts.join(", ")}`);
+
+    const entries = distribution.entries.filter((e) => e.pack === pack.id);
+    const counts = (Object.keys(STATUS_LABEL) as PackStatus[])
+      .map((status) => [status, entries.filter((e) => e.status === status).length] as const)
+      .filter(([, count]) => count > 0)
+      .map(([status, count]) => `${STATUS_LABEL[status]} ${count}`);
+    lines.push(`      ${counts.join(", ")}`);
+
+    for (const entry of entries) {
+      const where =
+        entry.file === null ? "" : entry.line === null ? entry.file : `${entry.file}:${entry.line}`;
+      const message = entry.message ? `  ${entry.message}` : "";
+      lines.push(
+        `      ${pad(entry.repo, 44)} ${pad(STATUS_LABEL[entry.status], 15)} ${where}${message}`.trimEnd(),
+      );
+    }
+  }
+  return lines;
 }
 
 function renderRepo(repo: RepoReport): string[] {
@@ -81,10 +145,41 @@ function renderRepo(repo: RepoReport): string[] {
   for (const finding of repo.findings) {
     lines.push(`      ! ${finding.file}:${finding.line}  ${finding.message}`);
   }
+  for (const issue of repo.blockIssues) {
+    if (issue.kind !== "malformed-marker") continue;
+    lines.push(`      ! ${issue.file}:${issue.line}  ${issue.message}`);
+  }
+  for (const issue of repo.skills.issues) {
+    lines.push(`      ! ${issue.file}:${issue.line}  ${issue.message}`);
+  }
 
   for (const file of repo.files) lines.push(renderFile(file));
+  for (const block of repo.blocks) {
+    const rev = block.rev ? ` rev ${block.rev.slice(0, 7)}` : "";
+    const state = block.modified ? "  MODIFIED" : "";
+    lines.push(
+      `      ${pad(`${block.file}:${block.line}-${block.endLine}`, 52)} block ${block.source}${rev}${state}`,
+    );
+  }
+  for (const skill of repo.skills.skills) {
+    const lock = skill.lockState === null ? "" : `  [${LOCK_STATE_LABEL[skill.lockState]}]`;
+    const links =
+      skill.links.length > 0
+        ? `  (also ${skill.links.map((l) => l.split("/")[0] ?? l).join(", ")})`
+        : "";
+    lines.push(
+      `      ${pad(skill.relativePath, 52)} skill ${String(skill.files).padStart(3)} files${lock}${links}`,
+    );
+  }
   return lines;
 }
+
+const LOCK_STATE_LABEL: Record<SkillLockState, string> = {
+  unlocked: "no lock entry",
+  match: "matches lock",
+  differs: "lock hash differs",
+  locked: "locked",
+};
 
 function renderFile(file: RepoReport["files"][number]): string {
   const marker = file.wrapperTarget
