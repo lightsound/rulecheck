@@ -163,11 +163,29 @@ export const sync = (
     }
 
     const branch = branchFor(pack.id);
+    const existing = yield* github.getRef(target, `heads/${branch}`);
+    if (existing !== null) {
+      const tip = yield* github.getCommit(target, existing);
+      if (!isRulecheckCommit(tip.message)) {
+        return yield* new SyncRefused({
+          message: `${name}: branch \`${branch}\` exists but its tip commit (${existing.slice(0, 7)}) was not written by rulecheck; delete or rename the branch first`,
+        });
+      }
+    }
+
     if (options.dryRun) {
       return { kind: "planned", repo: name, status: before.entry, plan, base, branch };
     }
 
-    const written = yield* write(github, target, baseSha, base, branch, plan, pack, before.entry);
+    const written = yield* write(github, target, {
+      baseSha,
+      base,
+      branch,
+      branchExists: existing !== null,
+      plan,
+      pack,
+      status: before.entry,
+    });
     return { kind: "written", repo: name, status: before.entry, plan, base, branch, ...written };
   });
 
@@ -213,30 +231,28 @@ function where(entry: PackStatusEntry): string {
   return entry.line === null ? entry.file : `${entry.file}:${entry.line}`;
 }
 
+interface WriteInput {
+  readonly baseSha: string;
+  readonly base: string;
+  readonly branch: string;
+  /** Whether `agent-rules/<pack>` already exists; ownership was verified by the caller. */
+  readonly branchExists: boolean;
+  readonly plan: SyncPlan;
+  readonly pack: Pack;
+  readonly status: PackStatusEntry;
+}
+
+/** The only function in rulecheck that issues GitHub writes. Every check has run by now. */
 const write = (
   github: GitHubService,
   target: RepositoryRef,
-  baseSha: string,
-  base: string,
-  branch: string,
-  plan: SyncPlan,
-  pack: Pack,
-  status: PackStatusEntry,
+  input: WriteInput,
 ): Effect.Effect<
   { commit: string; pullRequest: PullRequest; pullRequestCreated: boolean },
-  GitHubError | SyncRefused
+  GitHubError
 > =>
   Effect.gen(function* () {
-    const existing = yield* github.getRef(target, `heads/${branch}`);
-    if (existing !== null) {
-      const tip = yield* github.getCommit(target, existing);
-      if (!isRulecheckCommit(tip.message)) {
-        return yield* new SyncRefused({
-          message: `${repositoryName(target)}: branch \`${branch}\` exists but its tip commit (${existing.slice(0, 7)}) was not written by rulecheck; delete or rename the branch first`,
-        });
-      }
-    }
-
+    const { baseSha, base, branch, plan, pack, status } = input;
     const text = pullRequestText(plan, pack, status);
     const baseCommit = yield* github.getCommit(target, baseSha);
     const tree = yield* github.createTree(
@@ -249,7 +265,7 @@ const write = (
       tree,
       parents: [baseSha],
     });
-    yield* github.setRef(target, `heads/${branch}`, commit, { create: existing === null });
+    yield* github.setRef(target, `heads/${branch}`, commit, { create: !input.branchExists });
 
     const open = yield* github.listOpenPullRequests(target, `${target.owner}:${branch}`);
     const current = open[0];

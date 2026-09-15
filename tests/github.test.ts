@@ -380,11 +380,13 @@ describe("sync", () => {
     await run(github.service.setRef(repo, "heads/agent-rules/base", human, { create: true }));
     github.calls.length = 0;
 
-    const result = await runSync({ repo: "acme/canonical" });
-    expect(result).toMatchObject({
+    const refusal = {
       kind: "refused",
       message: `acme/canonical: branch \`agent-rules/base\` exists but its tip commit (${human.slice(0, 7)}) was not written by rulecheck; delete or rename the branch first`,
-    });
+    };
+    expect(await runSync({ repo: "acme/canonical" })).toMatchObject(refusal);
+    // The dry run reports the same refusal instead of previewing a write that would be refused.
+    expect(await runSync({ repo: "acme/canonical", dryRun: true })).toMatchObject(refusal);
     expect(github.calls).toEqual([]);
     expect(await run(github.service.getRef(repo, "heads/agent-rules/base"))).toBe(human);
   });
