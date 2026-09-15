@@ -91,6 +91,25 @@ repository; each pack is its own managed block identified by `source=<pack-id>`.
 the file is the subscription order. Conflicts between packs are content, not
 structure, and are out of scope for automation (a lint may point them out later).
 
+## 2026-09-15 D8: Scope is the agent configuration surface; Rules and Skills first
+
+Scope is the whole agent configuration surface: Rules, Skills, MCP, Hooks, Subagents/Commands.
+Delivery order is developer productivity first: Rules, then Skills, then MCP/Hooks. MCP and Hooks
+are **governance targets** (inventory, allow/deny, required), not pack-distribution targets,
+because they carry secrets and execution rights.
+
+The pack unit is generalized from "an `AGENTS.md` fragment" to **a set of files**: Skills are
+distributed as directories (`.cursor/skills/<name>/SKILL.md`, `.claude/skills/<name>/`), so a pack
+may contain a managed block for `AGENTS.md` plus whole managed files. D7's vocabulary (pack,
+subscription, `source=`) is unchanged.
+
+Skills drift is reported by reading the de-facto standard `skills-lock.json` (vercel-labs/skills;
+source + hash per skill). rulecheck defines no manifest of its own.
+
+Not built: single-repo lint rule catalogs (agnix and similar; recommend or invoke them instead),
+tool-format expansion (`ruler`, `rulesync`; D2 makes it unnecessary), and PR plumbing beyond
+`gh api` / `multi-gitter`. Rationale and the survey behind it: [landscape.md](landscape.md).
+
 ## Recording rule
 
 Add an entry here whenever a decision changes what rulecheck writes, what it reports, or which
