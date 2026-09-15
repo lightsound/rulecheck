@@ -15,7 +15,7 @@ real state of ~76 repositories before automating anything.
 Every tool reads `AGENTS.md`; Claude Code resolves the `@` import; a prose pointer ("see
 AGENTS.md") loads nothing. Tool-scoped rules go in `.cursor/rules/*.mdc` or `.claude/rules/*.md`.
 
-## 2026-09-14 D3: Personal pack in a private repo, wired by import and User Rule (superseded by D5, D6)
+## 2026-09-14 D3: Personal pack in a private repo, wired by import and User Rule (superseded by D5, D6, D13)
 
 `lightsound/agent-rules/AGENTS.md` as the single personal source. Claude Code:
 `~/.claude/CLAUDE.md` imports it. Cursor: a User Rule copy, synced with `/sync-agent-rules`
@@ -277,6 +277,52 @@ not the pack's. Files outside the pair keep their own identity: a stale referenc
 A `CLAUDE.md` that is an `@AGENTS.md` line plus up to three short lines is still a wrapper to the
 scanner (`agents-canonical`), so those lines are not merged; that threshold predates this decision
 and is unchanged here.
+
+## 2026-09-15 D13: The Cursor User Rule copy of the pack is retired, not automated
+
+D3 wired the pack into Cursor as a User Rule copy refreshed by a slash command
+(`/sync-agent-rules`), the one manual step left in the distribution. The question was whether to
+automate it. Researched 2026-09-15 against Cursor's published docs (facts and sources in
+[tool-behavior.md](tool-behavior.md), "User Rules have no headless write path"): User Rules live in
+the Cursor account, are edited only in Customize → Rules or by the in-app agent, are absent from
+the Admin API (which logs `team_rule` events but has no rules endpoint), absent from the `agent`
+CLI (`generate-rule` writes a project `.mdc`), and their legacy on-disk mirror
+(`state.vscdb`, key `aicontext.personalContext`) is declared stale by Cursor staff now that the
+account is authoritative. Team Rules are dashboard-only as well. So option (c), a headless
+`sync-user-rule`, has no supported target, and option (b), drift detection against an on-disk
+copy, has no safe file to read.
+
+The structural answer is already in D4 and D5: the repository is the only input every agent
+shares, so the pack reaches Cursor, local and cloud, through the managed block in each
+subscribed repository's `AGENTS.md`, which Cursor always applies and ranks above User Rules
+(Team → Project → User). A User Rule copy is therefore redundant wherever the block is present
+and loads the pack twice there; it adds value only in unsubscribed repositories and in chats
+without a repository. Keeping a synced copy for those cases would preserve the manual step for a
+shrinking benefit. Decision:
+
+- The pack is **not** kept in a User Rule. Once the block covers the repositories used daily
+  (roadmap Step 4), the User Rule copy and `/sync-agent-rules` are deleted. An unsubscribed
+  repository that should have the pack is subscribed and synced, not covered by a copy.
+- A User Rule may still exist, hand-written, for **account-level preferences that are not pack
+  content** (for example the reply language for chats outside any repository). It is never
+  generated from the pack, so nothing needs syncing. Same rule for the machine layer: facts about
+  one machine stay in `~/.claude/CLAUDE.md` (D5); rulecheck does not manage either.
+- No `.cursor/rules/*.mdc` copy of the pack is added to repositories: an `alwaysApply: true`
+  rule and the root `AGENTS.md` are applied in the same way by Cursor's local and cloud agents,
+  and the block already lives in a file every other tool reads (D2).
+- rulecheck does not read Cursor's storage or write to it. What it adds is the read-only check
+  that makes the removal verifiable: when the personal layer is scanned together with `--packs`,
+  a personal file that equals a pack body, or that is the pack's own source path
+  (`packs/<id>/AGENTS.md`) with a different hash, is reported under the pack with the
+  repositories in which the pack now loads twice (`personalCopies` in `scan --json`). Two exact
+  signals, no similarity guess, following the precision rule for findings.
+
+Considered and rejected: a Cloud Agent environment symlink `/.cursor -> ~/.cursor` plus an
+install script that clones the pack (a staff-acknowledged workaround for the rules lookup; per
+environment, needs a token for a private pack repository, and the roadmap excludes setup-script
+hacks); a Cursor plugin carrying the pack as a rule (client install, Cursor-only, update
+semantics undocumented, and it would double-load next to the block); a record file written by
+the slash command for rulecheck to compare (keeps the manual step alive to measure it).
 
 ## Recording rule
 

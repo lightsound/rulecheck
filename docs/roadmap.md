@@ -20,7 +20,9 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
   `~/.claude/CLAUDE.md` directly; `agent-rules/machine/CLAUDE.local.example.md` is the template.
 - Interim wiring, to be dismantled in step 4: `~/.claude/CLAUDE.md` imports the pack;
   Cursor User Rule holds a copy synced by `/sync-agent-rules`
-  (`~/.cursor/commands/sync-agent-rules.md` symlink). `~/AGENTS.md` and `~/CLAUDE.md` do not exist.
+  (`~/.cursor/commands/sync-agent-rules.md` symlink); D13 retires that copy instead of
+  automating it, and `scan --packs` reports the personal-layer copies that remain.
+  `~/AGENTS.md` and `~/CLAUDE.md` do not exist.
 
 ## Step 1: Split the pack (agent-rules, no code) — done 2026-09-15
 
@@ -119,10 +121,18 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
   introduced while rot elsewhere still does not excuse the block. Covered by
   `tests/fake-github.ts` runs (merge, wrapper, foreign marker in either file, pre-existing rot);
   no live run yet, the first `both-full` subscriber gets it.
-- Remaining: after the block is in the repositories used daily, delete the pack import from
-  `~/.claude/CLAUDE.md`, delete the Cursor User Rule copy and `/sync-agent-rules`, set Claude
-  Code's `language` setting for third-party repos. Verify with probes (tool-behavior.md method)
-  that nothing loads twice.
+- Done 2026-09-15: the Cursor User Rule question is settled by D13. No headless way to write a
+  User Rule exists (Admin API, `agent` CLI, on-disk state, Team Rules all checked; sources in
+  tool-behavior.md), so the copy is retired rather than automated: the block is the Cursor
+  channel, local and cloud. `scan --packs` with the personal layer now reports every personal
+  file that equals a pack body or is the pack's own source path with a different hash, together
+  with the repositories where the pack loads twice (`personalCopies` in `--json`, a `!` line
+  under the pack in the text report). That is the removal gate for the next item.
+- Remaining: after the block is in the repositories used daily (the `personalCopies` line lists
+  them), delete the pack import from `~/.claude/CLAUDE.md`, delete the Cursor User Rule copy and
+  `/sync-agent-rules`, set Claude Code's `language` setting for third-party repos. Verify with
+  probes (tool-behavior.md method) that nothing loads twice; the `personalCopies` line must be
+  gone from the scan.
 
 ## Step 5: Update fan-out and drift
 
