@@ -357,8 +357,14 @@ describe("classifyPackStatus", () => {
       file: "AGENTS.md",
       line: 89,
       message:
-        "block at line 92 is outdated (rev 2222222 -> 1111111); it sits inside the region `generated:task-matrix` (lines 89-105) another tool owns",
+        "block at line 92 is outdated (rev 2222222 -> 1111111); it overlaps the region `generated:task-matrix` (lines 89-105) another tool owns",
     });
+    // A block that starts inside the region and ends outside it is blocked the same way.
+    const straddling = repo("acme/canonical", "agents-canonical", {
+      blocks: [block("base", OLD_BODY, { line: 104, endLine: 108 })],
+      foreignRegions: [REGION],
+    });
+    expect(classifyPackStatus(straddling, base)).toMatchObject({ status: "blocked", line: 89 });
     // Current and modified blocks inside a region need no write: no block.
     const current = repo("acme/canonical", "agents-canonical", {
       blocks: [block("base", BODY, { line: 92, endLine: 95 })],

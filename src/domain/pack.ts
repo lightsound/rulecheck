@@ -168,17 +168,17 @@ export function classifyPackStatus(repo: RepoForDistribution, pack: Pack): PackS
         message: `${pending}; ${issue.message}`,
       };
     }
-    // Replacing a block that sits inside another tool's region would write inside the region (D15).
-    const enclosing = repo.foreignRegions.find(
-      (r) => r.file === block.file && r.line < block.line && block.endLine < r.endLine,
+    // Replacing a block that shares lines with another tool's region would write inside it (D15).
+    const overlapping = repo.foreignRegions.find(
+      (r) => r.file === block.file && r.line <= block.endLine && block.line <= r.endLine,
     );
-    if (enclosing) {
+    if (overlapping) {
       return {
         ...base,
         status: "blocked",
-        file: enclosing.file,
-        line: enclosing.line,
-        message: `${pending}; it sits inside the region \`${enclosing.name}\` (lines ${enclosing.line}-${enclosing.endLine}) another tool owns`,
+        file: overlapping.file,
+        line: overlapping.line,
+        message: `${pending}; it overlaps the region \`${overlapping.name}\` (lines ${overlapping.line}-${overlapping.endLine}) another tool owns`,
       };
     }
     return {

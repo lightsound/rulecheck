@@ -303,6 +303,19 @@ describe("planSync", () => {
     });
   });
 
+  test("D15: a pack body with marker-shaped comments updates cleanly; text inside our block is the pack's", () => {
+    const oldBody = "Docs say:\n<!-- toc:start -->\nold toc\n<!-- toc:end -->";
+    const oldBlock = `<!-- agent-rules:begin source=base rev=old hash=${hashBlockBody(oldBody)} -->\n${oldBody}\n<!-- agent-rules:end -->`;
+    const p = plan(
+      input(
+        "agents-canonical",
+        { "AGENTS.md": `# P\n\n${oldBlock}\n`, "CLAUDE.md": "@AGENTS.md\n" },
+        { status: status("outdated") },
+      ),
+    );
+    expect(p.changes[0]?.after).toBe(`# P\n\n${BLOCK}\n`);
+  });
+
   test("outdated: replaces the block in place and keeps everything around it", () => {
     const oldBlock = `<!-- agent-rules:begin source=base rev=old hash=${hashBlockBody(OLD_BODY)} -->\n${OLD_BODY}\n<!-- agent-rules:end -->`;
     const content = `# P\n\n${oldBlock}\n\n## After\n`;
