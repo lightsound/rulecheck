@@ -1,6 +1,6 @@
 import { Effect, type FileSystem, type Path, Semaphore } from "effect";
 import type { PlatformError } from "effect/PlatformError";
-import type { Pack } from "../domain/types.ts";
+import type { Pack, PackStatusEntry } from "../domain/types.ts";
 import type { GitHub, GitHubError } from "../github/client.ts";
 import { type LoadedPacks, type PackSourceError, resolvePacks } from "../scan/packs.ts";
 import { type SyncRefused, type SyncResult, selectPack, syncTarget } from "./sync.ts";
@@ -27,9 +27,18 @@ export interface SyncTargetRef {
   readonly pack: string;
 }
 
+/**
+ * One target's sync outcome (`docs/status-model.md`): a `SyncResult`, or one of the two ways the
+ * target path ends without a result. `refused` carries the pack status measured on the base
+ * branch when the refusal came after that measurement; `failed` never measured anything.
+ */
 export type SyncOutcome =
-  | { readonly kind: "done"; readonly result: SyncResult }
-  | { readonly kind: "refused"; readonly message: string }
+  | SyncResult
+  | {
+      readonly kind: "refused";
+      readonly message: string;
+      readonly status: PackStatusEntry | null;
+    }
   | { readonly kind: "failed"; readonly error: GitHubError | PlatformError };
 
 export interface SyncAllRow {
@@ -90,9 +99,14 @@ const runTarget = (
   pack: Pack,
 ): Effect.Effect<SyncOutcome, never, GitHub | FileSystem.FileSystem | Path.Path> =>
   syncTarget(options, loaded, pack).pipe(
-    Effect.map((result): SyncOutcome => ({ kind: "done", result })),
+    Effect.map((result): SyncOutcome => result),
     Effect.catchTags({
-      SyncRefused: (e) => Effect.succeed<SyncOutcome>({ kind: "refused", message: e.message }),
+      SyncRefused: (e) =>
+        Effect.succeed<SyncOutcome>({
+          kind: "refused",
+          message: e.message,
+          status: e.status ?? null,
+        }),
       GitHubError: (error) => Effect.succeed<SyncOutcome>({ kind: "failed", error }),
       PlatformError: (error) => Effect.succeed<SyncOutcome>({ kind: "failed", error }),
     }),

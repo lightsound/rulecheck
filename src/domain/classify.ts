@@ -1,10 +1,10 @@
 import { findForeignMarkers, parseBlocks } from "./block.ts";
 import type {
-  BothFullNormalization,
   CanonicalShape,
   ContextBudget,
   FileKind,
   InstructionFile,
+  Normalization,
   RuleFrontmatter,
   WrapperTarget,
 } from "./types.ts";
@@ -288,7 +288,7 @@ export function claudeContentBeyondImport(claudeContent: string): string {
 }
 
 /**
- * Decide how a `both-full` pair is normalized (D12). `wrapper` only when the text CLAUDE.md adds
+ * Decide how a `both-full` pair is normalized (D12). `drop` only when the text CLAUDE.md adds
  * appears verbatim in AGENTS.md (a byte-level substring after line-ending normalization), so no
  * sentence is dropped on a guess; every other pair is merged and left for review. Managed blocks
  * and other tools' regions in AGENTS.md do not count as a place where the text survives: a block
@@ -298,10 +298,35 @@ export function claudeContentBeyondImport(claudeContent: string): string {
 export function classifyBothFull(
   agentsContent: string,
   claudeContent: string,
-): BothFullNormalization {
+): Extract<Normalization, "drop" | "merge"> {
   const extra = claudeContentBeyondImport(claudeContent);
-  if (extra.length === 0) return "wrapper";
-  return contentOutsideBlocks(agentsContent).includes(extra) ? "wrapper" : "merge";
+  if (extra.length === 0) return "drop";
+  return contentOutsideBlocks(agentsContent).includes(extra) ? "drop" : "merge";
+}
+
+/**
+ * What a sync does to the root pair besides inserting the block. Every shape maps to exactly one
+ * normalization; only `both-full` needs the files' content to choose between `drop` and `merge`.
+ */
+export function classifyNormalization(
+  shape: CanonicalShape,
+  agentsContent: string,
+  claudeContent: string,
+): Normalization {
+  switch (shape) {
+    case "agents-canonical":
+    case "agents-imported":
+      return "keep";
+    case "agents-only":
+      return "add-wrapper";
+    case "none":
+      return "create";
+    case "claude-only":
+    case "claude-canonical":
+      return "move";
+    case "both-full":
+      return classifyBothFull(agentsContent, claudeContent);
+  }
 }
 
 /** `content` with the lines of every managed block and foreign region (markers included) blanked, line count preserved. */

@@ -8,16 +8,7 @@ import type {
   ScanReport,
   SkillLockState,
 } from "../domain/types.ts";
-
-const SHAPE_LABEL: Record<CanonicalShape, string> = {
-  "agents-canonical": "AGENTS.md canonical",
-  "agents-imported": "AGENTS.md via @import",
-  "claude-canonical": "CLAUDE.md canonical",
-  "agents-only": "AGENTS.md only",
-  "claude-only": "CLAUDE.md only",
-  "both-full": "both have content",
-  none: "none",
-};
+import { SHAPE_LABEL, STATUS_LABEL } from "./labels.ts";
 
 const SHAPE_NOTE: Record<CanonicalShape, string | null> = {
   "agents-canonical": null,
@@ -27,17 +18,8 @@ const SHAPE_NOTE: Record<CanonicalShape, string | null> = {
   "agents-only": "Claude Code does not read AGENTS.md; add a CLAUDE.md wrapper (`@AGENTS.md`)",
   "claude-only": "Codex and most non-Cursor tools do not read CLAUDE.md",
   "both-full":
-    "Cursor loads both files; content is likely duplicated or conflicting (a sync merges CLAUDE.md into AGENTS.md and leaves the wrapper)",
+    "Cursor loads both files; content is likely duplicated or conflicting (a sync merges CLAUDE.md into AGENTS.md, or drops it when AGENTS.md already contains it, and leaves the wrapper)",
   none: null,
-};
-
-const STATUS_LABEL: Record<PackStatus, string> = {
-  current: "current",
-  outdated: "outdated",
-  modified: "modified",
-  eligible: "eligible",
-  blocked: "blocked",
-  "not-subscribed": "not subscribed",
 };
 
 export function renderText(report: ScanReport, options: { readonly all?: boolean } = {}): string {

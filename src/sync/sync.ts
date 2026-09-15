@@ -49,9 +49,20 @@ export interface SyncOptions extends SyncTargetOptions {
   readonly packs: string;
 }
 
+/**
+ * What one target's sync ended in (the sync outcomes of `docs/status-model.md`, less `refused`
+ * and `failed`, which are errors of this path and become outcomes in `all.ts`). `status` is the
+ * pack status measured on the base branch before anything else.
+ */
 export type SyncResult =
-  | { readonly kind: "current"; readonly repo: string; readonly status: PackStatusEntry }
   | {
+      /** The base branch already reads `current`; no branch or pull request was consulted. */
+      readonly kind: "nothing-to-do";
+      readonly repo: string;
+      readonly status: PackStatusEntry;
+    }
+  | {
+      /** Dry run: every check passed and this is what a real run would write. */
       readonly kind: "planned";
       readonly repo: string;
       readonly status: PackStatusEntry;
@@ -71,7 +82,8 @@ export type SyncResult =
       readonly pullRequest: PullRequest;
     }
   | {
-      readonly kind: "written";
+      /** `opened`: a new pull request; `updated`: the branch was rewritten under the open one. */
+      readonly kind: "opened" | "updated";
       readonly repo: string;
       readonly status: PackStatusEntry;
       readonly plan: SyncPlan;
@@ -79,11 +91,16 @@ export type SyncResult =
       readonly branch: string;
       readonly commit: string;
       readonly pullRequest: PullRequest;
-      readonly pullRequestCreated: boolean;
     };
 
+/**
+ * The sync did not write and says why. `status` is the pack status measured on the base branch
+ * when the refusal came after that measurement (a `modified` or `blocked` row, rot the block
+ * would introduce, a foreign branch); null when the target could not even be measured.
+ */
 export class SyncRefused extends Data.TaggedError("SyncRefused")<{
   readonly message: string;
+  readonly status?: PackStatusEntry;
 }> {}
 
 export const branchFor = (pack: string): string => `agent-rules/${pack}`;
@@ -153,21 +170,22 @@ export const syncTarget = (
     const snapshot = yield* repositorySnapshot(github, target, baseSha, mount);
     const before = yield* measure(snapshot, mount, name, loaded, pack);
 
+    // Every refusal from here on names the measured status, so a `sync --all` row shows it.
+    const refuse = (message: string) => new SyncRefused({ message, status: before.entry });
+
     switch (before.entry.status) {
       case "current":
-        return { kind: "current", repo: name, status: before.entry };
+        return { kind: "nothing-to-do", repo: name, status: before.entry };
       case "not-subscribed":
-        return yield* new SyncRefused({
-          message: `${name} is not subscribed to \`${pack.id}\`; add it to subscriptions.json in ${loaded.source} first`,
-        });
+        return yield* refuse(
+          `${name} is not subscribed to \`${pack.id}\`; add it to subscriptions.json in ${loaded.source} first`,
+        );
       case "modified":
-        return yield* new SyncRefused({
-          message: `${name} ${where(before.entry)}: block \`${pack.id}\` was edited in place (${before.entry.message}); a human must reconcile it`,
-        });
+        return yield* refuse(
+          `${name} ${where(before.entry)}: block \`${pack.id}\` was edited in place (${before.entry.message}); a human must reconcile it`,
+        );
       case "blocked":
-        return yield* new SyncRefused({
-          message: `${name} ${where(before.entry)}: ${before.entry.message}`,
-        });
+        return yield* refuse(`${name} ${where(before.entry)}: ${before.entry.message}`);
       case "eligible":
       case "outdated":
         break;
@@ -182,7 +200,7 @@ export const syncTarget = (
       pack,
       packOrder: loaded.packs.map((p) => p.id),
     });
-    if ("reason" in plan) return yield* new SyncRefused({ message: `${name}: ${plan.reason}` });
+    if ("reason" in plan) return yield* refuse(`${name}: ${plan.reason}`);
 
     const after = yield* measure(
       withChanges(snapshot, mount, plan.changes),
@@ -192,9 +210,9 @@ export const syncTarget = (
       pack,
     );
     if (after.entry.status !== "current") {
-      return yield* new SyncRefused({
-        message: `${name}: the planned ${plan.blockFile} would read as ${after.entry.status} (${after.entry.message ?? "no detail"}); refusing to write`,
-      });
+      return yield* refuse(
+        `${name}: the planned ${plan.blockFile} would read as ${after.entry.status} (${after.entry.message ?? "no detail"}); refusing to write`,
+      );
     }
     // D15: the planner already asserted this on its changes; assert it again on the planned tree
     // as scanned, so the promise holds for what is written, not for what was intended.
@@ -204,9 +222,7 @@ export const syncTarget = (
         before.contents.get(path) ?? null,
         after.contents.get(path) ?? null,
       );
-      if (drift !== null) {
-        return yield* new SyncRefused({ message: `${name}: ${drift}; refusing to write` });
-      }
+      if (drift !== null) return yield* refuse(`${name}: ${drift}; refusing to write`);
     }
     const introduced = newFindings(
       before.repo.findings,
@@ -215,9 +231,9 @@ export const syncTarget = (
     );
     if (introduced.length > 0) {
       const lines = introduced.map((f) => `  ${f.file}:${f.line}  ${f.message}`);
-      return yield* new SyncRefused({
-        message: `${name}: pack \`${pack.id}\` would introduce rot in this repository:\n${lines.join("\n")}`,
-      });
+      return yield* refuse(
+        `${name}: pack \`${pack.id}\` would introduce rot in this repository:\n${lines.join("\n")}`,
+      );
     }
 
     const branch = branchFor(pack.id);
@@ -225,9 +241,9 @@ export const syncTarget = (
     if (existing !== null) {
       const tip = yield* github.getCommit(target, existing);
       if (!isRulecheckCommit(tip.message)) {
-        return yield* new SyncRefused({
-          message: `${name}: branch \`${branch}\` exists but its tip commit (${existing.slice(0, 7)}) was not written by rulecheck; delete or rename the branch first`,
-        });
+        return yield* refuse(
+          `${name}: branch \`${branch}\` exists but its tip commit (${existing.slice(0, 7)}) was not written by rulecheck; delete or rename the branch first`,
+        );
       }
       // Idempotence (D14): the branch tip already holds every planned path as planned and its
       // pull request is open, so a rerun has nothing to deliver. A closed pull request or a stale
@@ -264,8 +280,16 @@ export const syncTarget = (
       status: before.entry,
     });
     const gated = options.writeLock ? options.writeLock.withPermits(1)(writing) : writing;
-    const written = yield* gated;
-    return { kind: "written", repo: name, status: before.entry, plan, base, branch, ...written };
+    const { created, ...written } = yield* gated;
+    return {
+      kind: created ? "opened" : "updated",
+      repo: name,
+      status: before.entry,
+      plan,
+      base,
+      branch,
+      ...written,
+    };
   });
 
 /** Whether every planned path reads in `treeSha` exactly as the plan would write it. */
@@ -375,10 +399,7 @@ const write = (
   github: GitHubService,
   target: RepositoryRef,
   input: WriteInput,
-): Effect.Effect<
-  { commit: string; pullRequest: PullRequest; pullRequestCreated: boolean },
-  GitHubError
-> =>
+): Effect.Effect<{ commit: string; pullRequest: PullRequest; created: boolean }, GitHubError> =>
   Effect.gen(function* () {
     const { baseSha, base, branch, plan, pack, status } = input;
     const text = pullRequestText(plan, pack, status);
@@ -400,5 +421,5 @@ const write = (
     const pullRequest = current
       ? yield* github.updatePullRequest(target, current.number, text)
       : yield* github.createPullRequest(target, { ...text, head: branch, base });
-    return { commit, pullRequest, pullRequestCreated: current === undefined };
+    return { commit, pullRequest, created: current === undefined };
   });

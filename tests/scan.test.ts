@@ -241,6 +241,7 @@ describe("walk", () => {
 describe("scan", () => {
   test("classifies shapes, finds cross-repo duplicates, and estimates budgets", async () => {
     const report = await run(scan(root));
+    expect(report.schemaVersion).toBe(1);
 
     const canonical = report.repos.find((r) => r.name === "acme/canonical");
     const both = report.repos.find((r) => r.name === "acme/both");
@@ -364,8 +365,9 @@ describe("scan", () => {
     // `both` carries its own text in CLAUDE.md, so the sync would merge it (D12).
     const both = distribution?.entries.find((e) => e.repo === "acme/both" && e.pack === "base");
     expect(both?.message).toStartWith("append CLAUDE.md content to AGENTS.md under");
-    expect(report.repos.find((r) => r.name === "acme/both")?.bothFull).toBe("merge");
-    expect(report.repos.find((r) => r.name === "acme/canonical")?.bothFull).toBeNull();
+    expect(report.repos.find((r) => r.name === "acme/both")?.normalization).toBe("merge");
+    expect(report.repos.find((r) => r.name === "acme/canonical")?.normalization).toBe("keep");
+    expect(report.repos.find((r) => r.name === "acme/empty")?.normalization).toBe("create");
     expect(distribution?.counts).toEqual({
       current: 0,
       outdated: 0,
@@ -521,7 +523,7 @@ describe("scan: canonical by import (D16)", () => {
       const report = await run(scan(tree));
       const cobracket = report.repos.find((r) => r.name === "acme/cobracket");
       expect(cobracket?.shape).toBe("agents-imported");
-      expect(cobracket?.bothFull).toBeNull();
+      expect(cobracket?.normalization).toBe("keep");
       const claude = cobracket?.files.find((f) => f.relativePath === "CLAUDE.md");
       expect(claude?.wrapperTarget).toBeNull();
       expect(claude?.importsAgentsMd).toBe(true);

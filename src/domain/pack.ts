@@ -2,11 +2,11 @@ import { createHash } from "node:crypto";
 import { hashBlockBody, parseBlocks } from "./block.ts";
 import type {
   BlockIssue,
-  BothFullNormalization,
   CanonicalShape,
   ForeignRegion,
   InstructionFile,
   ManagedBlock,
+  Normalization,
   Pack,
   PackDistribution,
   PackFile,
@@ -100,8 +100,8 @@ export function findPackedRef(packedRefs: string, ref: string): string | null {
 export interface RepoForDistribution {
   readonly name: string;
   readonly shape: CanonicalShape;
-  /** Required when `shape` is `both-full`; decides the normalization named in the status (D12). */
-  readonly bothFull: BothFullNormalization | null;
+  /** What a sync would do to the root pair besides inserting the block; named in the `eligible` row. */
+  readonly normalization: Normalization;
   readonly files: ReadonlyArray<InstructionFile>;
   readonly blocks: ReadonlyArray<ManagedBlock>;
   readonly blockIssues: ReadonlyArray<BlockIssue>;
@@ -126,22 +126,33 @@ function contentFile(repo: RepoForDistribution): string {
   return "AGENTS.md";
 }
 
-const ELIGIBLE_ACTION: Record<Exclude<CanonicalShape, "both-full">, string> = {
-  "agents-canonical": "insert block into AGENTS.md",
-  "agents-imported": `insert block into AGENTS.md (${IMPORTED_NOTE})`,
-  "agents-only": "insert block into AGENTS.md, add CLAUDE.md wrapper",
-  "claude-only": "rename to AGENTS.md, add CLAUDE.md wrapper, insert block",
-  "claude-canonical": "swap the pair so AGENTS.md is canonical, insert block",
-  none: "create AGENTS.md with the block and a CLAUDE.md wrapper",
-};
+/**
+ * The text label of each normalization, as the `eligible` row and the glossary
+ * (`docs/status-model.md`) spell it. `claude` is the root CLAUDE.md file the pair has
+ * (`CLAUDE.md` or `.claude/CLAUDE.md`); the verbs match the plan's actions in `sync.ts`.
+ */
+export function describeNormalization(normalization: Normalization, claude: string): string {
+  switch (normalization) {
+    case "keep":
+      return "insert block into AGENTS.md";
+    case "add-wrapper":
+      return "insert block into AGENTS.md, add CLAUDE.md wrapper";
+    case "create":
+      return "create AGENTS.md with the block and a CLAUDE.md wrapper";
+    case "move":
+      return `move ${claude} content to AGENTS.md, add CLAUDE.md wrapper, insert block`;
+    case "drop":
+      return `${claude} repeats AGENTS.md: drop it, add CLAUDE.md wrapper, insert block into AGENTS.md`;
+    case "merge":
+      return `append ${claude} content to AGENTS.md under \`## Merged from CLAUDE.md\`, add CLAUDE.md wrapper, insert block`;
+  }
+}
 
 function eligibleAction(repo: RepoForDistribution): string {
-  if (repo.shape !== "both-full") return ELIGIBLE_ACTION[repo.shape];
   const claude =
     repo.files.find((f) => ROOT_CLAUDE.has(f.relativePath))?.relativePath ?? "CLAUDE.md";
-  return repo.bothFull === "wrapper"
-    ? `${claude} repeats AGENTS.md: drop it, add CLAUDE.md wrapper, insert block into AGENTS.md`
-    : `append ${claude} content to AGENTS.md under \`## Merged from CLAUDE.md\`, add CLAUDE.md wrapper, insert block`;
+  const action = describeNormalization(repo.normalization, claude);
+  return repo.shape === "agents-imported" ? `${action} (${IMPORTED_NOTE})` : action;
 }
 
 /** Status of one repository for one pack. */

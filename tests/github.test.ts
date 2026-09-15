@@ -146,7 +146,11 @@ function world() {
     run(
       sync({ pack: "base", packs: "acme/agent-rules", dryRun: false, ...options }).pipe(
         Effect.catchTag("SyncRefused", (e) =>
-          Effect.succeed({ kind: "refused" as const, message: e.message }),
+          Effect.succeed({
+            kind: "refused" as const,
+            message: e.message,
+            status: e.status ?? null,
+          }),
         ),
       ),
     );
@@ -271,11 +275,10 @@ describe("sync", () => {
     const { github, run, runSync } = world();
     const repo = { owner: "acme", name: "canonical" };
     const result = await runSync({ repo: "acme/canonical" });
-    expect(result.kind).toBe("written");
-    if (result.kind !== "written") return;
+    expect(result.kind).toBe("opened");
+    if (result.kind !== "opened") return;
     expect(result.branch).toBe("agent-rules/base");
     expect(result.base).toBe("main");
-    expect(result.pullRequestCreated).toBe(true);
     expect(result.pullRequest.url).toBe("https://github.com/acme/canonical/pull/1");
     expect(github.fileAt("acme/canonical", "heads/agent-rules/base", "AGENTS.md")).toBe(
       `# Canonical\n\n- build: \`bun run build\`\n- entry: \`src/main.ts\`\n\n${block("base", BODY, await revOf(github))}\n`,
@@ -296,7 +299,9 @@ describe("sync", () => {
       "setRef acme/canonical heads/agent-rules/base create",
       "createPullRequest acme/canonical agent-rules/base -> main",
     ]);
-    expect(renderSync(result)).toContain("opened from agent-rules/base");
+    expect(renderSync(result)).toContain(
+      "acme/canonical: eligible -> opened pull request https://github.com/acme/canonical/pull/1",
+    );
 
     // Rerun before merge: the branch already carries the planned content and the PR is open, so
     // nothing is pushed (D14). A dry run says the same.
@@ -308,7 +313,7 @@ describe("sync", () => {
     expect(again.commit).toBe(result.commit);
     expect(github.calls).toEqual([]);
     expect(renderSync(again)).toContain(
-      "pull request https://github.com/acme/canonical/pull/1 is up to date",
+      "acme/canonical: eligible -> up to date; pull request https://github.com/acme/canonical/pull/1",
     );
     expect((await runSync({ repo: "acme/canonical", dryRun: true })).kind).toBe("up-to-date");
 
@@ -319,9 +324,8 @@ describe("sync", () => {
     await run(github.service.setRef(repo, "heads/main", edited, { create: false }));
     github.calls.length = 0;
     const rebased = await runSync({ repo: "acme/canonical" });
-    expect(rebased.kind).toBe("written");
-    if (rebased.kind !== "written") return;
-    expect(rebased.pullRequestCreated).toBe(false);
+    expect(rebased.kind).toBe("updated");
+    if (rebased.kind !== "updated") return;
     expect(rebased.pullRequest.number).toBe(1);
     expect(github.calls).toEqual([
       "createTree acme/canonical AGENTS.md",
@@ -338,9 +342,9 @@ describe("sync", () => {
     github.moveRef("acme/canonical", "heads/main", "heads/agent-rules/base");
     github.calls.length = 0;
     const merged = await runSync({ repo: "acme/canonical" });
-    expect(merged.kind).toBe("current");
+    expect(merged.kind).toBe("nothing-to-do");
     expect(github.calls).toEqual([]);
-    if (merged.kind === "current") {
+    if (merged.kind === "nothing-to-do") {
       expect(renderSync(merged)).toContain("is current (AGENTS.md:6); nothing to do");
     }
   });
@@ -361,14 +365,14 @@ describe("sync", () => {
 
   test("normalizes deterministic shapes in the same commit", async () => {
     const { github, runSync } = world();
-    expect((await runSync({ repo: "acme/empty" })).kind).toBe("written");
+    expect((await runSync({ repo: "acme/empty" })).kind).toBe("opened");
     expect(github.pathsAt("acme/empty", "heads/agent-rules/base")).toEqual([
       "AGENTS.md",
       "CLAUDE.md",
       "README.md",
     ]);
 
-    expect((await runSync({ repo: "acme/agents-only" })).kind).toBe("written");
+    expect((await runSync({ repo: "acme/agents-only" })).kind).toBe("opened");
     expect(github.fileAt("acme/agents-only", "heads/agent-rules/base", "CLAUDE.md")).toBe(
       "@AGENTS.md\n",
     );
@@ -376,7 +380,7 @@ describe("sync", () => {
       "# Only agents\n\n<!-- agent-rules:begin",
     );
 
-    expect((await runSync({ repo: "acme/claude-only" })).kind).toBe("written");
+    expect((await runSync({ repo: "acme/claude-only" })).kind).toBe("opened");
     expect(github.pathsAt("acme/claude-only", "heads/agent-rules/base")).toEqual([
       "AGENTS.md",
       "CLAUDE.md",
@@ -385,7 +389,7 @@ describe("sync", () => {
       "# Nested claude\n\n",
     );
 
-    expect((await runSync({ repo: "acme/outdated" })).kind).toBe("written");
+    expect((await runSync({ repo: "acme/outdated" })).kind).toBe("opened");
     const updated = github.fileAt("acme/outdated", "heads/agent-rules/base", "AGENTS.md") ?? "";
     expect(updated).toStartWith("# O\n\n<!-- agent-rules:begin source=base");
     expect(updated).toContain(BODY);
@@ -395,7 +399,7 @@ describe("sync", () => {
     );
 
     // `base` precedes `frontend` in subscriptions.json, so its block goes first.
-    expect((await runSync({ repo: "acme/ordered" })).kind).toBe("written");
+    expect((await runSync({ repo: "acme/ordered" })).kind).toBe("opened");
     const ordered = github.fileAt("acme/ordered", "heads/agent-rules/base", "AGENTS.md") ?? "";
     expect(ordered.indexOf("source=base")).toBeLessThan(ordered.indexOf("source=frontend"));
   });
@@ -407,13 +411,13 @@ describe("sync", () => {
     if (dry.kind !== "planned") return;
     expect(dry.status.status).toBe("eligible");
     expect(renderSync(dry)).toContain(
-      "acme/both: eligible (append CLAUDE.md content to AGENTS.md under `## Merged from CLAUDE.md`, add CLAUDE.md wrapper, insert block); dry run",
+      "acme/both: eligible (append CLAUDE.md content to AGENTS.md under `## Merged from CLAUDE.md`, add CLAUDE.md wrapper, insert block) -> planned; dry run",
     );
     expect(github.calls).toEqual([]);
 
     const result = await runSync({ repo: "acme/both" });
-    expect(result.kind).toBe("written");
-    if (result.kind !== "written") return;
+    expect(result.kind).toBe("opened");
+    if (result.kind !== "opened") return;
     expect(github.fileAt("acme/both", "heads/agent-rules/base", "AGENTS.md")).toBe(
       `# A\n\n- entry: \`src/main.ts\`\n\n## Merged from CLAUDE.md\n\n${BOTH_CLAUDE_EXTRA}\n\n${block("base", BODY, await revOf(github))}\n`,
     );
@@ -428,10 +432,12 @@ describe("sync", () => {
   test("both have content, CLAUDE.md repeats AGENTS.md: only the wrapper is written; a marker in either file blocks", async () => {
     const { github, runSync } = world();
     // `<!-- END: tail -->` is a foreign region marker; the pair would be rewritten, so it blocks.
+    // The refusal carries the measured status, so a `sync --all` row can show `blocked`.
     expect(await runSync({ repo: "acme/both-repeat" })).toEqual({
       kind: "refused",
       message:
         "acme/both-repeat AGENTS.md:8: unpaired region marker <!-- END: tail --> has no opening marker",
+      status: expect.objectContaining({ status: "blocked", file: "AGENTS.md", line: 8 }),
     });
     expect(github.calls).toEqual([]);
 
@@ -449,8 +455,8 @@ describe("sync", () => {
         dryRun: false,
       }).pipe(Effect.provide(Layer.mergeAll(BunServices.layer, clean.layer))),
     );
-    expect(result.kind).toBe("written");
-    if (result.kind !== "written") return;
+    expect(result.kind).toBe("opened");
+    if (result.kind !== "opened") return;
     expect(result.plan.actions[0]).toBe("drop CLAUDE.md content, which AGENTS.md already contains");
     expect(clean.fileAt("acme/both-repeat", "heads/agent-rules/base", "AGENTS.md")).toBe(
       `# A\n\n${REPEATED}\n\n${block("base", BODY, await revOf(clean))}\n`,
@@ -473,8 +479,8 @@ describe("sync", () => {
     expect(github.calls).toEqual([]);
 
     const result = await runSync({ repo: "acme/regions" });
-    expect(result.kind).toBe("written");
-    if (result.kind !== "written") return;
+    expect(result.kind).toBe("opened");
+    if (result.kind !== "opened") return;
     const written = github.fileAt("acme/regions", "heads/agent-rules/base", "AGENTS.md") ?? "";
     expect(written).toBe(
       `${COBRACKET.replace(/\s+$/, "")}\n\n${block("base", BODY, await revOf(github))}\n`,
@@ -495,7 +501,7 @@ describe("sync", () => {
     // The planned tree reads current with the same four regions; a rerun is quiet.
     github.moveRef("acme/regions", "heads/main", "heads/agent-rules/base");
     github.calls.length = 0;
-    expect((await runSync({ repo: "acme/regions" })).kind).toBe("current");
+    expect((await runSync({ repo: "acme/regions" })).kind).toBe("nothing-to-do");
   });
 
   test("D16: a CLAUDE.md that imports AGENTS.md from inside a region is left byte for byte; the block lands in AGENTS.md", async () => {
@@ -516,8 +522,8 @@ describe("sync", () => {
     expect(github.calls).toEqual([]);
 
     const result = await runSync({ repo: "acme/cobracket" });
-    expect(result.kind).toBe("written");
-    if (result.kind !== "written") return;
+    expect(result.kind).toBe("opened");
+    if (result.kind !== "opened") return;
     expect(github.fileAt("acme/cobracket", "heads/agent-rules/base", "CLAUDE.md")).toBe(
       COBRACKET_CLAUDE,
     );
@@ -541,7 +547,7 @@ describe("sync", () => {
     // The planned tree measured `current` before the write; after the merge the rerun agrees.
     github.moveRef("acme/cobracket", "heads/main", "heads/agent-rules/base");
     github.calls.length = 0;
-    expect((await runSync({ repo: "acme/cobracket" })).kind).toBe("current");
+    expect((await runSync({ repo: "acme/cobracket" })).kind).toBe("nothing-to-do");
   });
 
   test("refuses: not subscribed, foreign marker, modified block", async () => {
@@ -577,7 +583,7 @@ describe("sync", () => {
       );
     }
     // acme/empty has no package.json and no src/, so neither reference can be judged: not rot.
-    expect((await runSync({ repo: "acme/empty", pack: "rotten" })).kind).toBe("written");
+    expect((await runSync({ repo: "acme/empty", pack: "rotten" })).kind).toBe("opened");
     expect(github.calls.filter((c) => c.includes("acme/canonical"))).toEqual([]);
 
     // The same stale `bun run lint` already flagged in a rule file does not excuse the block.

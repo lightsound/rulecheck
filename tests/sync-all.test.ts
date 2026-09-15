@@ -65,11 +65,7 @@ function world() {
 }
 
 function rows(result: SyncAllResult): string[] {
-  return result.rows.map((row) => {
-    const outcome =
-      row.outcome.kind === "done" ? `${row.outcome.result.kind}` : `${row.outcome.kind}`;
-    return `${row.target.pack} ${row.target.repo} ${outcome}`;
-  });
+  return result.rows.map((row) => `${row.target.pack} ${row.target.repo} ${row.outcome.kind}`);
 }
 
 describe("syncAll", () => {
@@ -80,7 +76,7 @@ describe("syncAll", () => {
     expect(rows(result)).toEqual([
       "base acme/eligible planned",
       "base acme/outdated planned",
-      "base acme/current current",
+      "base acme/current nothing-to-do",
       "base acme/modified refused",
       "base acme/foreign refused",
       "base acme/gone failed",
@@ -89,36 +85,39 @@ describe("syncAll", () => {
     expect(result.failed).toBe(1);
     expect(github.calls).toEqual([]);
 
+    // The status column is the pack status measured on the default branch, also for refusals;
+    // the outcome column starts with the outcome label (docs/status-model.md).
     const text = renderSyncAll(result);
     expect(text).toContain("Sync (dry run, nothing written): 7 targets from acme/agent-rules@");
+    expect(text).toMatch(/repository\s+pack\s+status\s+outcome/);
     expect(text).toMatch(
-      /acme\/eligible\s+base\s+eligible\s+\+5 -0\s+would open or update a pull request: insert block `base` into AGENTS.md/,
+      /acme\/eligible\s+base\s+eligible\s+planned \+5 -0: insert block `base` into AGENTS.md/,
     );
-    expect(text).toMatch(/acme\/outdated\s+base\s+outdated\s+\+2 -1\s+would open or update/);
-    expect(text).toMatch(/acme\/current\s+base\s+current\s+nothing to do/);
+    expect(text).toMatch(/acme\/outdated\s+base\s+outdated\s+planned \+2 -1: update block/);
+    expect(text).toMatch(/acme\/current\s+base\s+current\s+nothing to do \(block at AGENTS.md:3\)/);
     expect(text).toMatch(
-      /acme\/modified\s+base\s+refused\s+acme\/modified AGENTS.md:3: block `base` was edited in place/,
-    );
-    expect(text).toMatch(
-      /acme\/foreign\s+base\s+refused\s+acme\/foreign AGENTS.md:1: another tool marks the whole file/,
+      /acme\/modified\s+base\s+modified\s+refused: acme\/modified AGENTS.md:3: block `base` was edited in place/,
     );
     expect(text).toMatch(
-      /acme\/gone\s+base\s+failed\s+GitHub getRepository failed \(HTTP 404\): Not Found/,
+      /acme\/foreign\s+base\s+blocked\s+refused: acme\/foreign AGENTS.md:1: another tool marks the whole file/,
     );
-    expect(text).toEndWith("7 targets: 3 would write, 1 current, 2 refused, 1 failed");
+    expect(text).toMatch(
+      /acme\/gone\s+base\s+-\s+failed: GitHub getRepository failed \(HTTP 404\): Not Found/,
+    );
+    expect(text).toEndWith("7 targets: 1 nothing to do, 3 planned, 2 refused, 1 failed");
   });
 
   test("real run: one pull request per target, refusals and the failure isolated; a rerun is idempotent; merged targets read current", async () => {
     const { github, runAll } = world();
     const first = await runAll();
     expect(rows(first)).toEqual([
-      "base acme/eligible written",
-      "base acme/outdated written",
-      "base acme/current current",
+      "base acme/eligible opened",
+      "base acme/outdated opened",
+      "base acme/current nothing-to-do",
       "base acme/modified refused",
       "base acme/foreign refused",
       "base acme/gone failed",
-      "frontend acme/eligible written",
+      "frontend acme/eligible opened",
     ]);
     expect(first.failed).toBe(1);
     expect(github.pulls("acme/eligible").map((p) => p.head)).toEqual([
@@ -133,7 +132,9 @@ describe("syncAll", () => {
     // sequence at a time, so no two targets' tree/commit/ref/pull request calls interleave.
     expect(github.maxInFlight()).toBe(3);
     expect(github.maxWriters()).toBe(1);
-    expect(renderSyncAll(first)).toEndWith("7 targets: 3 opened, 1 current, 2 refused, 1 failed");
+    expect(renderSyncAll(first)).toEndWith(
+      "7 targets: 1 nothing to do, 3 opened, 2 refused, 1 failed",
+    );
     expect(renderSyncAll(first)).toMatch(
       /acme\/eligible\s+base\s+eligible\s+opened PR #1 \(https:\/\/github.com\/acme\/eligible\/pull\/1\)/,
     );
@@ -144,7 +145,7 @@ describe("syncAll", () => {
     expect(rows(second)).toEqual([
       "base acme/eligible up-to-date",
       "base acme/outdated up-to-date",
-      "base acme/current current",
+      "base acme/current nothing-to-do",
       "base acme/modified refused",
       "base acme/foreign refused",
       "base acme/gone failed",
@@ -155,7 +156,7 @@ describe("syncAll", () => {
       /acme\/outdated\s+base\s+outdated\s+up to date \(PR #1 open, https:\/\/github.com\/acme\/outdated\/pull\/1\)/,
     );
     expect(renderSyncAll(second)).toEndWith(
-      "7 targets: 3 up to date, 1 current, 2 refused, 1 failed",
+      "7 targets: 1 nothing to do, 3 up to date, 2 refused, 1 failed",
     );
 
     // The `base` pull request on acme/outdated merges: the default branch decides, not the branch.
@@ -163,8 +164,8 @@ describe("syncAll", () => {
     const third = await runAll({ pack: "base" });
     expect(rows(third)).toEqual([
       "base acme/eligible up-to-date",
-      "base acme/outdated current",
-      "base acme/current current",
+      "base acme/outdated nothing-to-do",
+      "base acme/current nothing-to-do",
       "base acme/modified refused",
       "base acme/foreign refused",
       "base acme/gone failed",

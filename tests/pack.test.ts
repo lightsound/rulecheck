@@ -24,7 +24,15 @@ const base = packFromFiles(
     { path: "AGENTS.md", content: `${BODY}\n` },
     { path: ".cursor/skills/review/SKILL.md", content: "---\nname: review\n---\n" },
   ],
-  ["Acme/Canonical", "acme/both", "acme/empty", "acme/claude", "acme/foreign", "acme/swap"],
+  [
+    "Acme/Canonical",
+    "acme/both",
+    "acme/empty",
+    "acme/claude",
+    "acme/foreign",
+    "acme/swap",
+    "acme/only",
+  ],
 );
 
 describe("packFromFiles", () => {
@@ -98,6 +106,26 @@ function block(source: string, body: string, overrides: Partial<ManagedBlock> = 
   };
 }
 
+/** The normalization every shape maps to; `both-full` defaults to `merge` (override per test). */
+function normalizationOf(
+  shape: RepoForDistribution["shape"],
+): RepoForDistribution["normalization"] {
+  switch (shape) {
+    case "agents-canonical":
+    case "agents-imported":
+      return "keep";
+    case "agents-only":
+      return "add-wrapper";
+    case "none":
+      return "create";
+    case "claude-only":
+    case "claude-canonical":
+      return "move";
+    case "both-full":
+      return "merge";
+  }
+}
+
 function repo(
   name: string,
   shape: RepoForDistribution["shape"],
@@ -106,7 +134,7 @@ function repo(
   return {
     name,
     shape,
-    bothFull: shape === "both-full" ? "merge" : null,
+    normalization: normalizationOf(shape),
     files: [],
     blocks: [],
     blockIssues: [],
@@ -202,24 +230,32 @@ describe("classifyPackStatus", () => {
     expect(classifyPackStatus(claudeOnly, base)).toMatchObject({
       status: "eligible",
       file: ".claude/CLAUDE.md",
+      message: "move .claude/CLAUDE.md content to AGENTS.md, add CLAUDE.md wrapper, insert block",
     });
-    expect(classifyPackStatus(repo("acme/swap", "claude-canonical"), base).status).toBe("eligible");
+    // claude-canonical is the same move: the AGENTS.md pointer is overwritten with the content.
+    expect(classifyPackStatus(repo("acme/swap", "claude-canonical"), base)).toMatchObject({
+      status: "eligible",
+      message: "move CLAUDE.md content to AGENTS.md, add CLAUDE.md wrapper, insert block",
+    });
+    expect(classifyPackStatus(repo("acme/only", "agents-only"), base).message).toBe(
+      "insert block into AGENTS.md, add CLAUDE.md wrapper",
+    );
   });
 
   test("both have content: eligible, and the message names the D12 normalization", () => {
-    expect(classifyPackStatus(repo("acme/both", "both-full", { bothFull: "merge" }), base)).toEqual(
-      {
-        repo: "acme/both",
-        pack: "base",
-        status: "eligible",
-        file: "AGENTS.md",
-        line: null,
-        message:
-          "append CLAUDE.md content to AGENTS.md under `## Merged from CLAUDE.md`, add CLAUDE.md wrapper, insert block",
-      },
-    );
     expect(
-      classifyPackStatus(repo("acme/both", "both-full", { bothFull: "wrapper" }), base),
+      classifyPackStatus(repo("acme/both", "both-full", { normalization: "merge" }), base),
+    ).toEqual({
+      repo: "acme/both",
+      pack: "base",
+      status: "eligible",
+      file: "AGENTS.md",
+      line: null,
+      message:
+        "append CLAUDE.md content to AGENTS.md under `## Merged from CLAUDE.md`, add CLAUDE.md wrapper, insert block",
+    });
+    expect(
+      classifyPackStatus(repo("acme/both", "both-full", { normalization: "drop" }), base),
     ).toMatchObject({
       status: "eligible",
       message:
@@ -227,7 +263,7 @@ describe("classifyPackStatus", () => {
     });
     // The message names the file that actually carries the content.
     const nested = repo("acme/both", "both-full", {
-      bothFull: "wrapper",
+      normalization: "drop",
       files: [file("AGENTS.md"), file(".claude/CLAUDE.md")],
     });
     expect(classifyPackStatus(nested, base).message).toStartWith(
