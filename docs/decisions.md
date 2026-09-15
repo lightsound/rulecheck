@@ -220,7 +220,7 @@ request text) and `src/domain/diff.ts` stay pure. `src/scan/` remains read-only.
 **Not in this step.** Whole managed files in a pack (D8 `file` entries) are inventoried by scan
 but not written; nested `AGENTS.md` blocks are not touched; the pack `AGENTS.md` in
 `lightsound/agent-rules` is not yet wrapped in its own markers (both marker-wrapped and bare
-bodies are read); no fan-out (`--all`, Step 5).
+bodies are read; settled by D11: it stays bare); no fan-out (`--all`, Step 5).
 
 ## 2026-09-15 D11: Pack sources stay unwrapped; markers are rendered at sync time
 

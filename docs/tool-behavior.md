@@ -121,14 +121,17 @@ records which contracts have been exercised against api.github.com and which hav
 | `GET git/ref/heads/<branch>` → `object.sha`; `GET git/commits/<sha>` → `tree.sha`, `message`; `GET git/trees/<sha>?recursive=1` → flat `tree[]` with `path`, `type`, `sha`, `mode`, and `truncated` | building the snapshot filesystem | verified 2026-09-15 | `scan --packs lightsound/rulecheck` and `sync lightsound/rulecheck --dry-run` read the real tree and blobs |
 | `GET git/blobs/<sha>` → `content` base64 with embedded newlines, `encoding: "base64"` (`utf-8` is accepted too; anything else fails) | reading files | verified 2026-09-15 | blob of `CLAUDE.md`: `{"content":"QEFHRU5UUy5tZAo=\n","encoding":"base64","size":11}` |
 | `GET pulls?state=open&head=<owner>%3A<branch>` finds the open pull request from a same-repository branch | reusing the open pull request on rerun | verified 2026-09-15 | returned [#5](https://github.com/lightsound/rulecheck/pull/5) for `lightsound:cursor/step3-sync-write-path-33c6` |
-| `POST git/trees` with `base_tree` and entries `{path, mode: "100644", type: "blob", content}`; deletion as `{path, mode, type, sha: null}` | writing the root pair, removing `.claude/CLAUDE.md` in the `claude-only` normalization | **documented, not yet exercised** | [Create a tree](https://docs.github.com/rest/git/trees#create-a-tree): "sha ... use `null` to delete" |
-| `POST git/commits`, `POST git/refs` (`{ref: "refs/heads/<b>", sha}`), `PATCH git/refs/heads/<b>` (`{sha, force: true}`), `POST pulls`, `PATCH pulls/<n>` | commit, branch, pull request | **documented, not yet exercised** | GitHub REST docs for Git Data and Pulls |
+| `POST git/trees` with `base_tree` and entries `{path, mode: "100644", type: "blob", content}` | writing the root pair | verified 2026-09-15 | `sync lightsound/rulecheck --pack base --packs lightsound/agent-rules` wrote `AGENTS.md` on top of the `main` tree; the resulting diff was byte-identical to the dry run ([#6](https://github.com/lightsound/rulecheck/pull/6)) |
+| `POST git/trees` deletion entry `{path, mode, type, sha: null}` | removing `.claude/CLAUDE.md` in the `claude-only` normalization | **documented, not yet exercised** | [Create a tree](https://docs.github.com/rest/git/trees#create-a-tree): "sha ... use `null` to delete" |
+| `POST git/commits` (`{message, tree, parents}`), `POST git/refs` (`{ref: "refs/heads/<b>", sha}`), `POST pulls` (`{title, body, head, base}`) | first commit, new branch, new pull request | verified 2026-09-15 | the same run created commit `07bc66d`, branch `agent-rules/base`, and [#6](https://github.com/lightsound/rulecheck/pull/6) |
+| `PATCH git/refs/heads/<b>` (`{sha, force: true}`), `PATCH pulls/<n>` (`{title, body}`) | force-moving the tool-owned branch and reusing the open pull request on rerun | **documented, not yet exercised** | the rerun after #6 was a dry run only (it did verify the tip-commit ownership check via `GET git/commits/<sha>`) |
 | Written paths always get mode `100644`; a base entry with `100755` or `120000` at that path is replaced by a regular file | writing `AGENTS.md` / `CLAUDE.md` | by design, unverified in the wild | a symlinked `CLAUDE.md -> AGENTS.md` reads as the text `AGENTS.md`, which the wrapper detector treats as a pointer, so the shape is `agents-canonical` and the link is left alone |
 
-Re-verification: the first run of `sync` without `--dry-run` goes to a throwaway repository under
-the operator's own account (one run per shape, `claude-only` with `.claude/CLAUDE.md` included
-because it is the only deleting path), then the rows above move to "verified" with the run as
-evidence. Repeat when `gh` changes its error output or GitHub changes the Git Data API.
+Re-verification: the rows still marked "not yet exercised" move to "verified" on the first live
+run that needs them: a tree deletion needs a `claude-only` subscriber with `.claude/CLAUDE.md`
+(the only deleting path); the `PATCH` pair needs a pack change while a subscriber's
+`agent-rules/<pack>` pull request is still open. Repeat the whole table when `gh` changes its
+error output or GitHub changes the Git Data API.
 
 ## What this means for a personal instructions pack
 
