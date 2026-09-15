@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { hashBlockBody, parseBlocks } from "./block.ts";
 import type {
   BlockIssue,
+  BothFullNormalization,
   CanonicalShape,
   InstructionFile,
   ManagedBlock,
@@ -97,6 +98,8 @@ export function findPackedRef(packedRefs: string, ref: string): string | null {
 export interface RepoForDistribution {
   readonly name: string;
   readonly shape: CanonicalShape;
+  /** Required when `shape` is `both-full`; decides the normalization named in the status (D12). */
+  readonly bothFull: BothFullNormalization | null;
   readonly files: ReadonlyArray<InstructionFile>;
   readonly blocks: ReadonlyArray<ManagedBlock>;
   readonly blockIssues: ReadonlyArray<BlockIssue>;
@@ -123,6 +126,18 @@ const ELIGIBLE_ACTION: Record<Exclude<CanonicalShape, "both-full">, string> = {
   "claude-canonical": "swap the pair so AGENTS.md is canonical, insert block",
   none: "create AGENTS.md with the block and a CLAUDE.md wrapper",
 };
+
+const BOTH_FULL_ACTION: Record<BothFullNormalization, string> = {
+  wrapper:
+    "CLAUDE.md repeats AGENTS.md: replace it with the `@AGENTS.md` wrapper, insert block into AGENTS.md",
+  merge:
+    "append CLAUDE.md content to AGENTS.md under `## Merged from CLAUDE.md`, replace CLAUDE.md with the `@AGENTS.md` wrapper, insert block",
+};
+
+function eligibleAction(repo: RepoForDistribution): string {
+  if (repo.shape !== "both-full") return ELIGIBLE_ACTION[repo.shape];
+  return BOTH_FULL_ACTION[repo.bothFull ?? "merge"];
+}
 
 /** Status of one repository for one pack. */
 export function classifyPackStatus(repo: RepoForDistribution, pack: Pack): PackStatusEntry {
@@ -158,17 +173,8 @@ export function classifyPackStatus(repo: RepoForDistribution, pack: Pack): PackS
     return { ...base, status: "not-subscribed", file: null, line: null, message: null };
   }
 
-  if (repo.shape === "both-full") {
-    return {
-      ...base,
-      status: "blocked",
-      file: "AGENTS.md",
-      line: 1,
-      message: "both AGENTS.md and CLAUDE.md have content; decide which one is canonical first",
-    };
-  }
-
-  // Files the sync would rewrite: only AGENTS.md when the pair is already canonical, else both.
+  // Files the sync would rewrite: only AGENTS.md when the pair is already canonical, else both
+  // (a `both-full` pair is normalized in the same commit, D12).
   const touched =
     repo.shape === "agents-canonical" || repo.shape === "agents-only"
       ? new Set(["AGENTS.md"])
@@ -189,7 +195,7 @@ export function classifyPackStatus(repo: RepoForDistribution, pack: Pack): PackS
     status: "eligible",
     file: contentFile(repo),
     line: null,
-    message: ELIGIBLE_ACTION[repo.shape],
+    message: eligibleAction(repo),
   };
 }
 

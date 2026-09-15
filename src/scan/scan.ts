@@ -1,12 +1,14 @@
 import { Effect, FileSystem, Path } from "effect";
 import type { PlatformError } from "effect/PlatformError";
 import { findForeignMarkers, parseBlocks } from "../domain/block.ts";
-import { classifyShape, estimateBudget } from "../domain/classify.ts";
+import { classifyBothFull, classifyShape, estimateBudget } from "../domain/classify.ts";
 import { distribute } from "../domain/pack.ts";
 import type {
   BlockIssue,
+  BothFullNormalization,
   CanonicalShape,
   DuplicateGroup,
+  InstructionFile,
   ManagedBlock,
   PackDistribution,
   PersonalLayer,
@@ -125,10 +127,12 @@ const analyzeRepo = (
     const { blocks, blockIssues } = detectBlocks(analyzed);
     const skills = yield* inventorySkills(fs, path, repo);
 
+    const shape = classifyShape(files);
     return {
       root: repo.root,
       name: displayName(repo.root, scanRoot),
-      shape: classifyShape(files),
+      shape,
+      bothFull: shape === "both-full" ? classifyBothFullPair(files, contents) : null,
       files,
       budget: estimateBudget(files, contents),
       findings,
@@ -137,6 +141,18 @@ const analyzeRepo = (
       skills,
     } satisfies RepoReport;
   });
+
+/** D12: which normalization a sync applies to a `both-full` pair, from the root files' content. */
+function classifyBothFullPair(
+  files: ReadonlyArray<InstructionFile>,
+  contents: ReadonlyMap<string, string>,
+): BothFullNormalization {
+  const claude = files.find((f) => f.kind === "claude-md" && ROOT_PAIR.has(f.relativePath));
+  return classifyBothFull(
+    contents.get("AGENTS.md") ?? "",
+    claude ? (contents.get(claude.relativePath) ?? "") : "",
+  );
+}
 
 /**
  * `~/ghq/github.com/owner/repo` → `owner/repo`; otherwise the path relative to the scan root,

@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
+  classifyBothFull,
   classifyShape,
+  claudeContentBeyondImport,
   detectKind,
   detectWrapperTarget,
   estimateBudget,
@@ -191,6 +193,35 @@ describe("classifyShape", () => {
       "none",
     );
     expect(classifyShape([])).toBe("none");
+  });
+});
+
+describe("classifyBothFull", () => {
+  const agents = "# Project\n\n- Use Bun.\n- Respond in Japanese.\n";
+
+  test("wrapper when CLAUDE.md adds nothing beyond its import", () => {
+    expect(claudeContentBeyondImport("@AGENTS.md\n")).toBe("");
+    expect(claudeContentBeyondImport("\n@./AGENTS.md\r\n\n")).toBe("");
+    expect(claudeContentBeyondImport("@AGENTS.md\n\n- Use Bun.\n")).toBe("- Use Bun.");
+    // A line that says more than the import is content, not an import.
+    expect(claudeContentBeyondImport("@AGENTS.md and more\n")).toBe("@AGENTS.md and more");
+
+    expect(classifyBothFull(agents, "@AGENTS.md\n\n\n")).toBe("wrapper");
+    expect(classifyBothFull(agents, "")).toBe("wrapper");
+  });
+
+  test("wrapper when the extra text appears verbatim in AGENTS.md, line endings aside", () => {
+    expect(classifyBothFull(agents, "- Use Bun.\n- Respond in Japanese.\n")).toBe("wrapper");
+    expect(classifyBothFull(agents, "@AGENTS.md\r\n\r\n- Use Bun.\r\n")).toBe("wrapper");
+    expect(classifyBothFull(agents.replace(/\n/g, "\r\n"), "- Use Bun.\n")).toBe("wrapper");
+    expect(classifyBothFull(agents, agents)).toBe("wrapper");
+  });
+
+  test("merge as soon as one line differs; no fuzzy matching", () => {
+    expect(classifyBothFull(agents, "- Use Bun.\n- Respond in English.\n")).toBe("merge");
+    expect(classifyBothFull(agents, "- use bun.\n")).toBe("merge");
+    expect(classifyBothFull(agents, "- Respond in Japanese.\n- Use Bun.\n")).toBe("merge");
+    expect(classifyBothFull("", "# Only here\n")).toBe("merge");
   });
 });
 

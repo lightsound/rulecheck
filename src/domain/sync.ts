@@ -1,4 +1,5 @@
 import { normalizeBody, parseBlocks } from "./block.ts";
+import { classifyBothFull, claudeContentBeyondImport } from "./classify.ts";
 import type { FileChange } from "./diff.ts";
 import type {
   CanonicalShape,
@@ -172,11 +173,65 @@ function planInsert(input: SyncPlanInput, rendered: string): SyncPlan | SyncRefu
       }
       return { changes, actions, blockFile: "AGENTS.md", blockLine: inserted.line };
     }
-    case "both-full":
-      return {
-        reason: "both AGENTS.md and CLAUDE.md have content; decide which one is canonical first",
-      };
+    case "both-full": {
+      const present = ROOT_CLAUDE.filter(has);
+      const claudeFile = present[0];
+      const agentsBefore = input.contents.get("AGENTS.md");
+      if (present.length !== 1 || claudeFile === undefined) {
+        return { reason: "both CLAUDE.md and .claude/CLAUDE.md exist; keep one before syncing" };
+      }
+      if (agentsBefore === undefined) return unexpected("both-full");
+      const claudeContent = input.contents.get(claudeFile) ?? "";
+      const normalization = classifyBothFull(agentsBefore, claudeContent);
+      const actions: string[] = [];
+      let agentsContent = agentsBefore;
+      if (normalization === "merge") {
+        agentsContent = mergeClaudeContent(agentsBefore, claudeContentBeyondImport(claudeContent));
+        actions.push(
+          `append ${claudeFile} content to AGENTS.md under \`${MERGED_HEADING}\` (verbatim, before any managed block; duplicates or conflicts with the text above it are left for review)`,
+        );
+      } else {
+        actions.push(`drop ${claudeFile} content, which AGENTS.md already contains`);
+      }
+      const inserted = insertBlock(agentsContent, rendered, input);
+      const changes: FileChange[] = [
+        { path: "AGENTS.md", before: agentsBefore, after: inserted.content },
+      ];
+      actions.push(`insert block \`${input.pack.id}\` into AGENTS.md`);
+      if (claudeFile === "CLAUDE.md") {
+        changes.push({ path: "CLAUDE.md", before: claudeContent, after: WRAPPER_CONTENT });
+        actions.push("replace CLAUDE.md with the wrapper (`@AGENTS.md`)");
+      } else {
+        changes.push({ path: claudeFile, before: claudeContent, after: null });
+        changes.push({ path: "CLAUDE.md", before: null, after: WRAPPER_CONTENT });
+        actions.push(`remove ${claudeFile}`, "create CLAUDE.md wrapper (`@AGENTS.md`)");
+      }
+      return { changes, actions, blockFile: "AGENTS.md", blockLine: inserted.line };
+    }
   }
+}
+
+/** Heading under which a merged CLAUDE.md lands in AGENTS.md (D12). */
+export const MERGED_HEADING = "## Merged from CLAUDE.md";
+
+/**
+ * Append `extra` (CLAUDE.md beyond its import, see `claudeContentBeyondImport`) to `agents` under
+ * `MERGED_HEADING`: before the first managed block so project text stays ahead of distributed
+ * text, otherwise at the end. The text is copied verbatim; nothing is deduplicated.
+ */
+export function mergeClaudeContent(agents: string, extra: string): string {
+  const section = [MERGED_HEADING, "", extra];
+  const first = parseBlocks("", agents).blocks[0];
+  if (first) {
+    const lines = agents.split("\n");
+    const previous = lines[first.line - 2];
+    const leading = previous !== undefined && previous.trim().length > 0 ? [""] : [];
+    lines.splice(first.line - 1, 0, ...leading, ...section, "");
+    return lines.join("\n");
+  }
+  const head = agents.replace(/\s+$/, "");
+  const body = section.join("\n");
+  return head.length === 0 ? `${body}\n` : `${head}\n\n${body}\n`;
 }
 
 function unexpected(shape: CanonicalShape): SyncRefusal {
@@ -240,7 +295,7 @@ export function pullRequestText(
     "Changes:",
     ...plan.actions.map((action) => `- ${action}`),
     "",
-    "Checks passed before this pull request was opened: the repository is subscribed, its root pair has a deterministic shape, and the block adds no reference to a script or path that does not exist here.",
+    "Checks passed before this pull request was opened: the repository is subscribed, its root pair is normalized to `AGENTS.md` canonical by the changes above, and the block adds no reference to a script or path that does not exist here.",
   ].join("\n");
   return { title, body };
 }

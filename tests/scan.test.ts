@@ -336,8 +336,8 @@ describe("scan", () => {
       ),
     ).toEqual([
       "base acme/blocked blocked AGENTS.md:11",
-      "base acme/both blocked AGENTS.md:1",
       "base acme/foreign blocked AGENTS.md:1",
+      "base acme/both eligible AGENTS.md:-",
       "base acme/canonical eligible AGENTS.md:-",
       "base acme/empty eligible AGENTS.md:-",
       "base acme/restored not-subscribed -:-",
@@ -355,12 +355,17 @@ describe("scan", () => {
       `blocked: block at line 3 is outdated (rev aaaaaaa -> ${PACK_REV.slice(0, 7)}); \`agent-rules:begin\` is missing hash=`,
       "modified: body no longer matches its hash=",
     ]);
+    // `both` carries its own text in CLAUDE.md, so the sync would merge it (D12).
+    const both = distribution?.entries.find((e) => e.repo === "acme/both" && e.pack === "base");
+    expect(both?.message).toStartWith("append CLAUDE.md content to AGENTS.md under");
+    expect(report.repos.find((r) => r.name === "acme/both")?.bothFull).toBe("merge");
+    expect(report.repos.find((r) => r.name === "acme/canonical")?.bothFull).toBeNull();
     expect(distribution?.counts).toEqual({
       current: 0,
       outdated: 0,
       modified: 1,
-      eligible: 3,
-      blocked: 3,
+      eligible: 4,
+      blocked: 2,
       "not-subscribed": 5,
     });
     expect(distribution?.warnings).toEqual([]);

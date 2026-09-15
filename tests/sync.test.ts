@@ -3,6 +3,8 @@ import { hashBlockBody, parseBlocks } from "../src/domain/block.ts";
 import { unifiedDiff } from "../src/domain/diff.ts";
 import { packFromFiles } from "../src/domain/pack.ts";
 import {
+  MERGED_HEADING,
+  mergeClaudeContent,
   planSync,
   pullRequestText,
   renderBlock,
@@ -147,15 +149,77 @@ describe("planSync", () => {
     });
   });
 
-  test("refuses both CLAUDE.md files, both-full, and files that contradict the shape", () => {
+  test("both-full, CLAUDE.md repeats AGENTS.md: the wrapper replaces it, nothing is merged", () => {
+    const agents = "# P\n\n- Use Bun.\n";
+    const p = plan(
+      input("both-full", { "AGENTS.md": agents, "CLAUDE.md": "@AGENTS.md\n\n- Use Bun.\n" }),
+    );
+    expect(p.changes).toEqual([
+      { path: "AGENTS.md", before: agents, after: `# P\n\n- Use Bun.\n\n${BLOCK}\n` },
+      { path: "CLAUDE.md", before: "@AGENTS.md\n\n- Use Bun.\n", after: WRAPPER_CONTENT },
+    ]);
+    expect(p.actions).toEqual([
+      "drop CLAUDE.md content, which AGENTS.md already contains",
+      "insert block `base` into AGENTS.md",
+      "replace CLAUDE.md with the wrapper (`@AGENTS.md`)",
+    ]);
+    expect(p.blockLine).toBe(5);
+  });
+
+  test("both-full, CLAUDE.md differs: its text lands under the merge heading, before any block", () => {
+    const frontendBlock = renderBlock(frontend) ?? "";
+    const agents = `# P\n\n- Use Bun.\n${frontendBlock}\n`;
+    const claude = "@AGENTS.md\n\n# Claude notes\n\n- Use npm.\n";
+    const p = plan(input("both-full", { "AGENTS.md": agents, "CLAUDE.md": claude }));
+    expect(p.changes[0]?.after).toBe(
+      `# P\n\n- Use Bun.\n\n## Merged from CLAUDE.md\n\n# Claude notes\n\n- Use npm.\n\n${BLOCK}\n\n${frontendBlock}\n`,
+    );
+    expect(p.changes[1]).toEqual({ path: "CLAUDE.md", before: claude, after: WRAPPER_CONTENT });
+    expect(p.actions[0]).toBe(
+      "append CLAUDE.md content to AGENTS.md under `## Merged from CLAUDE.md` (verbatim, before any managed block; duplicates or conflicts with the text above it are left for review)",
+    );
+    expect(p.blockLine).toBe(11);
+    const sources = parseBlocks("AGENTS.md", p.changes[0]?.after ?? "").blocks.map((b) => b.source);
+    expect(sources).toEqual(["base", "frontend"]);
+
+    // Without blocks the merged text goes to the end; a nested CLAUDE.md is removed instead.
+    const q = plan(input("both-full", { "AGENTS.md": "# P\n", ".claude/CLAUDE.md": "Own.\n" }));
+    expect(q.changes).toEqual([
+      {
+        path: "AGENTS.md",
+        before: "# P\n",
+        after: `# P\n\n${MERGED_HEADING}\n\nOwn.\n\n${BLOCK}\n`,
+      },
+      { path: ".claude/CLAUDE.md", before: "Own.\n", after: null },
+      { path: "CLAUDE.md", before: null, after: WRAPPER_CONTENT },
+    ]);
+    expect(pullRequestText(q, base, status("eligible")).body).toContain(
+      "- append .claude/CLAUDE.md content to AGENTS.md under `## Merged from CLAUDE.md`",
+    );
+  });
+
+  test("mergeClaudeContent keeps a blank line before the heading and before a following block", () => {
+    expect(mergeClaudeContent("", "X")).toBe(`${MERGED_HEADING}\n\nX\n`);
+    expect(mergeClaudeContent("# P\n\n\n", "X")).toBe(`# P\n\n${MERGED_HEADING}\n\nX\n`);
+    expect(mergeClaudeContent(`# P\n${BLOCK}\n`, "X")).toBe(
+      `# P\n\n${MERGED_HEADING}\n\nX\n\n${BLOCK}\n`,
+    );
+  });
+
+  test("refuses both CLAUDE.md files and files that contradict the shape", () => {
     expect(
       planSync(input("claude-only", { "CLAUDE.md": "a\n", ".claude/CLAUDE.md": "b\n" })),
     ).toEqual({
       reason: "both CLAUDE.md and .claude/CLAUDE.md exist; keep one before syncing",
     });
     expect(
-      "reason" in planSync(input("both-full", { "AGENTS.md": "a\n", "CLAUDE.md": "b\n" })),
-    ).toBe(true);
+      planSync(
+        input("both-full", { "AGENTS.md": "a\n", "CLAUDE.md": "b\n", ".claude/CLAUDE.md": "c\n" }),
+      ),
+    ).toEqual({
+      reason: "both CLAUDE.md and .claude/CLAUDE.md exist; keep one before syncing",
+    });
+    expect("reason" in planSync(input("both-full", { "CLAUDE.md": "b\n" }))).toBe(true);
     expect("reason" in planSync(input("none", { "AGENTS.md": "a\n" }))).toBe(true);
     expect(
       "reason" in planSync(input("agents-only", { "AGENTS.md": "a\n", "CLAUDE.md": "b\n" })),

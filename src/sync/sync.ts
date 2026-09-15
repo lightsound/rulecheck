@@ -217,8 +217,13 @@ const measure = (
     return { repo, entry, contents };
   });
 
+/**
+ * A finding is "known" by kind and value, not by file: the normalization moves CLAUDE.md text into
+ * AGENTS.md (`claude-only`, `claude-canonical`, `both-full`), and rot that already existed there
+ * must not read as rot the pack introduced.
+ */
 function findingKey(finding: Finding): string {
-  return `${finding.kind}:${finding.file}:${finding.value}`;
+  return `${finding.kind}:${finding.value}`;
 }
 
 function newFindings(before: ReadonlyArray<Finding>, after: ReadonlyArray<Finding>): Finding[] {

@@ -68,6 +68,16 @@ export type CanonicalShape =
   | "both-full"
   | "none";
 
+/**
+ * How a sync normalizes a `both-full` pair (D12).
+ *
+ * - `wrapper` CLAUDE.md adds nothing that AGENTS.md does not already contain (after its `@AGENTS.md`
+ *             import line is dropped); it is replaced by the wrapper
+ * - `merge`   CLAUDE.md carries text of its own; it is appended to AGENTS.md under
+ *             `## Merged from CLAUDE.md` before any managed block, then replaced by the wrapper
+ */
+export type BothFullNormalization = "wrapper" | "merge";
+
 export interface ContextBudget {
   /** Approximate tokens Cursor loads for every conversation at the repo root. */
   readonly cursor: number;
@@ -165,10 +175,11 @@ export interface Pack {
  * - `current`        block present, body untouched, hash equals the pack's current hash
  * - `outdated`       block present, body untouched, pack has moved on
  * - `modified`       block present but its body no longer matches the hash it carries
- * - `eligible`       subscribed, no block, and the shape allows a deterministic insertion
+ * - `eligible`       subscribed, no block, and the shape allows a deterministic insertion (every
+ *                    shape does; `both-full` is normalized as its message says, D12)
  * - `blocked`        a write is pending (insertion for a subscriber, or an update of an outdated block)
- *                    and a human must act first: `both have content`, or a foreign or malformed
- *                    marker in a file the sync would write
+ *                    and a human must act first: a foreign or malformed marker in a file the sync
+ *                    would write
  * - `not-subscribed` no block and the repository is not in the pack's subscription list
  */
 export type PackStatus =
@@ -269,6 +280,8 @@ export interface RepoReport {
   /** Short display name, e.g. `owner/repo` when the root lives under a ghq-style tree. */
   readonly name: string;
   readonly shape: CanonicalShape;
+  /** How a sync would normalize the pair; null unless `shape` is `both-full`. */
+  readonly bothFull: BothFullNormalization | null;
   readonly files: ReadonlyArray<InstructionFile>;
   readonly budget: ContextBudget;
   readonly findings: ReadonlyArray<Finding>;
