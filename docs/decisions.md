@@ -282,7 +282,9 @@ block.
 
 A `CLAUDE.md` that is an `@AGENTS.md` line plus up to three short lines is still a wrapper to the
 scanner (`agents-canonical`), so those lines are not merged; that threshold predates this decision
-and is unchanged here.
+and is unchanged here. Revised by D16: a `CLAUDE.md` of any length that holds an `@AGENTS.md`
+line outside fenced code is `agents-imported` and left untouched, so the two normalizations above
+apply only to a `CLAUDE.md` without an import line.
 
 ## 2026-09-15 D13: The Cursor User Rule copy of the pack is retired, not automated
 
@@ -452,6 +454,65 @@ bytes, so blocking there asked a human to look at nothing. Revised rule:
 text report lists them next to the managed blocks. The marker vocabulary above replaces D9's
 "single-line comment containing a foreign word or starting with `BEGIN` / `END`" as the
 definition of a foreign marker; D9's status precedence is otherwise unchanged.
+
+## 2026-09-15 D16: A `CLAUDE.md` that imports `AGENTS.md` is canonical in effect, whatever else it holds
+
+D2 set the convention, `AGENTS.md` canonical and `CLAUDE.md` exactly `@AGENTS.md`, and the reader
+took the second half literally: only a `CLAUDE.md` of at most four short lines counted as the
+wrapper, everything longer was `both-full`, and D12 then merged its text into `AGENTS.md` and
+replaced it with the one-line wrapper. Observed in `lightsound/cobracket`: `CLAUDE.md` is 420
+lines, four of them a project intro and the rest three regions of other tools (D15), one of
+which, `fallow:agent-install`, consists of the single line `@AGENTS.md`; the repository's own
+`AGENTS.md` says "Do not merge the two files or delete either." The pair was `both-full`, the
+merge would have rewritten a file holding regions, so the row read `blocked` at `CLAUDE.md:9`
+and asked a human to do something the repository forbids.
+
+The requirement behind D2 is that Claude Code loads `AGENTS.md`, not that `CLAUDE.md` is one
+line: Claude Code resolves an `@AGENTS.md` line wherever it sits in the file, and it does not
+evaluate imports inside markdown code spans and code blocks ([tool-behavior.md](tool-behavior.md)).
+So the shape is decided by the presence of the import line, not by the length of the file:
+
+- **`agents-imported`** (new shape, "canonical by import"): both root files carry content and
+  the root `CLAUDE.md` holds a line that is exactly `@AGENTS.md` (or `@./AGENTS.md`, surrounding
+  whitespace allowed), anywhere in the file, inside another tool's region included. `AGENTS.md` is the block target; `CLAUDE.md` is never a change of the plan and is
+  left byte for byte as it is; no D12 merge or wrapper conversion is planned. The row reads
+  `eligible` / `outdated` as usual, with the message "CLAUDE.md already imports AGENTS.md; left
+  untouched", and the pull request carries the same line as an action. Because `CLAUDE.md` is
+  not written, its markers and regions do not block (as for the strict wrapper, D9); a marker in
+  `AGENTS.md` still does. The planner refuses when the files no longer show the import line the
+  shape promises. The measure-after step accepts the planned tree as it is: the status is read
+  from the block, and the shape stays `agents-imported`, so `current` there is what "writer and
+  reader agree" (D10) means for this shape; D12's "must read `agents-canonical`" applies to the
+  shapes D12 normalizes.
+- The strict one-line wrapper stays `agents-canonical`; `scan` labels the new shape `AGENTS.md
+  via @import` and adds a low-severity note (not a finding, nothing to act on for the sync) that
+  the pair is not the one-line wrapper and Claude Code loads the extra text too. `--json` carries
+  `agents-imported` in `shape` and `importsAgentsMd` per file.
+- `both-full` is now a `CLAUDE.md` with content and **no** import line. D12 applies to it
+  unchanged: a merge when the text is its own, the wrapper when `AGENTS.md` already contains it,
+  and D15 keeps it `blocked` when either file holds a region the change would move or drop. An
+  `AGENTS.md` that is itself a pointer back at `CLAUDE.md` keeps the pair `claude-canonical`; the
+  import line does not override that, because the content would then be in the wrong file.
+- Only the root `CLAUDE.md` qualifies. A `.claude/CLAUDE.md` with the same line stays
+  `both-full`: Claude Code resolves a relative import against the importing file's directory, so
+  the line there points at `.claude/AGENTS.md`, not at the root file.
+- The line must sit where Claude Code parses imports: outside fenced code (documented) and
+  outside a multi-line HTML comment (block comments are stripped before injection; that this
+  happens before import parsing is an inference, marked as such in tool-behavior.md). The
+  comment rule errs on the safe side: wrongly excluding a line yields `both-full` and a D12
+  rewrite, wrongly including one would leave `AGENTS.md` unloaded. A single-line comment next to
+  the line, such as a region marker, changes nothing.
+- The invariant "CLAUDE.md is never a change" holds on the update path too. A block for the pack
+  that sits in an `agents-imported` `CLAUDE.md` (hand-placed; the sync only ever inserts into
+  `AGENTS.md`) reads `current` or `modified` as under D9, but when it is outdated the row is
+  `blocked` at the block ("move the block into AGENTS.md") instead of being rewritten there, and
+  the planner refuses any plan for this shape that names a root `CLAUDE.md`.
+
+Consequence for D12: a `CLAUDE.md` that repeats `AGENTS.md` verbatim next to an import line is
+no longer collapsed into the wrapper; it is `agents-imported` and left alone, so Claude Code keeps
+loading the duplicate text. That is content the repository chose, reported by the note, and
+touching it would be authoring (D1). D12's `wrapper` normalization therefore fires only for a
+`CLAUDE.md` without an import line whose text `AGENTS.md` already contains.
 
 ## Recording rule
 

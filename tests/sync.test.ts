@@ -27,6 +27,11 @@ const frontend = packFromFiles("frontend", REV, [{ path: "AGENTS.md", content: "
 const BLOCK = `<!-- agent-rules:begin source=base rev=${REV} hash=${hashBlockBody(BODY)} -->\n${BODY}\n<!-- agent-rules:end -->`;
 /** `lightsound/cobracket` AGENTS.md as fetched 2026-09-15: four foreign regions, the last one ends the file. */
 const COBRACKET = readFileSync(new URL("./fixtures/cobracket-AGENTS.md", import.meta.url), "utf8");
+/** Its CLAUDE.md, same date: project intro, three foreign regions, `@AGENTS.md` inside the second (D16). */
+const COBRACKET_CLAUDE = readFileSync(
+  new URL("./fixtures/cobracket-CLAUDE.md", import.meta.url),
+  "utf8",
+);
 
 function file(relativePath: string, overrides: Partial<InstructionFile> = {}): InstructionFile {
   return {
@@ -40,6 +45,7 @@ function file(relativePath: string, overrides: Partial<InstructionFile> = {}): I
     contentHash: relativePath,
     wrapperTarget: null,
     wrapperUsesImport: false,
+    importsAgentsMd: false,
     frontmatter: null,
     ...overrides,
   };
@@ -118,6 +124,37 @@ describe("planSync", () => {
       input("agents-canonical", { "AGENTS.md": "# P\n", "CLAUDE.md": "@AGENTS.md\n" }),
     );
     expect(p.changes.map((c) => c.path)).toEqual(["AGENTS.md"]);
+  });
+
+  test("D16: agents-imported touches only AGENTS.md and names the untouched CLAUDE.md", () => {
+    const p = plan(
+      input("agents-imported", { "AGENTS.md": COBRACKET, "CLAUDE.md": COBRACKET_CLAUDE }),
+    );
+    expect(p.changes.map((c) => c.path)).toEqual(["AGENTS.md"]);
+    expect(p.changes[0]?.after).toBe(`${COBRACKET.replace(/\s+$/, "")}\n\n${BLOCK}\n`);
+    expect(p.blockLine).toBe(187);
+    expect(p.actions).toEqual([
+      "insert block `base` into AGENTS.md",
+      "CLAUDE.md already imports AGENTS.md; left untouched",
+    ]);
+    // The shape promises an import line; files without one do not match it.
+    expect(
+      planSync(input("agents-imported", { "AGENTS.md": "# P\n", "CLAUDE.md": "# Own\n" })),
+    ).toEqual({ reason: "root files do not match shape `agents-imported`; rescan the repository" });
+    // An outdated block that sits in CLAUDE.md would make the update write CLAUDE.md: refused.
+    const oldBlock = `<!-- agent-rules:begin source=base rev=old hash=${hashBlockBody(OLD_BODY)} -->\n${OLD_BODY}\n<!-- agent-rules:end -->`;
+    expect(
+      planSync(
+        input(
+          "agents-imported",
+          { "AGENTS.md": "# P\n", "CLAUDE.md": `# Own\n\n@AGENTS.md\n\n${oldBlock}\n` },
+          { status: status("outdated", "CLAUDE.md") },
+        ),
+      ),
+    ).toEqual({
+      reason:
+        "CLAUDE.md imports AGENTS.md and is left untouched (D16), but the plan would write it; refusing to plan",
+    });
   });
 
   test("claude-only: moves CLAUDE.md content into AGENTS.md and leaves the wrapper behind", () => {

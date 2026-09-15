@@ -11,6 +11,7 @@ import type {
 
 const SHAPE_LABEL: Record<CanonicalShape, string> = {
   "agents-canonical": "AGENTS.md canonical",
+  "agents-imported": "AGENTS.md via @import",
   "claude-canonical": "CLAUDE.md canonical",
   "agents-only": "AGENTS.md only",
   "claude-only": "CLAUDE.md only",
@@ -20,6 +21,8 @@ const SHAPE_LABEL: Record<CanonicalShape, string> = {
 
 const SHAPE_NOTE: Record<CanonicalShape, string | null> = {
   "agents-canonical": null,
+  "agents-imported":
+    "CLAUDE.md imports AGENTS.md and carries content of its own; not the strict one-line wrapper (Claude Code loads both), a sync leaves it untouched",
   "claude-canonical": "Cursor and Codex read AGENTS.md; consider making it the canonical file",
   "agents-only": "Claude Code does not read AGENTS.md; add a CLAUDE.md wrapper (`@AGENTS.md`)",
   "claude-only": "Codex and most non-Cursor tools do not read CLAUDE.md",

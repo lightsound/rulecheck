@@ -115,6 +115,9 @@ function isRootPairFile(relativePath: string): boolean {
   return relativePath === "AGENTS.md" || ROOT_CLAUDE.has(relativePath);
 }
 
+/** D16: why an `agents-imported` pair is written like a canonical one. */
+export const IMPORTED_NOTE = "CLAUDE.md already imports AGENTS.md; left untouched";
+
 /** The root file a sync would insert the block into, given the current shape. */
 function contentFile(repo: RepoForDistribution): string {
   if (repo.shape === "claude-only" || repo.shape === "claude-canonical") {
@@ -125,6 +128,7 @@ function contentFile(repo: RepoForDistribution): string {
 
 const ELIGIBLE_ACTION: Record<Exclude<CanonicalShape, "both-full">, string> = {
   "agents-canonical": "insert block into AGENTS.md",
+  "agents-imported": `insert block into AGENTS.md (${IMPORTED_NOTE})`,
   "agents-only": "insert block into AGENTS.md, add CLAUDE.md wrapper",
   "claude-only": "rename to AGENTS.md, add CLAUDE.md wrapper, insert block",
   "claude-canonical": "swap the pair so AGENTS.md is canonical, insert block",
@@ -158,6 +162,16 @@ export function classifyPackStatus(repo: RepoForDistribution, pack: Pack): PackS
     // that rewrite unsafe: the block would be replaced inside a file another tool or a broken
     // marker owns. Current and modified rows need no write, so the marker stays a repo-level note.
     const pending = `block at line ${block.line} is outdated (${revChange(block, pack)})`;
+    // D16: an `agents-imported` CLAUDE.md is never written, so a block that sits there cannot be
+    // updated in place; a human moves it into AGENTS.md first.
+    if (repo.shape === "agents-imported" && ROOT_CLAUDE.has(block.file)) {
+      return {
+        ...base,
+        ...at,
+        status: "blocked",
+        message: `${pending}; it sits in ${block.file}, which the sync leaves untouched because it imports AGENTS.md (D16); move the block into AGENTS.md`,
+      };
+    }
     const issue = repo.blockIssues.find((i) => i.file === block.file);
     if (issue) {
       return {
@@ -193,12 +207,11 @@ export function classifyPackStatus(repo: RepoForDistribution, pack: Pack): PackS
     return { ...base, status: "not-subscribed", file: null, line: null, message: null };
   }
 
-  // Files the sync would rewrite: only AGENTS.md when the pair is already canonical, else both
-  // (a `both-full` pair is normalized in the same commit, D12).
-  const touched =
-    repo.shape === "agents-canonical" || repo.shape === "agents-only"
-      ? new Set(["AGENTS.md"])
-      : new Set(["AGENTS.md", ...ROOT_CLAUDE]);
+  // Files the sync would rewrite: only AGENTS.md when the pair is already canonical (strictly, or
+  // by import, D16), else both (a `both-full` pair is normalized in the same commit, D12).
+  const touched = LEAVES_CLAUDE_ALONE.has(repo.shape)
+    ? new Set(["AGENTS.md"])
+    : new Set(["AGENTS.md", ...ROOT_CLAUDE]);
   const issue = repo.blockIssues.find((i) => touched.has(i.file));
   if (issue) {
     return {
@@ -236,8 +249,16 @@ export function classifyPackStatus(repo: RepoForDistribution, pack: Pack): PackS
 /** Shapes whose AGENTS.md keeps its text where it is; the block is appended or replaced there. */
 const KEEPS_AGENTS_IN_PLACE: ReadonlySet<CanonicalShape> = new Set([
   "agents-canonical",
+  "agents-imported",
   "agents-only",
   "both-full",
+]);
+
+/** Shapes whose sync writes AGENTS.md only: CLAUDE.md is absent, or already loads AGENTS.md. */
+const LEAVES_CLAUDE_ALONE: ReadonlySet<CanonicalShape> = new Set([
+  "agents-canonical",
+  "agents-imported",
+  "agents-only",
 ]);
 
 function regionsIn(repo: RepoForDistribution, file: string): number {

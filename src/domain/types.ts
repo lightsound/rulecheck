@@ -47,6 +47,13 @@ export interface InstructionFile {
    * A prose pointer ("see AGENTS.md") is not loaded automatically.
    */
   readonly wrapperUsesImport: boolean;
+  /**
+   * True when a root `CLAUDE.md` holds a line that is exactly an `@AGENTS.md` import where Claude
+   * Code parses imports (outside fenced code and multi-line HTML comments), wherever in the file
+   * (D16). Claude Code loads `AGENTS.md` through it even when the file carries other content.
+   * Always false for other files.
+   */
+  readonly importsAgentsMd: boolean;
   readonly frontmatter: RuleFrontmatter | null;
 }
 
@@ -54,14 +61,19 @@ export interface InstructionFile {
  * How a repository arranges its root-level AGENTS.md / CLAUDE.md pair.
  *
  * - `agents-canonical` AGENTS.md carries the content, CLAUDE.md is a wrapper pointing at it
+ * - `agents-imported`  AGENTS.md carries the content, CLAUDE.md imports it with an `@AGENTS.md`
+ *                      line but also carries content of its own (D16); functionally canonical,
+ *                      the sync leaves CLAUDE.md as it is
  * - `claude-canonical` CLAUDE.md carries the content, AGENTS.md is a wrapper pointing at it
  * - `agents-only`      only AGENTS.md exists (Claude Code will not read it)
  * - `claude-only`      only CLAUDE.md exists (Codex and most non-Cursor tools will not read it)
- * - `both-full`        both files carry content; tools that read both load them twice
+ * - `both-full`        both files carry content and CLAUDE.md does not import AGENTS.md; tools
+ *                      that read both load them twice
  * - `none`             neither exists at the root
  */
 export type CanonicalShape =
   | "agents-canonical"
+  | "agents-imported"
   | "claude-canonical"
   | "agents-only"
   | "claude-only"
@@ -71,8 +83,8 @@ export type CanonicalShape =
 /**
  * How a sync normalizes a `both-full` pair (D12).
  *
- * - `wrapper` CLAUDE.md adds nothing that AGENTS.md does not already contain (after its `@AGENTS.md`
- *             import line is dropped); it is replaced by the wrapper
+ * - `wrapper` CLAUDE.md adds nothing that AGENTS.md does not already contain; it is replaced by
+ *             the wrapper
  * - `merge`   CLAUDE.md carries text of its own; it is appended to AGENTS.md under
  *             `## Merged from CLAUDE.md` before any managed block, then replaced by the wrapper
  */
