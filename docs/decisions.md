@@ -63,10 +63,18 @@ repositories can come from Claude Code's `language` setting instead of a memory 
 
 The sync writes to the **remote repository** (branch + commit + PR via the GitHub API), never to
 local checkouts. Reasons: cloud agents clone the default branch, so a rule reaches them only after
-merge; local checkouts get it through normal `git pull`; teams need review. Auto-merge is an
-option per repository (fine for solo repositories). Distribution status (current / outdated /
-modified / eligible / blocked / not subscribed) is a first-class report, per repository with
-`file:line`.
+merge; local checkouts get it through normal `git pull`; teams need review. Auto-merge is a
+per-repository option, **off by default**; it suits solo repositories only. Distribution status
+(current / outdated / modified / eligible / blocked / not subscribed) is a first-class report, per
+repository with `file:line`.
+
+Order of operations for every sync is measure, then write: rot detection runs on the pack against
+the target repository before a PR is opened, and a pack that references a command or path missing
+there is blocked, not distributed.
+
+Confirmed 2026-09-15 that this matches the intended product: author a pack in a web or desktop
+app, select repositories, press sync, receive PRs (or auto-merge where enabled). `rulecheck scan`
+is the backend of the status view.
 
 Shape normalization is a prerequisite and is itself a PR: deterministic cases (`none`,
 `AGENTS.md only`, `CLAUDE.md only` via rename, reversed canonical) are automated; `both have
@@ -77,9 +85,10 @@ committing rules to a shared repository makes them team rules.
 
 ## 2026-09-15 D7: Multiple named packs
 
-A team has more than one shared rule set. A pack is a named `AGENTS.md` fragment; a repository
-subscribes to zero or more packs; each pack is its own managed block identified by `source=`.
-Block order in the file is the subscription order. Conflicts between packs are content, not
+A team has more than one shared rule set. Vocabulary: a **pack** is a named `AGENTS.md` fragment
+(`base`, `frontend`, ...); a **subscription** is the relation repository ↔ pack, zero or more per
+repository; each pack is its own managed block identified by `source=<pack-id>`. Block order in
+the file is the subscription order. Conflicts between packs are content, not
 structure, and are out of scope for automation (a lint may point them out later).
 
 ## Recording rule
