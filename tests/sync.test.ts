@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { hashBlockBody, parseBlocks } from "../src/domain/block.ts";
+import { readFileSync } from "node:fs";
+import {
+  findForeignMarkers,
+  foreignRegionDrift,
+  hashBlockBody,
+  parseBlocks,
+} from "../src/domain/block.ts";
 import { diffStats, unifiedDiff } from "../src/domain/diff.ts";
 import { packFromFiles } from "../src/domain/pack.ts";
 import {
@@ -19,6 +25,8 @@ const REV = "1111111aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const base = packFromFiles("base", REV, [{ path: "AGENTS.md", content: `${BODY}\n` }], ["acme/x"]);
 const frontend = packFromFiles("frontend", REV, [{ path: "AGENTS.md", content: "React.\n" }], []);
 const BLOCK = `<!-- agent-rules:begin source=base rev=${REV} hash=${hashBlockBody(BODY)} -->\n${BODY}\n<!-- agent-rules:end -->`;
+/** `lightsound/cobracket` AGENTS.md as fetched 2026-09-15: four foreign regions, the last one ends the file. */
+const COBRACKET = readFileSync(new URL("./fixtures/cobracket-AGENTS.md", import.meta.url), "utf8");
 
 function file(relativePath: string, overrides: Partial<InstructionFile> = {}): InstructionFile {
   return {
@@ -250,6 +258,62 @@ describe("planSync", () => {
       ),
     );
     expect(q.changes[0]?.after).toBe(`# P\n\n${BLOCK}\n\n${frontendBlock}\n`);
+  });
+
+  test("D15: the block lands after a trailing foreign region and every region keeps its bytes", () => {
+    const p = plan(
+      input("agents-canonical", { "AGENTS.md": COBRACKET, "CLAUDE.md": "@AGENTS.md\n" }),
+    );
+    const after = p.changes[0]?.after ?? "";
+    expect(after).toBe(`${COBRACKET.replace(/\s+$/, "")}\n\n${BLOCK}\n`);
+    expect(after.split("\n").slice(0, 185)).toEqual(COBRACKET.split("\n").slice(0, 185));
+    expect(p.blockLine).toBe(187);
+    expect(foreignRegionDrift("AGENTS.md", COBRACKET, after)).toBeNull();
+    expect(findForeignMarkers("AGENTS.md", after).regions).toHaveLength(4);
+  });
+
+  test("D15: merged CLAUDE.md text and the block go after the region that ends AGENTS.md", () => {
+    const region = "<!-- convex-ai-start -->\nConvex.\n<!-- convex-ai-end -->";
+    const agents = `# P\n\n${region}\n`;
+    const claude = "@AGENTS.md\n\n# Claude notes\n\n- Use npm.\n";
+    const p = plan(input("both-full", { "AGENTS.md": agents, "CLAUDE.md": claude }));
+    expect(p.changes[0]?.after).toBe(
+      `# P\n\n${region}\n\n${MERGED_HEADING}\n\n# Claude notes\n\n- Use npm.\n\n${BLOCK}\n`,
+    );
+    // Text that survives only inside a region does not make CLAUDE.md a wrapper (D12, D15).
+    const repeated = "@AGENTS.md\n\nConvex.\n";
+    const q = plan(input("both-full", { "AGENTS.md": agents, "CLAUDE.md": repeated }));
+    expect(q.actions[0]).toStartWith("append CLAUDE.md content to AGENTS.md");
+  });
+
+  test("D15: the planner refuses any change that would alter a region", () => {
+    // A later pack's block sits inside a foreign region: inserting before it would write inside.
+    const frontendBlock = renderBlock(frontend) ?? "";
+    const agents = `# P\n\n<!-- x:start -->\n${frontendBlock}\n<!-- x:end -->\n`;
+    expect(
+      planSync(input("agents-canonical", { "AGENTS.md": agents, "CLAUDE.md": "@AGENTS.md\n" })),
+    ).toEqual({
+      reason: "AGENTS.md: the region `x` another tool owns would change; refusing to plan",
+    });
+    // A region in the CLAUDE.md that becomes the wrapper cannot survive.
+    const claude =
+      "@AGENTS.md\n\n<!-- x:start -->\n- one\n- two\n- three\n- four\n<!-- x:end -->\n";
+    expect(planSync(input("both-full", { "AGENTS.md": "# P\n", "CLAUDE.md": claude }))).toEqual({
+      reason: "CLAUDE.md would carry 0 foreign region(s) instead of 1; refusing to plan",
+    });
+  });
+
+  test("D15: a pack body with marker-shaped comments updates cleanly; text inside our block is the pack's", () => {
+    const oldBody = "Docs say:\n<!-- toc:start -->\nold toc\n<!-- toc:end -->";
+    const oldBlock = `<!-- agent-rules:begin source=base rev=old hash=${hashBlockBody(oldBody)} -->\n${oldBody}\n<!-- agent-rules:end -->`;
+    const p = plan(
+      input(
+        "agents-canonical",
+        { "AGENTS.md": `# P\n\n${oldBlock}\n`, "CLAUDE.md": "@AGENTS.md\n" },
+        { status: status("outdated") },
+      ),
+    );
+    expect(p.changes[0]?.after).toBe(`# P\n\n${BLOCK}\n`);
   });
 
   test("outdated: replaces the block in place and keeps everything around it", () => {

@@ -382,7 +382,7 @@ describe("scan", () => {
     const text = renderText(report);
     expect(text).toContain("Pack distribution");
     expect(text).toContain("acme/foreign");
-    expect(text).toContain("AGENTS.md:1  another tool marks this file");
+    expect(text).toContain("AGENTS.md:1  another tool marks the whole file");
     expect(text).toContain("AGENTS.md:7-9");
     expect(text).toContain("MODIFIED");
   });

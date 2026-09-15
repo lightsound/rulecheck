@@ -12,8 +12,9 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
   a pull request per repository per pack through `gh api`. First real run done: `lightsound/rulecheck`
   carries block `base` ([rulecheck#6](https://github.com/lightsound/rulecheck/pull/6)) and reads
   `current`. Pack sources stay unwrapped; markers are rendered at sync time (D11). Every shape,
-  including `both have content`, is normalized by the sync (D12); only marker conflicts block.
-  `sync --all` fans out over `subscriptions.json` and its `--dry-run` table is the remote
+  including `both have content`, is normalized by the sync (D12); only marker conflicts block:
+  well-formed marker pairs of other tools are opaque regions the sync appends after (D15), while
+  unpaired, nested, and file-level markers still block. `sync --all` fans out over `subscriptions.json` and its `--dry-run` table is the remote
   distribution report (D14); `scan --packs` reflects local checkouts only.
 - `lightsound/agent-rules/packs/base/AGENTS.md`: the portable pack `base` (D7 naming),
   environment-neutral only (Step 1, [agent-rules#1](https://github.com/lightsound/agent-rules/pull/1)).

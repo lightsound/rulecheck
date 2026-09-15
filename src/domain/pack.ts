@@ -4,6 +4,7 @@ import type {
   BlockIssue,
   BothFullNormalization,
   CanonicalShape,
+  ForeignRegion,
   InstructionFile,
   ManagedBlock,
   Pack,
@@ -104,6 +105,8 @@ export interface RepoForDistribution {
   readonly files: ReadonlyArray<InstructionFile>;
   readonly blocks: ReadonlyArray<ManagedBlock>;
   readonly blockIssues: ReadonlyArray<BlockIssue>;
+  /** Well-formed regions of other tools in the root pair (D15). */
+  readonly foreignRegions: ReadonlyArray<ForeignRegion>;
 }
 
 const ROOT_CLAUDE = new Set(["CLAUDE.md", ".claude/CLAUDE.md"]);
@@ -154,6 +157,7 @@ export function classifyPackStatus(repo: RepoForDistribution, pack: Pack): PackS
     // Only an outdated block has a write pending. A malformed or foreign marker in its file makes
     // that rewrite unsafe: the block would be replaced inside a file another tool or a broken
     // marker owns. Current and modified rows need no write, so the marker stays a repo-level note.
+    const pending = `block at line ${block.line} is outdated (${revChange(block, pack)})`;
     const issue = repo.blockIssues.find((i) => i.file === block.file);
     if (issue) {
       return {
@@ -161,10 +165,28 @@ export function classifyPackStatus(repo: RepoForDistribution, pack: Pack): PackS
         status: "blocked",
         file: issue.file,
         line: issue.line,
-        message: `block at line ${block.line} is outdated (${revChange(block, pack)}); ${issue.message}`,
+        message: `${pending}; ${issue.message}`,
       };
     }
-    return { ...base, ...at, status: "outdated", message: revChange(block, pack) };
+    // Replacing a block that shares lines with another tool's region would write inside it (D15).
+    const overlapping = repo.foreignRegions.find(
+      (r) => r.file === block.file && r.line <= block.endLine && block.line <= r.endLine,
+    );
+    if (overlapping) {
+      return {
+        ...base,
+        status: "blocked",
+        file: overlapping.file,
+        line: overlapping.line,
+        message: `${pending}; it overlaps the region \`${overlapping.name}\` (lines ${overlapping.line}-${overlapping.endLine}) another tool owns`,
+      };
+    }
+    return {
+      ...base,
+      ...at,
+      status: "outdated",
+      message: withRegions(revChange(block, pack), regionsIn(repo, block.file)),
+    };
   }
 
   if (!pack.subscribers.includes(normalizeRepoName(repo.name))) {
@@ -188,13 +210,43 @@ export function classifyPackStatus(repo: RepoForDistribution, pack: Pack): PackS
     };
   }
 
+  // A region stays in the file it is in (D15). Only a content AGENTS.md that the plan keeps in
+  // place may carry one; a file the plan moves, merges, drops, or replaces with the wrapper may not.
+  const kept = KEEPS_AGENTS_IN_PLACE.has(repo.shape) ? "AGENTS.md" : null;
+  const region = repo.foreignRegions.find((r) => touched.has(r.file) && r.file !== kept);
+  if (region) {
+    return {
+      ...base,
+      status: "blocked",
+      file: region.file,
+      line: region.line,
+      message: `another tool owns lines ${region.line}-${region.endLine} of ${region.file} (region \`${region.name}\`); the sync would rewrite that file`,
+    };
+  }
+
   return {
     ...base,
     status: "eligible",
     file: contentFile(repo),
     line: null,
-    message: eligibleAction(repo),
+    message: withRegions(eligibleAction(repo), kept ? regionsIn(repo, kept) : 0),
   };
+}
+
+/** Shapes whose AGENTS.md keeps its text where it is; the block is appended or replaced there. */
+const KEEPS_AGENTS_IN_PLACE: ReadonlySet<CanonicalShape> = new Set([
+  "agents-canonical",
+  "agents-only",
+  "both-full",
+]);
+
+function regionsIn(repo: RepoForDistribution, file: string): number {
+  return repo.foreignRegions.filter((r) => r.file === file).length;
+}
+
+function withRegions(message: string, regions: number): string {
+  if (regions === 0) return message;
+  return `${message}; ${regions} foreign region${regions === 1 ? "" : "s"} stay${regions === 1 ? "s" : ""} untouched`;
 }
 
 function shortRev(rev: string): string {

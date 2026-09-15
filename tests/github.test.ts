@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { BunServices } from "@effect/platform-bun";
 import { Effect, FileSystem, Layer } from "effect";
 import { hashBlockBody } from "../src/domain/block.ts";
@@ -22,6 +23,7 @@ const ROTTEN_BODY = "- Lint with `bun run lint`.\n- Entry point: `src/main.ts`."
 // Long enough that the scanner does not take the file for a wrapper.
 const BOTH_CLAUDE_EXTRA = "# C\n\n- legacy: `src/gone.ts`\n- one\n- two\n- three";
 const REPEATED = "- Use Bun.\n- one\n- two\n- three\n- four";
+const COBRACKET = readFileSync(new URL("./fixtures/cobracket-AGENTS.md", import.meta.url), "utf8");
 
 function block(source: string, body: string, rev = "aaaaaaa") {
   return `<!-- agent-rules:begin source=${source} rev=${rev} hash=${hashBlockBody(body)} -->\n${body}\n<!-- agent-rules:end -->`;
@@ -41,6 +43,7 @@ const PACK_REPO: FakeRepoInput = {
         "acme/both",
         "acme/both-repeat",
         "acme/foreign",
+        "acme/regions",
         "acme/outdated",
         "acme/modified",
         "acme/ordered",
@@ -84,6 +87,8 @@ const TARGETS: Record<string, FakeRepoInput> = {
       "CLAUDE.md": "@AGENTS.md\n",
     },
   },
+  // `lightsound/cobracket` AGENTS.md: four regions other tools own, the last one ends the file (D15).
+  "acme/regions": { files: { "AGENTS.md": COBRACKET, "CLAUDE.md": "@AGENTS.md\n" } },
   "acme/outdated": {
     files: {
       "AGENTS.md": `# O\n\n${block("base", OLD_BODY)}\n\n## Own\n`,
@@ -228,7 +233,7 @@ describe("resolvePacks", () => {
     const loaded = await run(resolvePacks("acme/agent-rules"));
     expect(loaded.source).toBe(`acme/agent-rules@${(sha ?? "").slice(0, 7)}`);
     expect(loaded.packs.map((p) => `${p.id}:${p.rev === sha}:${p.subscribers.length}`)).toEqual([
-      "base:true:10",
+      "base:true:11",
       "frontend:true:1",
       "rotten:true:3",
     ]);
@@ -416,7 +421,8 @@ describe("sync", () => {
     // `<!-- END: tail -->` is a foreign region marker; the pair would be rewritten, so it blocks.
     expect(await runSync({ repo: "acme/both-repeat" })).toEqual({
       kind: "refused",
-      message: "acme/both-repeat AGENTS.md:8: another tool marks this file: <!-- END: tail -->",
+      message:
+        "acme/both-repeat AGENTS.md:8: unpaired region marker <!-- END: tail --> has no opening marker",
     });
     expect(github.calls).toEqual([]);
 
@@ -445,6 +451,44 @@ describe("sync", () => {
     );
   });
 
+  test("D15: paired foreign regions do not block; the block is appended after them, bytes intact", async () => {
+    const { github, runSync } = world();
+    const dry = await runSync({ repo: "acme/regions", dryRun: true });
+    expect(dry.kind).toBe("planned");
+    if (dry.kind !== "planned") return;
+    expect(dry.status).toMatchObject({
+      status: "eligible",
+      file: "AGENTS.md",
+      message: "insert block into AGENTS.md; 4 foreign regions stay untouched",
+    });
+    expect(github.calls).toEqual([]);
+
+    const result = await runSync({ repo: "acme/regions" });
+    expect(result.kind).toBe("written");
+    if (result.kind !== "written") return;
+    const written = github.fileAt("acme/regions", "heads/agent-rules/base", "AGENTS.md") ?? "";
+    expect(written).toBe(
+      `${COBRACKET.replace(/\s+$/, "")}\n\n${block("base", BODY, await revOf(github))}\n`,
+    );
+    // Lines 1-185 (all four regions, `<!-- convex-ai-end -->` at 185) are byte for byte the original.
+    expect(written.split("\n").slice(0, 185).join("\n")).toBe(
+      COBRACKET.split("\n").slice(0, 185).join("\n"),
+    );
+    expect(result.plan.blockLine).toBe(187);
+    expect(github.pulls("acme/regions")[0]?.body).toContain("- block: AGENTS.md:187");
+    expect(github.calls).toEqual([
+      "createTree acme/regions AGENTS.md",
+      "createCommit acme/regions",
+      "setRef acme/regions heads/agent-rules/base create",
+      "createPullRequest acme/regions agent-rules/base -> main",
+    ]);
+
+    // The planned tree reads current with the same four regions; a rerun is quiet.
+    github.moveRef("acme/regions", "heads/main", "heads/agent-rules/base");
+    github.calls.length = 0;
+    expect((await runSync({ repo: "acme/regions" })).kind).toBe("current");
+  });
+
   test("refuses: not subscribed, foreign marker, modified block", async () => {
     const { github, runSync } = world();
     const messages: Record<string, string> = {};
@@ -458,7 +502,7 @@ describe("sync", () => {
         `${(await revOf(github)).slice(0, 7)} first`,
     );
     expect(messages["acme/foreign"]).toBe(
-      "acme/foreign AGENTS.md:1: another tool marks this file: <!-- managed by ruler; do not edit -->",
+      "acme/foreign AGENTS.md:1: another tool marks the whole file (no closing marker): <!-- managed by ruler; do not edit -->",
     );
     expect(messages["acme/modified"]).toStartWith(
       "acme/modified AGENTS.md:3: block `base` was edited in place",

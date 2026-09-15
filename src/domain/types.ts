@@ -131,7 +131,10 @@ export interface ManagedBlock {
 export type BlockIssueKind =
   /** An `agent-rules` marker that could not be paired or parsed. */
   | "malformed-marker"
-  /** A managed-region marker written by another tool, which a sync must not overwrite. */
+  /**
+   * Another tool's marker that does not delimit a well-formed region (D15): unpaired, nested,
+   * mismatched, or a file-level "generated / do not edit" comment. A sync must not write the file.
+   */
   | "foreign-marker";
 
 export interface BlockIssue {
@@ -139,6 +142,22 @@ export interface BlockIssue {
   readonly file: string;
   readonly line: number;
   readonly message: string;
+}
+
+/**
+ * A well-formed region another tool owns (D15): a `start` marker and the `end` marker of the same
+ * name, e.g. `<!-- generated:task-matrix:start -->` … `<!-- generated:task-matrix:end -->`. Opaque
+ * to rulecheck: nothing inside it is read as a marker or written.
+ */
+export interface ForeignRegion {
+  /** Repo-relative path of the file that carries the region. */
+  readonly file: string;
+  /** Marker text without the start/end token, as written in the start marker. */
+  readonly name: string;
+  /** 1-based line of the start marker. */
+  readonly line: number;
+  /** 1-based line of the end marker. */
+  readonly endLine: number;
 }
 
 /**
@@ -308,6 +327,8 @@ export interface RepoReport {
   readonly findings: ReadonlyArray<Finding>;
   readonly blocks: ReadonlyArray<ManagedBlock>;
   readonly blockIssues: ReadonlyArray<BlockIssue>;
+  /** Regions other tools own in the root pair (D15); a sync leaves their bytes untouched. */
+  readonly foreignRegions: ReadonlyArray<ForeignRegion>;
   readonly skills: SkillsInventory;
 }
 
