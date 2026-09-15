@@ -49,3 +49,36 @@ Health check for AI coding agent instruction files (`AGENTS.md`, `CLAUDE.md`, `.
 - Every write in `sync` is preceded by a scan of the remote tree and followed by a scan of the planned tree; a `blocked` or `modified` status or a new reference finding refuses the write. Keep that order when changing `src/sync/sync.ts`.
 - Test the write path against `tests/fake-github.ts` only. Never point a test or a manual run without `--dry-run` at a real repository you do not own.
 - Effect `unstable/*` modules may break between minor versions; bump `effect` and `@effect/platform-bun` together and re-run `bun run check`.
+
+<!-- agent-rules:begin source=base rev=97f10769145defd3d3ae58f8755d2a2cceb1e569 hash=eee7698ebfe00708fb1da9f0f14eae53d3806e88a7258c48b1f6c8900400b155 -->
+# Personal instructions
+
+Portable conventions for AI coding agents. Everything here holds in any clone of any repository, including a fresh checkout on a cloud VM; nothing depends on one machine's paths or tools. Where a project-specific section of the file that carries this text says otherwise, the project-specific section takes precedence.
+
+## Language
+
+- English everywhere: code, comments, identifiers, commit messages, branch names, Issues, PR titles and bodies, review comments, and every file in the repository.
+- Two exceptions: translation and i18n files together with user-facing UI copy, which follow the product's language; and the chat between the agent and the user, which is Japanese.
+
+## Reporting
+
+- No interim progress reports. Report once, when the work is done, with the results.
+- Write the chat in concise, plain Japanese.
+
+## Decisions
+
+- When implementation needs a judgment call, do not ask the user. Propose a solution, then run rounds of searching for a strictly better alternative or a silver bullet; stop the search when a round produces no new option.
+- Then extract the principle that generates the constraint and check whether the problem can be dissolved structurally. Only after that pick the best option.
+- In the final report, state for each decision in which round no new options appeared.
+
+## Delivery
+
+- When the work is done, open the PR as ready for review, not as a draft, and address review-bot findings.
+
+## Instruction files
+
+- `AGENTS.md` carries the content; `CLAUDE.md` contains exactly `@AGENTS.md`. Do not put content in `CLAUDE.md` and do not write a prose pointer ("see AGENTS.md"): Claude Code only loads the `@` import form.
+- Tool-scoped rules (glob-activated) go in `.cursor/rules/*.mdc` or `.claude/rules/*.md`, not in the root pair.
+- When an instruction file names a command or path, it must exist in the repository at the time of writing. Remove or update the reference when the target is renamed or deleted.
+- `README.md` is for humans and marketing only. Do not create or update it unless the user explicitly asks, and never duplicate `AGENTS.md` content into it. Agent-facing instructions live in `AGENTS.md`.
+<!-- agent-rules:end -->
