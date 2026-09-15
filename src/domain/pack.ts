@@ -35,7 +35,7 @@ export function packFromFiles(
   const packFiles: PackFile[] = [];
   for (const file of [...files].sort((a, b) => a.path.localeCompare(b.path))) {
     if (file.path === "AGENTS.md") {
-      // Once Step 3 wraps the pack body in markers the file *is* the block; until then the whole file is the body.
+      // Pack sources are stored bare (D11); a wrapped file is still accepted and its first block is the body.
       const body = parseBlocks(file.path, file.content).blocks[0]?.body ?? file.content;
       packFiles.push({ kind: "agents-block", body, hash: hashBlockBody(body) });
       continue;
