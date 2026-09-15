@@ -78,7 +78,8 @@ is the backend of the status view.
 
 Shape normalization is a prerequisite and is itself a PR: deterministic cases (`none`,
 `AGENTS.md only`, `CLAUDE.md only` via rename, reversed canonical) are automated; `both have
-content` and files carrying another tool's managed markers are reported for a human.
+content` and files carrying another tool's managed markers are reported for a human (`both have
+content` is automated since D12; the marker case stands).
 
 Opt-in is per repository and explicit; ownership is not inferred from the GitHub owner because
 committing rules to a shared repository makes them team rules.
@@ -128,8 +129,8 @@ the Step 3 writer produces blocks the reader already classifies correctly:
   is outdated and an update is pending; if the file carrying it also has a malformed or foreign
   marker the row is `blocked` (the rewrite would land inside a file another tool or a broken
   marker owns; the message names the pending update), otherwise `outdated`. Without a block:
-  `not subscribed`, or for subscribers `blocked` (`both have content`, or a foreign/malformed
-  marker in a root file the sync would write) else `eligible`. `blocked` therefore appears
+  `not subscribed`, or for subscribers `blocked` (a foreign/malformed marker in a root file the
+  sync would write; `both have content` blocked too until D12) else `eligible`. `blocked` therefore appears
   exactly where a write is pending, so every write is gated by "a human looks first" (D6), and
   `current` / `modified` rows stay quiet about markers (the repository's own `!` line and
   `totals.malformedMarkers` carry them). Comparison is by hash, not `rev`: a pack commit that
@@ -235,6 +236,44 @@ a pack repository that wants visible markers may still carry them at its own ris
 what a subscriber's `AGENTS.md` shows between the markers is the pack file verbatim after body
 normalization, and `packs/<id>/AGENTS.md` is also what `~/.claude/CLAUDE.md` imports and the
 Cursor User Rule copies, without comment lines.
+
+## 2026-09-15 D12: `both have content` is normalized by the sync, not handed to a human
+
+D6 and D9 left the `both-full` shape (`AGENTS.md` and `CLAUDE.md` both carry content) `blocked`:
+"decide which one is canonical first". The decision is already made by D2, `AGENTS.md` is
+canonical, so the only open question was what to do with the text in `CLAUDE.md`, and that has a
+deterministic answer that loses nothing. `both-full` is therefore `eligible`, and the sync commit
+normalizes the pair in one of two ways, chosen from the files' content:
+
+- **wrapper**: the text `CLAUDE.md` adds beyond an `@AGENTS.md` import line (line endings
+  normalized, surrounding blank lines trimmed) is empty or appears verbatim as a substring of
+  `AGENTS.md`. `CLAUDE.md` becomes exactly `@AGENTS.md`; nothing else moves. Verbatim containment
+  is the test, not a line set or a similarity score: dropping a file is only safe when every byte
+  of it provably survives, so a reordered or reworded copy is merged instead (precision over
+  recall, as for findings).
+- **merge**: otherwise the same text is appended to `AGENTS.md` under the heading
+  `## Merged from CLAUDE.md`, placed before the first managed block so project text stays ahead
+  of distributed text (D10), then `CLAUDE.md` becomes `@AGENTS.md`. The text is copied verbatim;
+  duplicates and contradictions with the text above it are left for the pull request review,
+  which is where such conflicts already go under the Renovate model (D6). Semantic merging is
+  content authoring and stays out of scope (D1).
+
+The `eligible` row names the normalization it will apply, the pull request body and commit
+message name the one that was applied, and `scan --json` carries it as `bothFull` per repository.
+`blocked` keeps its two remaining reasons: a foreign or malformed marker in a root file the sync
+would rewrite (D9; for `both-full` that is both files, as for every shape change) and the
+preconditions D10 lists (two `CLAUDE.md` files, files contradicting the shape). Measure after
+plan is unchanged: the planned tree must read `agents-canonical` and `current`.
+
+One reader change follows: the "new finding" check compares findings by kind and value, no
+longer by file. Moving text from `CLAUDE.md` into `AGENTS.md` (`claude-only`, `claude-canonical`,
+and now the merge) carries any rot that text already had into a different file, and that rot is
+the repository's, not the pack's. A finding is new only when its script or path was not flagged
+anywhere in the base tree.
+
+A `CLAUDE.md` that is an `@AGENTS.md` line plus up to three short lines is still a wrapper to the
+scanner (`agents-canonical`), so those lines are not merged; that threshold predates this decision
+and is unchanged here.
 
 ## Recording rule
 
