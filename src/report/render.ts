@@ -3,6 +3,7 @@ import type {
   PackDistribution,
   PackStatus,
   PersonalLayer,
+  PersonalPackCopy,
   RepoReport,
   ScanReport,
   SkillLockState,
@@ -118,8 +119,33 @@ function renderDistribution(distribution: PackDistribution): string[] {
         `      ${pad(entry.repo, 44)} ${pad(STATUS_LABEL[entry.status], 15)} ${where}${message}`.trimEnd(),
       );
     }
+
+    for (const copy of distribution.personalCopies.filter((c) => c.pack === pack.id)) {
+      lines.push(`      ! ${describePersonalCopy(copy)}`);
+    }
   }
   return lines;
+}
+
+/**
+ * D13: the personal layer still carries the pack. Name where, and how many repositories now load
+ * it twice, so the interim wiring is removed once the block covers the daily repositories.
+ */
+function describePersonalCopy(copy: PersonalPackCopy): string {
+  const state =
+    copy.state === "current"
+      ? "equals the pack body"
+      : "is the pack source but differs from the pack as loaded (checkout behind or ahead)";
+  const count = copy.doubleLoaded.length;
+  const twice =
+    count === 0
+      ? "no scanned repository carries the block yet"
+      : `${copy.state === "current" ? "loads twice" : "loads a second, divergent copy"} in ${count} ${plural(count, "repository", "repositories")} carrying the block (${copy.doubleLoaded.join(", ")})`;
+  return `personal layer ${copy.file} ${state}; ${twice}. Remove the personal copy once the block covers the repositories used daily`;
+}
+
+function plural(n: number, one: string, many: string): string {
+  return n === 1 ? one : many;
 }
 
 function renderRepo(repo: RepoReport): string[] {
@@ -205,7 +231,7 @@ function renderPersonal(personal: PersonalLayer): string[] {
     );
   }
   lines.push(
-    "      Cursor loads ~/AGENTS.md and ~/.cursor/rules/*.mdc for workspaces under home (ancestor walk, undocumented). User Rules in Cursor settings are not on disk and are not measured.",
+    "      Cursor loads ~/AGENTS.md and ~/.cursor/rules/*.mdc for workspaces under home (ancestor walk, undocumented). User Rules live in the Cursor account, not on disk, and have no headless write path: they are not measured, and a pack is distributed through its block, not through a User Rule copy (D13).",
   );
   return lines;
 }

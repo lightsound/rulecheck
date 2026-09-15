@@ -62,6 +62,40 @@ User Rules are the only per-user channel that reaches Cloud Agents. They live in
 storage, so no CLI can read them; the Cursor agent inside the app can (via the app-control tool).
 Whether the Cursor CLI (`agent`) applies User Rules is not documented.
 
+### User Rules have no headless write path (verified 2026-09-15)
+
+Checked for D13, against the docs as published on 2026-09-15. Every row is a negative result;
+re-check them when Cursor ships a rules endpoint or a CLI subcommand.
+
+| Candidate | Result | Evidence |
+|---|---|---|
+| Public API | none for User Rules. The Admin API (Teams/Enterprise) exposes members, usage, spend, audit logs, billing groups, model access, and Grok Bot; `team_rule` is an audit-log event type only. The one rules endpoint family is `GET`/`POST`/`PATCH`/`DELETE /grok-bot/team-rules` ("List Grok Bot team rules"; up to 50 rules of `name` + `content`), documented under Grok Bot, the review bot, and not stated to be the agent-context Team Rules of the rules page; whether the two are one store is documented nowhere. Nothing reads or writes a user's rules | [Admin API](https://cursor.com/docs/account/teams/admin-api) |
+| `agent` CLI | none. Commands: `login`, `status`, `models`, `mcp`, `sandbox`, `worker`, `ls`, `resume`, `create-chat`, `generate-rule`, shell integration. `generate-rule` writes a project rule file interactively; nothing touches account rules | [CLI parameters](https://cursor.com/docs/cli/reference/parameters) |
+| Settings file on disk | none that is safe. User Rules "are stored on your Cursor account" and "sync when you sign in on another machine"; they are excluded from profile exports. The legacy mirror is `state.vscdb` (`ItemTable`, key `aicontext.personalContext`, under `~/Library/Application Support/Cursor/User/globalStorage/` on macOS, `~/.config/Cursor/User/globalStorage/` on Linux); staff state that "in the latest versions of Cursor, the rules are now stored in the cloud, so the local DB might not reflect recent changes" and describe the key as a source of ghost rules to clear, not a place to write | [help: rules](https://cursor.com/help/customization/rules), [forum: where are the global rules saved](https://forum.cursor.com/t/where-are-the-global-rules-saved-in-my-filesystem/76645), [forum: rules in context not in UI](https://forum.cursor.com/t/user-rules-appearing-in-context-not-visible-in-user-rules-interface/145065) |
+| Team Rules | the rules page documents them as dashboard-managed ("create and manage rules directly from the Cursor dashboard"): free-form text with optional glob and Enforce flag, Teams/Enterprise plans, included in Agent context. The Admin API's `/grok-bot/team-rules` (row above) is the only programmatic rules surface and is documented for Grok Bot. Either way a team plan and admin rights are required, and a Team Rule is Cursor-only; not a channel for a personal pack | [docs: rules](https://cursor.com/docs/rules), [Admin API](https://cursor.com/docs/account/teams/admin-api) |
+| MCP / app control | the in-app agent can edit settings through the app-control tool, which is why `/sync-agent-rules` works; it requires the running desktop app and cannot be driven headless | observed (D3) |
+| Rules from a GitHub repository | "Rules aren't imported on their own"; they must be packaged as a plugin with `.cursor-plugin/marketplace.json` and installed from a marketplace, a per-client install (D8) | [docs: rules](https://cursor.com/docs/rules), "Importing rules from a repository" |
+
+What Cloud Agents do read, and how a repo rule compares with a User Rule:
+
+- Cloud Agents read three rule levels: User Rules ("apply to your sessions across all
+  repositories"), Team Rules, and "Repo rules: `.cursor/rules/*.mdc` files committed to the
+  repository" ([cloud best practices](https://cursor.com/docs/cloud-agent/best-practices)).
+  Staff: "Project rules in `.cursor/rules` and `AGENTS.md` are read out of the repo the Cloud
+  Agent checks out" ([forum](https://forum.cursor.com/t/global-rules-for-cursor-cloud-agents/168805)).
+- `alwaysApply: true` means "Always included. Globs and description are ignored", the same
+  standing as `AGENTS.md`, which is always applied. Precedence is Team → Project → User, all
+  merged, "earlier sources take precedence when guidance conflicts" ([docs: rules](https://cursor.com/docs/rules)).
+  So for a repository that carries the pack, a repo-resident rule (block in `AGENTS.md`, or an
+  always-apply `.mdc`) is at least equivalent to a User Rule: same sessions, same inclusion,
+  higher precedence. The User Rule differs only in reaching chats outside that repository.
+- `.cursor/CLOUD.md` and `metadata.environments: cloud` scope instructions to Cloud Agents only
+  ([forum, staff](https://forum.cursor.com/t/is-there-a-way-to-add-rule-or-agent-md-only-for-cloud-agent/159595)); undocumented.
+- `~/.cursor/rules` on the Cloud Agent VM is not read because the lookup walks up from
+  `/workspace`, not from `/home/ubuntu`; a `/.cursor -> /home/ubuntu/.cursor` symlink in the
+  environment image makes it load ([forum, staff-confirmed](https://forum.cursor.com/t/cursor-cloud-agents-still-dont-read-cursor-rules/164186)).
+  Workaround, not a channel; D13 does not use it.
+
 Rule frontmatter accepted by the parser but not documented: `metadata.environments`,
 `metadata.disabledEnvironments` (values `cloud`, `local`), `metadata.scopedTo`. Staff mention
 `.cursor/CLOUD.md` for cloud-only instructions ([forum](https://forum.cursor.com/t/is-there-a-way-to-add-rule-or-agent-md-only-for-cloud-agent/159595)).
@@ -139,10 +173,12 @@ error output or GitHub changes the Git Data API.
   `@~/path/to/pack/AGENTS.md`. Zero copies, documented.
 - Claude Code on the web: no per-user channel. Either accept that cloud sessions run without the
   personal pack, or verify the setup-script workaround above. Project instructions still apply.
-- Cursor: one User Rule containing a copy of the pack, because it is the only channel that reaches
-  Cloud Agents. Treat the copy as a generated artifact: sync from the file, never edit in place,
-  and put the sync procedure next to the file (see `lightsound/agent-rules`).
-- Do not combine the User Rule with `~/AGENTS.md`: local sessions would load the text twice.
+- Cursor: the managed block in each subscribed repository's `AGENTS.md` (D4, D13). Cursor local
+  and Cloud Agents always apply it, at Project precedence. No User Rule copy: it has no headless
+  write path (table above), and it would load the pack twice wherever the block is present. A
+  hand-written User Rule for account-level preferences that are not pack content is fine and
+  needs no sync.
+- Do not combine a pack copy with `~/AGENTS.md`: local sessions would load the text twice.
 - `~/AGENTS.md` (or `~/ghq/github.com/<owner>/AGENTS.md`) remains useful for **machine-local or
   owner-level** instructions that should not go to the cloud.
 
