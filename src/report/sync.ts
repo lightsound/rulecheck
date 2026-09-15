@@ -1,5 +1,8 @@
-import { unifiedDiff } from "../domain/diff.ts";
+import { diffStats, unifiedDiff } from "../domain/diff.ts";
+import type { SyncPlan } from "../domain/sync.ts";
+import type { SyncAllResult, SyncAllRow } from "../sync/all.ts";
 import type { SyncResult } from "../sync/sync.ts";
+import { renderFailure } from "./failure.ts";
 
 export function renderSync(result: SyncResult): string {
   const out: string[] = [];
@@ -23,6 +26,14 @@ export function renderSync(result: SyncResult): string {
         out.push("");
       }
       break;
+    case "up-to-date":
+      out.push(
+        `${result.repo}: ${result.status.status} -> pull request ${result.pullRequest.url} is up to date`,
+      );
+      out.push(
+        `branch ${result.branch} (commit ${result.commit.slice(0, 7)}) already carries the planned change; nothing written`,
+      );
+      break;
     case "written":
       out.push(`${result.repo}: ${result.status.status} -> pull request ${result.pullRequest.url}`);
       out.push(
@@ -32,4 +43,102 @@ export function renderSync(result: SyncResult): string {
       break;
   }
   return out.join("\n").trimEnd();
+}
+
+/**
+ * One row per target: repository, pack, remote status, and what happened (or, in a dry run, what
+ * would happen and the size of the diff). Multi-line refusals keep their detail lines indented.
+ */
+export function renderSyncAll(result: SyncAllResult): string {
+  const out: string[] = [];
+  const repoWidth = Math.max(10, ...result.rows.map((row) => row.target.repo.length));
+  const packWidth = Math.max(4, ...result.rows.map((row) => row.target.pack.length));
+  out.push(
+    `Sync${result.dryRun ? " (dry run, nothing written)" : ""}: ${result.rows.length} targets from ${result.source}`,
+  );
+  out.push("");
+  out.push(
+    `  ${pad("repository", repoWidth)}  ${pad("pack", packWidth)}  ${pad("status", 14)}  ${result.dryRun ? "planned action" : "result"}`,
+  );
+  for (const row of result.rows) {
+    const [first, ...rest] = describe(row).split("\n");
+    out.push(
+      `  ${pad(row.target.repo, repoWidth)}  ${pad(row.target.pack, packWidth)}  ${pad(statusOf(row), 14)}  ${first ?? ""}`.trimEnd(),
+    );
+    for (const line of rest) out.push(`  ${" ".repeat(repoWidth + packWidth + 20)}${line.trim()}`);
+  }
+  out.push("");
+  out.push(summary(result));
+  return out.join("\n").trimEnd();
+}
+
+/** A `done` row carries its remote status; a refusal names the status in its message. */
+function statusOf(row: SyncAllRow): string {
+  return row.outcome.kind === "done" ? row.outcome.result.status.status : row.outcome.kind;
+}
+
+function describe(row: SyncAllRow): string {
+  switch (row.outcome.kind) {
+    case "refused":
+      return row.outcome.message;
+    case "failed":
+      return row.outcome.error._tag === "GitHubError"
+        ? renderFailure(row.outcome.error).replace(/^rulecheck: /, "")
+        : row.outcome.error.message;
+    case "done": {
+      const result = row.outcome.result;
+      switch (result.kind) {
+        case "current":
+          return "nothing to do";
+        case "up-to-date":
+          return `up to date (PR #${result.pullRequest.number} open, ${result.pullRequest.url})`;
+        case "planned":
+          return `${diffSummary(result.plan)}  would open or update a pull request: ${result.plan.actions.join("; ")}`;
+        case "written":
+          return `${result.pullRequestCreated ? "opened" : "updated"} PR #${result.pullRequest.number} (${result.pullRequest.url})`;
+      }
+    }
+  }
+}
+
+function diffSummary(plan: SyncPlan): string {
+  let added = 0;
+  let removed = 0;
+  for (const change of plan.changes) {
+    const stats = diffStats(change);
+    added += stats.added;
+    removed += stats.removed;
+  }
+  return `+${added} -${removed}`;
+}
+
+function summary(result: SyncAllResult): string {
+  const counts = new Map<string, number>();
+  const bump = (label: string) => counts.set(label, (counts.get(label) ?? 0) + 1);
+  for (const row of result.rows) {
+    if (row.outcome.kind !== "done") {
+      bump(row.outcome.kind);
+      continue;
+    }
+    switch (row.outcome.result.kind) {
+      case "current":
+        bump("current");
+        break;
+      case "up-to-date":
+        bump("up to date");
+        break;
+      case "planned":
+        bump("would write");
+        break;
+      case "written":
+        bump(row.outcome.result.pullRequestCreated ? "opened" : "updated");
+        break;
+    }
+  }
+  const parts = [...counts.entries()].map(([label, count]) => `${count} ${label}`);
+  return `${result.rows.length} targets: ${parts.join(", ") || "none"}`;
+}
+
+function pad(text: string, width: number): string {
+  return text.length >= width ? text : text + " ".repeat(width - text.length);
 }

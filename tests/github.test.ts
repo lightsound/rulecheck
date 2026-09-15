@@ -253,8 +253,9 @@ describe("resolvePacks", () => {
 });
 
 describe("sync", () => {
-  test("eligible agents-canonical: one commit, one branch, one pull request; a rerun updates them", async () => {
-    const { github, runSync } = world();
+  test("eligible agents-canonical: one commit, one branch, one pull request; a rerun is idempotent until main moves", async () => {
+    const { github, run, runSync } = world();
+    const repo = { owner: "acme", name: "canonical" };
     const result = await runSync({ repo: "acme/canonical" });
     expect(result.kind).toBe("written");
     if (result.kind !== "written") return;
@@ -283,13 +284,31 @@ describe("sync", () => {
     ]);
     expect(renderSync(result)).toContain("opened from agent-rules/base");
 
-    // Rerun before merge: the tool-owned branch is force-updated and the open PR reused.
+    // Rerun before merge: the branch already carries the planned content and the PR is open, so
+    // nothing is pushed (D14). A dry run says the same.
     github.calls.length = 0;
     const again = await runSync({ repo: "acme/canonical" });
-    expect(again.kind).toBe("written");
-    if (again.kind !== "written") return;
-    expect(again.pullRequestCreated).toBe(false);
+    expect(again.kind).toBe("up-to-date");
+    if (again.kind !== "up-to-date") return;
     expect(again.pullRequest.number).toBe(1);
+    expect(again.commit).toBe(result.commit);
+    expect(github.calls).toEqual([]);
+    expect(renderSync(again)).toContain(
+      "pull request https://github.com/acme/canonical/pull/1 is up to date",
+    );
+    expect((await runSync({ repo: "acme/canonical", dryRun: true })).kind).toBe("up-to-date");
+
+    // main moved in the file the plan rewrites: the branch is stale, force-updated, the PR reused.
+    const edited = await commitOnMain(github, run, repo, {
+      "AGENTS.md": "# Canonical, edited\n\n- build: `bun run build`\n- entry: `src/main.ts`\n",
+    });
+    await run(github.service.setRef(repo, "heads/main", edited, { create: false }));
+    github.calls.length = 0;
+    const rebased = await runSync({ repo: "acme/canonical" });
+    expect(rebased.kind).toBe("written");
+    if (rebased.kind !== "written") return;
+    expect(rebased.pullRequestCreated).toBe(false);
+    expect(rebased.pullRequest.number).toBe(1);
     expect(github.calls).toEqual([
       "createTree acme/canonical AGENTS.md",
       "createCommit acme/canonical",
@@ -297,6 +316,9 @@ describe("sync", () => {
       "updatePullRequest acme/canonical #1",
     ]);
     expect(github.pulls("acme/canonical")).toHaveLength(1);
+    expect(github.fileAt("acme/canonical", "heads/agent-rules/base", "AGENTS.md")).toStartWith(
+      "# Canonical, edited\n",
+    );
 
     // After the merge the next sync is a no-op.
     github.moveRef("acme/canonical", "heads/main", "heads/agent-rules/base");
@@ -518,6 +540,29 @@ describe("sync", () => {
     });
   });
 });
+
+/** A human commit on top of `heads/main` that writes `files`; returns its sha (main is not moved). */
+async function commitOnMain(
+  github: ReturnType<typeof fakeGitHub>,
+  run: <A, E>(effect: Effect.Effect<A, E, BunServices.BunServices | GitHub>) => Promise<A>,
+  repo: { owner: string; name: string },
+  files: Record<string, string>,
+): Promise<string> {
+  const main = (await run(github.service.getRef(repo, "heads/main"))) ?? "";
+  const baseTree = (await run(github.service.getCommit(repo, main))).tree;
+  const tree = await run(
+    github.service.createTree(
+      repo,
+      baseTree,
+      Object.entries(files).map(([path, content]) => ({ path, content })),
+    ),
+  );
+  const sha = await run(
+    github.service.createCommit(repo, { message: "docs: edit", tree, parents: [main] }),
+  );
+  github.calls.length = 0;
+  return sha;
+}
 
 async function revOf(github: ReturnType<typeof fakeGitHub>): Promise<string> {
   return (

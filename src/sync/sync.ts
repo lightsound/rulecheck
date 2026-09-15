@@ -1,4 +1,4 @@
-import { Data, Effect, FileSystem, type Path } from "effect";
+import { Data, Effect, FileSystem, type Path, type Semaphore } from "effect";
 import type { PlatformError } from "effect/PlatformError";
 import { isRulecheckCommit, planSync, pullRequestText, type SyncPlan } from "../domain/sync.ts";
 import type { Finding, Pack, PackStatusEntry, RepoReport } from "../domain/types.ts";
@@ -25,18 +25,27 @@ import { scan } from "../scan/scan.ts";
  * The write path (D10): measure the target on GitHub, plan the normalized root pair, measure the
  * planned tree, and only then create one commit, one branch (`agent-rules/<pack>`), and one pull
  * request through the GitHub API. An existing branch of that name is rewritten only when its tip
- * commit was written by rulecheck. Local checkouts are never touched.
+ * commit was written by rulecheck, and left alone when it already carries the planned content
+ * with an open pull request (D14). Local checkouts are never touched.
  */
 
-export interface SyncOptions {
+export interface SyncTargetOptions {
   /** `owner/repo`. */
   readonly repo: string;
-  readonly pack: string;
-  /** `--packs`: directory or `owner/repo[@ref]`. */
-  readonly packs: string;
   /** Branch to base the change on; the repository's default branch when null. */
   readonly base?: string | null;
   readonly dryRun: boolean;
+  /**
+   * Serializes the write calls of concurrent targets (D14): GitHub asks for content-creating
+   * requests not to run concurrently. Reads run in parallel regardless.
+   */
+  readonly writeLock?: Semaphore.Semaphore;
+}
+
+export interface SyncOptions extends SyncTargetOptions {
+  readonly pack: string;
+  /** `--packs`: directory or `owner/repo[@ref]`. */
+  readonly packs: string;
 }
 
 export type SyncResult =
@@ -48,6 +57,17 @@ export type SyncResult =
       readonly plan: SyncPlan;
       readonly base: string;
       readonly branch: string;
+    }
+  | {
+      /** The tool-owned branch already carries the planned content and its pull request is open. */
+      readonly kind: "up-to-date";
+      readonly repo: string;
+      readonly status: PackStatusEntry;
+      readonly plan: SyncPlan;
+      readonly base: string;
+      readonly branch: string;
+      readonly commit: string;
+      readonly pullRequest: PullRequest;
     }
   | {
       readonly kind: "written";
@@ -75,11 +95,40 @@ interface Measurement {
   readonly contents: ReadonlyMap<string, string>;
 }
 
+/** Resolve `--packs`, pick the pack, and run the target path once. */
 export const sync = (
   options: SyncOptions,
 ): Effect.Effect<
   SyncResult,
   SyncRefused | PackSourceError | GitHubError | PlatformError,
+  GitHub | FileSystem.FileSystem | Path.Path
+> =>
+  Effect.gen(function* () {
+    const loaded = yield* resolvePacks(options.packs);
+    const pack = yield* selectPack(loaded, options.pack);
+    return yield* syncTarget(options, loaded, pack);
+  });
+
+export const selectPack = (loaded: LoadedPacks, id: string): Effect.Effect<Pack, SyncRefused> => {
+  const pack = loaded.packs.find((p) => p.id === id);
+  return pack
+    ? Effect.succeed(pack)
+    : new SyncRefused({
+        message: `pack \`${id}\` not found in ${loaded.source} (have: ${loaded.packs.map((p) => p.id).join(", ") || "none"})`,
+      });
+};
+
+/**
+ * One repository, one pack, packs already loaded. Measures the base branch first, so a block that
+ * has merged reads `current` before any tool-owned branch or pull request is looked at.
+ */
+export const syncTarget = (
+  options: SyncTargetOptions,
+  loaded: LoadedPacks,
+  pack: Pack,
+): Effect.Effect<
+  SyncResult,
+  SyncRefused | GitHubError | PlatformError,
   GitHub | FileSystem.FileSystem | Path.Path
 > =>
   Effect.gen(function* () {
@@ -92,14 +141,6 @@ export const sync = (
     }
     const target = parsed.repo;
     const name = repositoryName(target);
-
-    const loaded = yield* resolvePacks(options.packs);
-    const pack = loaded.packs.find((p) => p.id === options.pack);
-    if (!pack) {
-      return yield* new SyncRefused({
-        message: `pack \`${options.pack}\` not found in ${loaded.source} (have: ${loaded.packs.map((p) => p.id).join(", ") || "none"})`,
-      });
-    }
 
     const base = options.base ?? (yield* github.getRepository(target)).defaultBranch;
     const baseSha = yield* github.getRef(target, `heads/${base}`);
@@ -175,13 +216,32 @@ export const sync = (
           message: `${name}: branch \`${branch}\` exists but its tip commit (${existing.slice(0, 7)}) was not written by rulecheck; delete or rename the branch first`,
         });
       }
+      // Idempotence (D14): the branch tip already holds every planned path as planned and its
+      // pull request is open, so a rerun has nothing to deliver. A closed pull request or a stale
+      // tip falls through to the rewrite.
+      if (yield* treeMatchesPlan(github, target, tip.tree, plan)) {
+        const open = yield* github.listOpenPullRequests(target, `${target.owner}:${branch}`);
+        const pullRequest = open[0];
+        if (pullRequest) {
+          return {
+            kind: "up-to-date",
+            repo: name,
+            status: before.entry,
+            plan,
+            base,
+            branch,
+            commit: existing,
+            pullRequest,
+          };
+        }
+      }
     }
 
     if (options.dryRun) {
       return { kind: "planned", repo: name, status: before.entry, plan, base, branch };
     }
 
-    const written = yield* write(github, target, {
+    const writing = write(github, target, {
       baseSha,
       base,
       branch,
@@ -190,7 +250,33 @@ export const sync = (
       pack,
       status: before.entry,
     });
+    const gated = options.writeLock ? options.writeLock.withPermits(1)(writing) : writing;
+    const written = yield* gated;
     return { kind: "written", repo: name, status: before.entry, plan, base, branch, ...written };
+  });
+
+/** Whether every planned path reads in `treeSha` exactly as the plan would write it. */
+const treeMatchesPlan = (
+  github: GitHubService,
+  target: RepositoryRef,
+  treeSha: string,
+  plan: SyncPlan,
+): Effect.Effect<boolean, GitHubError> =>
+  Effect.gen(function* () {
+    const tree = yield* github.getTree(target, treeSha);
+    if (tree.truncated) return false;
+    const decoder = new TextDecoder();
+    for (const change of plan.changes) {
+      const entry = tree.entries.find((e) => e.type === "blob" && e.path === change.path);
+      if (change.after === null) {
+        if (entry !== undefined) return false;
+        continue;
+      }
+      if (entry === undefined) return false;
+      const content = decoder.decode(yield* github.getBlob(target, entry.sha));
+      if (content !== change.after) return false;
+    }
+    return true;
   });
 
 /** Run the read-only scan over a snapshot and pick out the target's row for the pack. */

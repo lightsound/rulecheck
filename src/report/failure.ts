@@ -29,3 +29,7 @@ export const reportFailure = (
   error: SyncRefused | PackSourceError | GitHubError,
 ): Effect.Effect<never, Reported> =>
   Console.error(renderFailure(error)).pipe(Effect.andThen(new Reported()));
+
+/** A run that finished but whose report contains targets GitHub could not answer for (D14). */
+export const reportIncomplete = (message: string): Effect.Effect<never, Reported> =>
+  Console.error(`rulecheck: ${message}`).pipe(Effect.andThen(new Reported()));

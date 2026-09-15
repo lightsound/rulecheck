@@ -42,6 +42,15 @@ export interface FakeGitHub {
   readonly layer: Layer.Layer<GitHub>;
   readonly service: GitHubService;
   readonly calls: string[];
+  /**
+   * Scheduling evidence: every call yields once, so concurrent fibers interleave here as they
+   * would on a network. `maxInFlight` is the most distinct repositories with a call open at one
+   * moment (not the most calls); `maxWriters` the most repositories that were between their
+   * first write (`createTree`) and their pull request at one moment, which the write lock must
+   * keep at 1. A write sequence that fails midway leaves the writer set with its error.
+   */
+  readonly maxInFlight: () => number;
+  readonly maxWriters: () => number;
   /** Content of `path` at the tip of `refs/<ref>`, or null when absent. */
   readonly fileAt: (repo: string, ref: string, path: string) => string | null;
   readonly pathsAt: (repo: string, ref: string) => string[];
@@ -110,7 +119,36 @@ export function fakeGitHub(input: Readonly<Record<string, FakeRepoInput>>): Fake
       : fail(operation, 404, `no ${type} ${sha}`);
   };
 
-  const service: GitHubService = {
+  const inFlight = new Map<string, number>();
+  let maxInFlight = 0;
+  const writers = new Set<string>();
+  let maxWriters = 0;
+  /** Keep the call open across one scheduler yield, like a request on the wire. */
+  const call = <A, E>(repo: RepositoryRef, effect: Effect.Effect<A, E>): Effect.Effect<A, E> =>
+    Effect.suspend(() => {
+      const name = key(repo);
+      inFlight.set(name, (inFlight.get(name) ?? 0) + 1);
+      maxInFlight = Math.max(maxInFlight, inFlight.size);
+      return Effect.yieldNow.pipe(
+        Effect.andThen(effect),
+        // A failed write call ends the repository's write sequence: the sync stops there.
+        Effect.tapError(() => Effect.sync(() => writers.delete(name))),
+        Effect.ensuring(
+          Effect.sync(() => {
+            const open = (inFlight.get(name) ?? 1) - 1;
+            if (open === 0) inFlight.delete(name);
+            else inFlight.set(name, open);
+          }),
+        ),
+      );
+    });
+  const beginWrite = (repo: RepositoryRef) => {
+    writers.add(key(repo));
+    maxWriters = Math.max(maxWriters, writers.size);
+  };
+  const endWrite = (repo: RepositoryRef) => writers.delete(key(repo));
+
+  const plain: GitHubService = {
     getRepository: (repo) =>
       repoOf("getRepository", repo).pipe(Effect.map((r) => ({ defaultBranch: r.defaultBranch }))),
     getRef: (repo, name) =>
@@ -134,6 +172,7 @@ export function fakeGitHub(input: Readonly<Record<string, FakeRepoInput>>): Fake
       repoOf("createTree", repo).pipe(
         Effect.flatMap(() => get("createTree", baseTree, "tree")),
         Effect.map((base) => {
+          beginWrite(repo);
           calls.push(`createTree ${key(repo)} ${changes.map((c) => c.path).join(",")}`);
           const entries = new Map(base.entries.map((e) => [e.path, e] as const));
           for (const change of changes) {
@@ -176,6 +215,7 @@ export function fakeGitHub(input: Readonly<Record<string, FakeRepoInput>>): Fake
       repoOf("createPullRequest", repo).pipe(
         Effect.map((r) => {
           calls.push(`createPullRequest ${key(repo)} ${input.head} -> ${input.base}`);
+          endWrite(repo);
           const number = r.pulls.length + 1;
           const pull: StoredPull = {
             number,
@@ -194,6 +234,7 @@ export function fakeGitHub(input: Readonly<Record<string, FakeRepoInput>>): Fake
       repoOf("updatePullRequest", repo).pipe(
         Effect.flatMap((r) => {
           calls.push(`updatePullRequest ${key(repo)} #${number}`);
+          endWrite(repo);
           const pull = r.pulls.find((p) => p.number === number);
           if (!pull) return fail("updatePullRequest", 404, "Not Found");
           pull.title = input.title;
@@ -201,6 +242,20 @@ export function fakeGitHub(input: Readonly<Record<string, FakeRepoInput>>): Fake
           return Effect.succeed(pull);
         }),
       ),
+  };
+  const service: GitHubService = {
+    getRepository: (repo) => call(repo, plain.getRepository(repo)),
+    getRef: (repo, name) => call(repo, plain.getRef(repo, name)),
+    getCommit: (repo, sha) => call(repo, plain.getCommit(repo, sha)),
+    getTree: (repo, treeSha) => call(repo, plain.getTree(repo, treeSha)),
+    getBlob: (repo, sha) => call(repo, plain.getBlob(repo, sha)),
+    createTree: (repo, baseTree, changes) => call(repo, plain.createTree(repo, baseTree, changes)),
+    createCommit: (repo, input) => call(repo, plain.createCommit(repo, input)),
+    setRef: (repo, name, sha, options) => call(repo, plain.setRef(repo, name, sha, options)),
+    listOpenPullRequests: (repo, head) => call(repo, plain.listOpenPullRequests(repo, head)),
+    createPullRequest: (repo, input) => call(repo, plain.createPullRequest(repo, input)),
+    updatePullRequest: (repo, number, input) =>
+      call(repo, plain.updatePullRequest(repo, number, input)),
   };
 
   const treeAt = (repo: string, ref: string) => {
@@ -216,6 +271,8 @@ export function fakeGitHub(input: Readonly<Record<string, FakeRepoInput>>): Fake
     layer: Layer.succeed(GitHub, service),
     service,
     calls,
+    maxInFlight: () => maxInFlight,
+    maxWriters: () => maxWriters,
     fileAt: (repo, ref, path) => {
       const entry = treeAt(repo, ref).tree.entries.find((e) => e.path === path);
       const obj = entry ? objects.get(entry.sha) : undefined;
