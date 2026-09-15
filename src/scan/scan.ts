@@ -15,7 +15,7 @@ import type {
   ScanTotals,
 } from "../domain/types.ts";
 import { type AnalyzedFile, analyzeFile } from "./analyze.ts";
-import { loadPacks } from "./packs.ts";
+import { type LoadedPacks, loadPacks } from "./packs.ts";
 import { scanPersonal } from "./personal.ts";
 import { inventorySkills } from "./skills.ts";
 import { verifyReferences } from "./verify.ts";
@@ -27,8 +27,11 @@ export interface ScanOptions {
   readonly minDuplicateLines?: number;
   /** Home directory whose `~/.claude` layer should be included, or `null` to skip it. */
   readonly home?: string | null;
-  /** Checkout of the pack repository (`packs/<id>/`, `subscriptions.json`), or `null` for no distribution report. */
-  readonly packs?: string | null;
+  /**
+   * Checkout of the pack repository (`packs/<id>/`, `subscriptions.json`), packs already loaded
+   * with `loadPacks` / `resolvePacks`, or `null` for no distribution report.
+   */
+  readonly packs?: string | LoadedPacks | null;
 }
 
 const DEFAULT_MIN_DUPLICATE_LINES = 5;
@@ -63,9 +66,11 @@ export const scan = (
 
     let distribution: PackDistribution | null = null;
     if (options.packs) {
-      const packsRoot = path.resolve(options.packs);
-      const loaded = yield* loadPacks(fs, path, packsRoot);
-      distribution = distribute(packsRoot, repos, loaded.packs, loaded.warnings);
+      const loaded =
+        typeof options.packs === "string"
+          ? yield* loadPacks(fs, path, path.resolve(options.packs))
+          : options.packs;
+      distribution = distribute(loaded.source, repos, loaded.packs, loaded.warnings);
     }
 
     return {
