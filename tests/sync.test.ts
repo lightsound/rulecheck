@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { hashBlockBody, parseBlocks } from "../src/domain/block.ts";
-import { unifiedDiff } from "../src/domain/diff.ts";
+import { diffStats, unifiedDiff } from "../src/domain/diff.ts";
 import { packFromFiles } from "../src/domain/pack.ts";
 import {
   MERGED_HEADING,
@@ -310,5 +310,24 @@ describe("unifiedDiff", () => {
       "+X",
       " 6",
     ]);
+  });
+
+  test("diffStats counts added and removed lines", () => {
+    expect(diffStats({ path: "a", before: null, after: "1\n2\n" })).toEqual({
+      added: 2,
+      removed: 0,
+    });
+    expect(diffStats({ path: "a", before: "1\n2\n", after: null })).toEqual({
+      added: 0,
+      removed: 2,
+    });
+    expect(diffStats({ path: "a", before: "1\n2\n3\n", after: "1\nX\n3\n4\n" })).toEqual({
+      added: 2,
+      removed: 1,
+    });
+    expect(diffStats({ path: "a", before: "same\n", after: "same\n" })).toEqual({
+      added: 0,
+      removed: 0,
+    });
   });
 });

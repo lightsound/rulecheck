@@ -13,6 +13,8 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
   carries block `base` ([rulecheck#6](https://github.com/lightsound/rulecheck/pull/6)) and reads
   `current`. Pack sources stay unwrapped; markers are rendered at sync time (D11). Every shape,
   including `both have content`, is normalized by the sync (D12); only marker conflicts block.
+  `sync --all` fans out over `subscriptions.json` and its `--dry-run` table is the remote
+  distribution report (D14); `scan --packs` reflects local checkouts only.
 - `lightsound/agent-rules/packs/base/AGENTS.md`: the portable pack `base` (D7 naming),
   environment-neutral only (Step 1, [agent-rules#1](https://github.com/lightsound/agent-rules/pull/1)).
   The repository's root `AGENTS.md` instructs agents working in agent-rules itself and is not
@@ -137,16 +139,37 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
   and the pack's source path only, so a pack pasted inside a larger personal file goes
   unreported; the probe is what closes the gap.
 
-## Step 5: Update fan-out and drift
+## Step 5: Update fan-out and drift — done 2026-09-15
 
 - `rulecheck sync --all`: for every subscribed repo whose status is `outdated`, open an update PR
   (Renovate style). `modified` repos get a report line, not a PR. The per-repository path exists
   (Step 3); fan-out adds iteration over `subscriptions.json` and a summary.
+- Result: D14. `rulecheck sync --all --packs <source> [--pack <id>] [--dry-run]` in
+  `src/sync/all.ts` runs the unchanged single-target path (`syncTarget`, `src/sync/sync.ts`) over
+  every (`owner/repo`, pack) pair in `subscriptions.json`, three targets in flight, writes behind a
+  one-permit semaphore. Every outcome is a row (repository, pack, remote status, result); a
+  refusal or a GitHub error on one target does not stop the others. Exit code 1 only when a target
+  could not be read or written; refusals exit 0. Idempotent by content: a target whose default
+  branch already reads `current` is skipped before any branch is consulted (so a squash-merged
+  block counts), and an open pull request whose branch tip already holds every planned path as
+  planned is reported `up to date`, not re-pushed; the same applies to `sync <owner/repo>`, whose
+  rerun no longer force-pushes an identical commit. `--dry-run` prints the same table with the
+  planned action and `+N -M` per target and writes nothing. Tested against `tests/fake-github.ts`
+  with seven targets: eligible, outdated, current, modified, foreign marker, a subscriber that does
+  not exist (404 → `failed`), and one repository under two packs; the rerun and the post-merge
+  states are asserted with zero write calls. Verified read-only against the real API with a
+  scratch pack subscribing `lightsound/rulecheck` and a nonexistent repository: `current` plus one
+  `failed` row and exit code 1; after a pack edit, `outdated +4 -3`.
+- Local vs remote status: `scan --packs` measures local checkouts and showed `eligible` for two
+  repositories whose pull requests had merged, because the checkouts sat on other branches.
+  `sync --all --dry-run` measures every subscriber's default-branch HEAD on GitHub and is the
+  distribution report from now on; no separate `status` command (D14).
 - Carried from Step 3: whole managed files in a pack (D8 `file` entries) are inventoried but not
   written; auto-merge as a per-repository opt-in (D6); a stale `agent-rules/<pack>` branch whose
   pull request was closed without merge is rewritten on the next sync (D10) rather than skipped;
   written paths always get mode `100644` (an executable or symlinked root file is replaced by a
-  regular file).
+  regular file). Not a target of `--all`: a repository that carries a block without a subscription
+  (only `scan --packs` over a checkout sees it).
 - Later: GitHub App + webhook so status updates without a local tree; the web/desktop UI on top.
 
 ## Not doing

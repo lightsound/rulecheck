@@ -55,6 +55,15 @@ function lineOps(before: readonly string[], after: readonly string[]): Op[] {
   return ops;
 }
 
+/** Added and removed line counts of one change, the `+N -M` of a summary row. */
+export function diffStats(change: FileChange): { added: number; removed: number } {
+  const ops = lineOps(splitLines(change.before), splitLines(change.after));
+  return {
+    added: ops.filter((op) => op.kind === "+").length,
+    removed: ops.filter((op) => op.kind === "-").length,
+  };
+}
+
 /** Unified diff of one file with `context` unchanged lines around each change. */
 export function unifiedDiff(change: FileChange, context = 3): string {
   const before = splitLines(change.before);

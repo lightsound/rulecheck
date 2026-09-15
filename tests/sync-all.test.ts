@@ -1,0 +1,196 @@
+import { describe, expect, test } from "bun:test";
+import { BunServices } from "@effect/platform-bun";
+import { Effect, Layer } from "effect";
+import { hashBlockBody } from "../src/domain/block.ts";
+import type { GitHub } from "../src/github/client.ts";
+import { renderSyncAll } from "../src/report/sync.ts";
+import { type SyncAllOptions, type SyncAllResult, syncAll } from "../src/sync/all.ts";
+import { type FakeRepoInput, fakeGitHub } from "./fake-github.ts";
+
+const BODY = "- Respond in Japanese.\n- Use Bun.";
+const OLD_BODY = "- Respond in Japanese.";
+
+function block(source: string, body: string) {
+  return `<!-- agent-rules:begin source=${source} rev=aaaaaaa hash=${hashBlockBody(body)} -->\n${body}\n<!-- agent-rules:end -->`;
+}
+
+const PACK_REPO: FakeRepoInput = {
+  files: {
+    "packs/base/AGENTS.md": `${BODY}\n`,
+    "packs/frontend/AGENTS.md": "React rules.\n",
+    "subscriptions.json": JSON.stringify({
+      base: [
+        "acme/eligible",
+        "acme/outdated",
+        "acme/current",
+        "acme/modified",
+        "acme/foreign",
+        "acme/gone",
+        "acme/eligible",
+      ],
+      frontend: ["acme/eligible"],
+    }),
+  },
+};
+
+const TARGETS: Record<string, FakeRepoInput> = {
+  "acme/eligible": { files: { "AGENTS.md": "# E\n", "CLAUDE.md": "@AGENTS.md\n" } },
+  "acme/outdated": {
+    files: { "AGENTS.md": `# O\n\n${block("base", OLD_BODY)}\n`, "CLAUDE.md": "@AGENTS.md\n" },
+  },
+  "acme/current": {
+    files: { "AGENTS.md": `# C\n\n${block("base", BODY)}\n`, "CLAUDE.md": "@AGENTS.md\n" },
+  },
+  "acme/modified": {
+    files: {
+      "AGENTS.md": `# M\n\n${block("base", BODY).replace("Use Bun", "Use npm")}\n`,
+      "CLAUDE.md": "@AGENTS.md\n",
+    },
+  },
+  "acme/foreign": {
+    files: { "AGENTS.md": "<!-- managed by ruler -->\n# F\n", "CLAUDE.md": "@AGENTS.md\n" },
+  },
+  // `acme/gone` is subscribed but does not exist: every API call answers 404.
+};
+
+function world() {
+  const github = fakeGitHub({ "acme/agent-rules": PACK_REPO, ...TARGETS });
+  const run = <A, E>(effect: Effect.Effect<A, E, BunServices.BunServices | GitHub>) =>
+    Effect.runPromise(effect.pipe(Effect.provide(Layer.mergeAll(BunServices.layer, github.layer))));
+  const runAll = (options: Partial<SyncAllOptions> = {}) =>
+    run(syncAll({ packs: "acme/agent-rules", pack: null, dryRun: false, ...options }));
+  return { github, run, runAll };
+}
+
+function rows(result: SyncAllResult): string[] {
+  return result.rows.map((row) => {
+    const outcome =
+      row.outcome.kind === "done" ? `${row.outcome.result.kind}` : `${row.outcome.kind}`;
+    return `${row.target.pack} ${row.target.repo} ${outcome}`;
+  });
+}
+
+describe("syncAll", () => {
+  test("dry run: every subscriber measured remotely, one row each, no writes, one API failure", async () => {
+    const { github, runAll } = world();
+    const result = await runAll({ dryRun: true });
+    expect(result.dryRun).toBe(true);
+    expect(rows(result)).toEqual([
+      "base acme/eligible planned",
+      "base acme/outdated planned",
+      "base acme/current current",
+      "base acme/modified refused",
+      "base acme/foreign refused",
+      "base acme/gone failed",
+      "frontend acme/eligible planned",
+    ]);
+    expect(result.failed).toBe(1);
+    expect(github.calls).toEqual([]);
+
+    const text = renderSyncAll(result);
+    expect(text).toContain("Sync (dry run, nothing written): 7 targets from acme/agent-rules@");
+    expect(text).toMatch(
+      /acme\/eligible\s+base\s+eligible\s+\+5 -0\s+would open or update a pull request: insert block `base` into AGENTS.md/,
+    );
+    expect(text).toMatch(/acme\/outdated\s+base\s+outdated\s+\+2 -1\s+would open or update/);
+    expect(text).toMatch(/acme\/current\s+base\s+current\s+nothing to do/);
+    expect(text).toMatch(
+      /acme\/modified\s+base\s+refused\s+acme\/modified AGENTS.md:3: block `base` was edited in place/,
+    );
+    expect(text).toMatch(
+      /acme\/foreign\s+base\s+refused\s+acme\/foreign AGENTS.md:1: another tool marks this file/,
+    );
+    expect(text).toMatch(
+      /acme\/gone\s+base\s+failed\s+GitHub getRepository failed \(HTTP 404\): Not Found/,
+    );
+    expect(text).toEndWith("7 targets: 3 would write, 1 current, 2 refused, 1 failed");
+  });
+
+  test("real run: one pull request per target, refusals and the failure isolated; a rerun is idempotent; merged targets read current", async () => {
+    const { github, runAll } = world();
+    const first = await runAll();
+    expect(rows(first)).toEqual([
+      "base acme/eligible written",
+      "base acme/outdated written",
+      "base acme/current current",
+      "base acme/modified refused",
+      "base acme/foreign refused",
+      "base acme/gone failed",
+      "frontend acme/eligible written",
+    ]);
+    expect(first.failed).toBe(1);
+    expect(github.pulls("acme/eligible").map((p) => p.head)).toEqual([
+      "acme:agent-rules/base",
+      "acme:agent-rules/frontend",
+    ]);
+    expect(github.pulls("acme/outdated")).toHaveLength(1);
+    expect(github.pulls("acme/modified")).toHaveLength(0);
+    expect(github.pulls("acme/foreign")).toHaveLength(0);
+    expect(github.calls.filter((c) => c.startsWith("createPullRequest"))).toHaveLength(3);
+    expect(renderSyncAll(first)).toEndWith("7 targets: 3 opened, 1 current, 2 refused, 1 failed");
+    expect(renderSyncAll(first)).toMatch(
+      /acme\/eligible\s+base\s+eligible\s+opened PR #1 \(https:\/\/github.com\/acme\/eligible\/pull\/1\)/,
+    );
+
+    // Nothing changed: the open pull requests already carry the planned content.
+    github.calls.length = 0;
+    const second = await runAll();
+    expect(rows(second)).toEqual([
+      "base acme/eligible up-to-date",
+      "base acme/outdated up-to-date",
+      "base acme/current current",
+      "base acme/modified refused",
+      "base acme/foreign refused",
+      "base acme/gone failed",
+      "frontend acme/eligible up-to-date",
+    ]);
+    expect(github.calls).toEqual([]);
+    expect(renderSyncAll(second)).toMatch(
+      /acme\/outdated\s+base\s+outdated\s+up to date \(PR #1 open, https:\/\/github.com\/acme\/outdated\/pull\/1\)/,
+    );
+    expect(renderSyncAll(second)).toEndWith(
+      "7 targets: 3 up to date, 1 current, 2 refused, 1 failed",
+    );
+
+    // The `base` pull request on acme/outdated merges: the default branch decides, not the branch.
+    github.moveRef("acme/outdated", "heads/main", "heads/agent-rules/base");
+    const third = await runAll({ pack: "base" });
+    expect(rows(third)).toEqual([
+      "base acme/eligible up-to-date",
+      "base acme/outdated current",
+      "base acme/current current",
+      "base acme/modified refused",
+      "base acme/foreign refused",
+      "base acme/gone failed",
+    ]);
+    expect(github.calls).toEqual([]);
+  });
+
+  test("--pack restricts the run; an unknown pack refuses the whole run", async () => {
+    const { runAll } = world();
+    const frontend = await runAll({ pack: "frontend", dryRun: true });
+    expect(rows(frontend)).toEqual(["frontend acme/eligible planned"]);
+    expect(frontend.failed).toBe(0);
+
+    const unknown = await runAll({ pack: "nope", dryRun: true }).catch((e: unknown) => e);
+    expect(String(unknown)).toContain("pack `nope` not found in acme/agent-rules@");
+  });
+
+  test("a subscription list without a matching pack yields no targets", async () => {
+    const github = fakeGitHub({
+      "acme/agent-rules": {
+        files: {
+          "packs/base/AGENTS.md": `${BODY}\n`,
+          "subscriptions.json": JSON.stringify({ base: [] }),
+        },
+      },
+    });
+    const result = await Effect.runPromise(
+      syncAll({ packs: "acme/agent-rules", pack: null, dryRun: true }).pipe(
+        Effect.provide(Layer.mergeAll(BunServices.layer, github.layer)),
+      ),
+    );
+    expect(result.rows).toEqual([]);
+    expect(renderSyncAll(result)).toEndWith("0 targets: none");
+  });
+});

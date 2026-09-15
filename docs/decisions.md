@@ -221,7 +221,8 @@ request text) and `src/domain/diff.ts` stay pure. `src/scan/` remains read-only.
 **Not in this step.** Whole managed files in a pack (D8 `file` entries) are inventoried by scan
 but not written; nested `AGENTS.md` blocks are not touched; the pack `AGENTS.md` in
 `lightsound/agent-rules` is not yet wrapped in its own markers (both marker-wrapped and bare
-bodies are read; settled by D11: it stays bare); no fan-out (`--all`, Step 5).
+bodies are read; settled by D11: it stays bare); no fan-out (`--all`, Step 5, now D14, which also
+replaces the unconditional rerun force-push above with a content check).
 
 ## 2026-09-15 D11: Pack sources stay unwrapped; markers are rendered at sync time
 
@@ -332,6 +333,59 @@ environment, needs a token for a private pack repository, and the roadmap exclud
 hacks); a Cursor plugin carrying the pack as a rule (client install, Cursor-only, update
 semantics undocumented, and it would double-load next to the block); a record file written by
 the slash command for rulecheck to compare (keeps the manual step alive to measure it).
+
+## 2026-09-15 D14: `sync --all`: fan-out over subscriptions, per-target isolation, exit code by knowledge
+
+D10 built the path for one repository and one pack. Step 5 runs it for every subscriber. The
+fan-out is the same `sync` command with `--all` instead of a repository argument, not a new
+command: the one write surface stays one (`sync`), and `--dry-run` keeps its meaning (every check,
+no write). `--pack <id>` narrows the run to one pack; without it every pack in `subscriptions.json`
+runs. `--base` is refused with `--all`: each subscriber is synced on its own default branch.
+
+**Targets.** One target per (`owner/repo`, pack) pair listed in `subscriptions.json`, in file
+order, pack by pack. A repository under two packs is two targets and two pull requests (D10). A
+repository that carries a block without being subscribed is not a target: the fan-out has no tree
+to discover it from, and `scan --packs` over a checkout still reports it.
+
+**Isolation.** Each target runs the unchanged single-target path (`syncTarget`), measure then
+write, and its outcome is one row. A refusal (`modified`, `blocked`, rot the block would introduce,
+a foreign `agent-rules/<pack>` branch, a planned tree that does not read `current`) is a row that
+names the `file:line`, and the run continues. So is a GitHub error. Nothing aborts the others.
+
+**Exit code.** The run exits 1 only when at least one target's outcome is unknown: GitHub could
+not be read or written (404, 401, network, `gh` missing). Refusals exit 0. Principle: the exit
+code says whether the report is complete, not whether every repository is in the desired state;
+the rows say that. A refusal is rulecheck's answer for that repository (a human must look), and
+answering is success. An unknown outcome means the report is missing a row's truth, which a
+script chaining on the command must not mistake for "nothing to do".
+
+**Idempotence by content, default branch first.** A rerun must not push again when nothing is
+left to deliver. The single-target path already measures the default-branch HEAD before anything
+else, so a block that merged (by squash or otherwise, so the merged content is on the default
+branch and not on `agent-rules/<pack>`) reads `current` and the tool-owned branch is never
+consulted. When the base still needs the block, the tool-owned branch is left alone if its tip
+commit is rulecheck's, every planned path reads at the tip exactly as the plan would write it, and
+a pull request from the branch is open; the row says `up to date (PR #n open)`. The key is the
+planned content, not the pack `rev` or the branch's parent: if the default branch changes the
+file the plan rewrites, the plan changes and the branch is force-updated onto the new base; if it
+changes other files, the delivered content is the same and the open pull request still merges. A
+closed pull request or a tip with other content falls through to the D10 rewrite. This applies to
+`sync <owner/repo>` too: one code path, so a single rerun is as quiet as the fan-out.
+
+**Concurrency.** Targets run up to three at a time (`Effect.forEach` with `concurrency: 3`); the
+write calls (tree, commit, ref, pull request) of every target pass through one semaphore with one
+permit, so at most one target writes at any moment. GitHub's secondary rate limit guidance asks
+that content-creating requests not be issued concurrently; reads are fine in parallel, and three
+keeps a run over tens of repositories short without a flag nobody would tune.
+
+**The remote report.** `scan --packs` measures the checkouts under a directory, so it reflects
+whichever branch or working-tree state each checkout has; two repositories were observed reading
+`eligible` locally after their pull requests had merged, because the checkouts were on other
+branches. The distribution status that decides anything is the default-branch HEAD on GitHub,
+which is what every target of `sync --all --dry-run` measures. That table (repository, pack,
+remote status, planned action with `+N -M`) is therefore the distribution report, and no separate
+`status` command is added: it would compute the same rows through the same path, and a dry run
+of the write is already the definition of "what is the state, what would change".
 
 ## Recording rule
 

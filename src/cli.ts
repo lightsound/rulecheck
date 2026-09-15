@@ -1,11 +1,12 @@
 import { Console, Effect, Option } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
-import { reportFailure } from "./report/failure.ts";
+import { reportFailure, reportIncomplete } from "./report/failure.ts";
 import { renderText } from "./report/render.ts";
-import { renderSync } from "./report/sync.ts";
+import { renderSync, renderSyncAll } from "./report/sync.ts";
 import { resolvePacks } from "./scan/packs.ts";
 import { scan } from "./scan/scan.ts";
-import { sync } from "./sync/sync.ts";
+import { syncAll } from "./sync/all.ts";
+import { SyncRefused, sync } from "./sync/sync.ts";
 
 const root = Argument.Directory("root", { mustExist: true }).pipe(
   Argument.withDescription("Directory to scan. Every git repository below it is inspected."),
@@ -65,20 +66,29 @@ const scanCommand = Command.make("scan", { root, json, all, maxDepth, personal, 
 );
 
 const target = Argument.String("repo").pipe(
-  Argument.withDescription("Target repository on GitHub, as owner/repo."),
+  Argument.withDescription("Target repository on GitHub, as owner/repo. Omit with --all."),
+  Argument.optional,
 );
 
 const pack = Flag.String("pack").pipe(
   Flag.withDescription(
-    "Id of the pack to distribute (a packs/<id>/ directory in the pack repository).",
+    "Id of the pack to distribute (a packs/<id>/ directory in the pack repository). Required for one repository; with --all it restricts the run to that pack.",
   ),
+  Flag.optional,
 );
 
 const syncPacks = Flag.String("packs").pipe(Flag.withDescription(PACKS_DESCRIPTION));
 
+const syncAllFlag = Flag.Boolean("all").pipe(
+  Flag.withDescription(
+    "Run over every repository in subscriptions.json (one pull request per repository per pack). With --dry-run this is the remote distribution report.",
+  ),
+  Flag.withDefault(false),
+);
+
 const base = Flag.String("base").pipe(
   Flag.withDescription(
-    "Branch to base the change on. Defaults to the repository's default branch.",
+    "Branch to base the change on. Defaults to the repository's default branch. Not available with --all.",
   ),
   Flag.optional,
 );
@@ -90,14 +100,38 @@ const dryRun = Flag.Boolean("dry-run").pipe(
 
 const syncCommand = Command.make(
   "sync",
-  { repo: target, pack, packs: syncPacks, base, dryRun },
+  { repo: target, pack, packs: syncPacks, all: syncAllFlag, base, dryRun },
   (config) =>
     Effect.gen(function* () {
+      const repo = Option.getOrNull(config.repo);
+      const packId = Option.getOrNull(config.pack);
+      const baseBranch = Option.getOrNull(config.base);
+      if (config.all) {
+        if (repo !== null || baseBranch !== null) {
+          return yield* new SyncRefused({
+            message:
+              "--all takes no repository argument and no --base; each subscriber is synced on its default branch",
+          });
+        }
+        const result = yield* syncAll({ packs: config.packs, pack: packId, dryRun: config.dryRun });
+        yield* Console.log(renderSyncAll(result));
+        if (result.failed > 0) {
+          return yield* reportIncomplete(
+            `${result.failed} of ${result.rows.length} targets failed; see the rows marked failed`,
+          );
+        }
+        return;
+      }
+      if (repo === null || packId === null) {
+        return yield* new SyncRefused({
+          message: "sync needs `<owner/repo> --pack <id>`, or `--all [--pack <id>]`",
+        });
+      }
       const result = yield* sync({
-        repo: config.repo,
-        pack: config.pack,
+        repo,
+        pack: packId,
         packs: config.packs,
-        base: Option.getOrNull(config.base),
+        base: baseBranch,
         dryRun: config.dryRun,
       });
       yield* Console.log(renderSync(result));
@@ -110,7 +144,7 @@ const syncCommand = Command.make(
     ),
 ).pipe(
   Command.withDescription(
-    "Distribute a pack's AGENTS.md block into one GitHub repository as a pull request: re-scan the repository remotely, refuse when it is blocked or the block would introduce rot, otherwise push branch agent-rules/<pack> and open (or update) the pull request. Never writes to local checkouts.",
+    "Distribute a pack's AGENTS.md block into GitHub repositories as pull requests: re-scan each repository remotely, refuse when it is blocked or the block would introduce rot, otherwise push branch agent-rules/<pack> and open (or update) the pull request. --all fans out over subscriptions.json; --all --dry-run is the remote distribution report. Never writes to local checkouts.",
   ),
 );
 
