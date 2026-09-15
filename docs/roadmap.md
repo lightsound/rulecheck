@@ -179,6 +179,18 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
   written paths always get mode `100644` (an executable or symlinked root file is replaced by a
   regular file). Not a target of `--all`: a repository that carries a block without a subscription
   (only `scan --packs` over a checkout sees it).
+- Multi-pack rollout, observed 2026-09-15 when `base` was split into `base` + `personal` across
+  seven subscribers (14 pull requests): each pack is its own branch and pull request per
+  repository (D10), both cut from the same default-branch head. The `base` update rewrites the
+  block in place and the `personal` insert appends right after it, so the hunks share context
+  lines and merging one pack's pull request makes the other pack's conflict. Procedure that
+  worked: **merge one pack's pull requests → run `sync --all` again → merge the next pack's**.
+  The rerun force-moved all seven `agent-rules/personal` branches onto the new heads and reused
+  the open pull requests (`updated PR #n`; first live use of `PATCH git/refs` and `PATCH pulls`),
+  and every one read `MERGEABLE` afterwards. Candidate follow-up: a single pull request per
+  repository carrying every subscribed pack (one branch, blocks in subscription order), which
+  removes the second phase at the cost of the one-pack-one-branch invariant in D10; needs a
+  decision entry before it is built.
 - Later: GitHub App + webhook so status updates without a local tree; the web/desktop UI on top.
 
 ## Not doing
