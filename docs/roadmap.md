@@ -2,12 +2,14 @@
 
 Ordered next steps. Each step is small enough for one chat session and ends with a check against
 the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
-[decisions.md](decisions.md) (D4 to D8); tool facts in [tool-behavior.md](tool-behavior.md).
+[decisions.md](decisions.md) (D4 to D10); tool facts in [tool-behavior.md](tool-behavior.md).
 
 ## Current state (2026-09-15)
 
 - rulecheck: read-only scan works on `~/ghq` (shape, duplicates, budget, rot detection, personal
-  layer, managed blocks, skills inventory, pack distribution status via `--packs`). No write path.
+  layer, managed blocks, skills inventory, pack distribution status via `--packs`, which reads a
+  local checkout or `owner/repo[@ref]` from GitHub). One write path: `rulecheck sync` (D10) opens
+  a pull request per repository per pack through `gh api`; not yet run against a real target.
 - `lightsound/agent-rules/packs/base/AGENTS.md`: the portable pack `base` (D7 naming),
   environment-neutral only (Step 1, [agent-rules#1](https://github.com/lightsound/agent-rules/pull/1)).
   The repository's root `AGENTS.md` instructs agents working in agent-rules itself and is not
@@ -64,8 +66,9 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
 - Left for Step 3: `--packs` still needs a local checkout of the pack repository (D6 wants the
   remote); whole managed files in a pack are inventoried but not compared with the target repo;
   blocks in nested `AGENTS.md` or in `CLAUDE.md` are listed but do not enter the status.
+  (`--packs` remote form resolved in Step 3; the other two remain.)
 
-## Step 3: First write path (needs a decision entry first)
+## Step 3: First write path — code done 2026-09-15, live verification pending
 
 - Record in `decisions.md` and `AGENTS.md` that rulecheck gains a remote-only write path (D6).
 - `rulecheck sync <owner/repo> --pack <id>`: via `gh api`, create branch, write the normalized
@@ -75,6 +78,23 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
 - A pack is a set of files (D8): the first pack carries only the `AGENTS.md` block; whole managed
   files (skill directories) follow once Step 2 reports their inventory.
 - Done when: one PR on a solo lightsound repo, merged, and the next `scan` shows `current`.
+- Result: D10 records the write path. `rulecheck sync <owner/repo> --pack <id> --packs <source>
+  [--base <branch>] [--dry-run]` in `src/sync/sync.ts`, the `GitHub` service and `gh api` layer in
+  `src/github/`, the pure plan in `src/domain/sync.ts`. A repository at a commit is presented as a
+  read-only `FileSystem` (`src/github/fs.ts`), so the target is measured with the unchanged `scan`
+  before planning and again on the planned tree; `not-subscribed`, `modified`, `blocked`, a
+  writer/reader disagreement, and any new `unknown-script` / `missing-path` finding refuse with
+  `file:line`. Branch `agent-rules/<pack>` is tool-owned and force-updated on rerun; the open pull
+  request is reused. The same filesystem view gives `--packs owner/repo[@ref]` (Step 2 carry-over
+  resolved). Tested against an in-memory GitHub (`tests/fake-github.ts`): all five deterministic
+  shapes, in-place update, block ordering by subscription, dry run issuing no write call, every
+  refusal. Verified read-only against the real API: `scan --packs lightsound/rulecheck` and
+  `sync lightsound/rulecheck --dry-run` with a scratch pack, including a rot refusal
+  (`AGENTS.md:49 script "deploy" is not defined`).
+- Open for the done criterion: run `sync` once without `--dry-run` on a solo lightsound repository
+  with `--packs lightsound/agent-rules`, merge, and confirm the next `scan` shows `current`. Also
+  wrap `packs/base/AGENTS.md` in agent-rules in its own markers (Step 1 deferral; the reader
+  accepts both forms).
 
 ## Step 4: Remove the interim wiring
 
@@ -86,7 +106,11 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
 ## Step 5: Update fan-out and drift
 
 - `rulecheck sync --all`: for every subscribed repo whose status is `outdated`, open an update PR
-  (Renovate style). `modified` repos get a report line, not a PR.
+  (Renovate style). `modified` repos get a report line, not a PR. The per-repository path exists
+  (Step 3); fan-out adds iteration over `subscriptions.json` and a summary.
+- Carried from Step 3: whole managed files in a pack (D8 `file` entries) are inventoried but not
+  written; auto-merge as a per-repository opt-in (D6); a stale `agent-rules/<pack>` branch whose
+  pull request was closed without merge is rewritten on the next sync (D10) rather than skipped.
 - Later: GitHub App + webhook so status updates without a local tree; the web/desktop UI on top.
 
 ## Not doing

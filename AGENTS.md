@@ -4,8 +4,8 @@ Health check for AI coding agent instruction files (`AGENTS.md`, `CLAUDE.md`, `.
 
 ## What this project is
 
-- A read-only CLI. It scans a directory tree, finds git repositories, and reports how each one arranges its instruction files: canonical shape, duplicates across repos, and the approximate context budget each tool loads.
-- It does not write to scanned repositories. Structural fixes will arrive later as explicit, deterministic commands; content authoring is never in scope.
+- A CLI with a read-only `scan` and one write command, `sync`. `scan` walks a directory tree, finds git repositories, and reports how each one arranges its instruction files: canonical shape, duplicates across repos, the approximate context budget each tool loads, and per pack the distribution status (current / outdated / modified / eligible / blocked / not subscribed).
+- `sync` distributes a pack's `AGENTS.md` block into one GitHub repository as a pull request (`docs/decisions.md` D10). It writes only through the GitHub API, never to local checkouts or `~/`, and only after re-running the scan on the remote tree before and after the planned change. Content authoring is never in scope.
 - Convention this project enforces on itself and recommends to others: `AGENTS.md` is canonical, `CLAUDE.md` is a one-line `@AGENTS.md` wrapper.
 
 ## Stack
@@ -17,7 +17,8 @@ Health check for AI coding agent instruction files (`AGENTS.md`, `CLAUDE.md`, `.
 
 ## Commands
 
-- `bun run dev scan <dir>` run the CLI against a directory (text summary). Flags: `--json` full report for tooling, `--all` include repositories with no instruction files, `--no-personal` skip the `~/.claude` layer, `--max-depth <n>` descent limit (default 12), `--packs <dir>` pack repository checkout (`packs/<id>/AGENTS.md`, `subscriptions.json`) to add the pack distribution report
+- `bun run dev scan <dir>` run the CLI against a directory (text summary). Flags: `--json` full report for tooling, `--all` include repositories with no instruction files, `--no-personal` skip the `~/.claude` layer, `--max-depth <n>` descent limit (default 12), `--packs <dir | owner/repo[@ref]>` pack repository (`packs/<id>/AGENTS.md`, `subscriptions.json`) as a local checkout or read from GitHub through `gh api`, to add the pack distribution report
+- `bun run dev sync <owner/repo> --pack <id> --packs <dir | owner/repo[@ref]> --dry-run` measure one target on GitHub and print the planned diff; without `--dry-run` it pushes branch `agent-rules/<id>` and opens or updates the pull request. `--base <branch>` overrides the default branch. Needs `gh auth login`
 - `bun run check` typecheck, lint, and test
 - `bun test` tests only
 - `bun run lint:fix` format and autofix
@@ -26,10 +27,12 @@ Health check for AI coding agent instruction files (`AGENTS.md`, `CLAUDE.md`, `.
 
 - `src/main.ts` entry; provides Bun platform services and runs the command tree
 - `src/cli.ts` command and flag definitions only, no logic
-- `src/domain/` pure functions and types: file kind detection, wrapper detection, frontmatter parsing, shape classification, budget estimation, token counting, reference extraction (`references.ts`), managed-block parsing (`block.ts`), skills inventory and `skills-lock.json` (`skills.ts`), pack loading and distribution status (`pack.ts`)
-- `src/scan/` effectful code: `walk.ts` discovery, `analyze.ts` per-file analysis, `verify.ts` reference verification against the repo, `skills.ts` skill directory hashing, `packs.ts` reading a pack repository checkout (`--packs`), `personal.ts` the personal layer (`~/.claude`, `~/AGENTS.md`, `~/CLAUDE.md`, `~/.cursor/rules`), `scan.ts` orchestration
-- `src/report/` rendering of a `ScanReport` to text
-- `tests/` `bun test` files; pure domain functions are tested directly, walking is tested against fixture trees
+- `src/domain/` pure functions and types: file kind detection, wrapper detection, frontmatter parsing, shape classification, budget estimation, token counting, reference extraction (`references.ts`), managed-block parsing (`block.ts`), skills inventory and `skills-lock.json` (`skills.ts`), pack loading and distribution status (`pack.ts`), the sync plan, block rendering and pull request text (`sync.ts`), unified diff (`diff.ts`)
+- `src/scan/` effectful, read-only: `walk.ts` discovery, `analyze.ts` per-file analysis, `verify.ts` reference verification against the repo, `skills.ts` skill directory hashing, `packs.ts` reading a pack repository from a checkout or from GitHub (`resolvePacks`, `--packs`), `personal.ts` the personal layer (`~/.claude`, `~/AGENTS.md`, `~/CLAUDE.md`, `~/.cursor/rules`), `scan.ts` orchestration
+- `src/github/` the `GitHub` Effect service (`client.ts`), its live layer over `gh api` (`gh.ts`), and `fs.ts`, which presents a repository at one commit as a read-only `FileSystem` mounted at `/github.com/<owner>/<repo>` so `scan` and `loadPacks` run unchanged on remote trees
+- `src/sync/` the write path: `sync.ts` measures the target through the snapshot filesystem, plans, measures the planned tree again, then creates one commit, the branch `agent-rules/<pack>`, and the pull request. The only directory that issues GitHub writes
+- `src/report/` rendering of a `ScanReport` (`render.ts`) and a sync result (`sync.ts`) to text; `failure.ts` prints expected failures (refusal, bad `--packs`, GitHub error) as one stderr line with exit code 1
+- `tests/` `bun test` files; pure domain functions are tested directly, walking is tested against fixture trees, the write path against `fake-github.ts` (an in-memory `GitHub` layer with a flat git object store)
 - `docs/tool-behavior.md` verified facts about what Cursor and Claude Code load, with evidence and a re-verification method. Update it when a heuristic depends on a new fact about a tool.
 - `docs/decisions.md` dated design decisions (distribution unit, layers, sync model). Add an entry when a decision changes what rulecheck writes or reports.
 - `docs/roadmap.md` ordered next steps with done criteria and the current wiring state. Read it first in a new session; update it when a step finishes.
@@ -37,10 +40,12 @@ Health check for AI coding agent instruction files (`AGENTS.md`, `CLAUDE.md`, `.
 
 ## Rules
 
-- Keep `src/domain/` free of Effect and I/O. Anything that touches the filesystem lives in `src/scan/`.
+- Keep `src/domain/` free of Effect and I/O. Anything that touches the filesystem lives in `src/scan/`; anything that talks to GitHub goes through the `GitHub` service in `src/github/`.
 - Add a new detector as a pure function in `src/domain/` first, with a test, then wire it into `scan.ts` and `render.ts`.
 - Findings favor precision over recall. A finding asks a human to act; when the text is ambiguous, skip it rather than guess. Every finding carries `file:line`. The rot-detection heuristics (what is extracted, what is skipped, how a reference is verified) are documented in the header comments of `src/domain/references.ts` and `src/scan/verify.ts`.
 - `README.md` is intentionally absent; do not create it unless the user asks.
 - Before changing a heuristic, run `bun run dev scan ~/ghq` and read the findings that appear or disappear; the real tree is the regression suite for false positives.
-- Do not add an editor, watcher, or any write path to scanned repositories without an explicit decision recorded in this file.
+- The only write path is `src/sync/` and it writes only to GitHub through the `GitHub` service (D10). Do not add an editor, watcher, local-checkout write, or a second write path without a new entry in `docs/decisions.md` and here.
+- Every write in `sync` is preceded by a scan of the remote tree and followed by a scan of the planned tree; a `blocked` or `modified` status or a new reference finding refuses the write. Keep that order when changing `src/sync/sync.ts`.
+- Test the write path against `tests/fake-github.ts` only. Never point a test or a manual run without `--dry-run` at a real repository you do not own.
 - Effect `unstable/*` modules may break between minor versions; bump `effect` and `@effect/platform-bun` together and re-run `bun run check`.
