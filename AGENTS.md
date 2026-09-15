@@ -50,7 +50,7 @@ Health check for AI coding agent instruction files (`AGENTS.md`, `CLAUDE.md`, `.
 - Test the write path against `tests/fake-github.ts` only. Never point a test or a manual run without `--dry-run` at a real repository you do not own.
 - Effect `unstable/*` modules may break between minor versions; bump `effect` and `@effect/platform-bun` together and re-run `bun run check`.
 
-<!-- agent-rules:begin source=base rev=97f10769145defd3d3ae58f8755d2a2cceb1e569 hash=eee7698ebfe00708fb1da9f0f14eae53d3806e88a7258c48b1f6c8900400b155 -->
+<!-- agent-rules:begin source=base rev=fe169e0f9bcb8bde3857cca3c282f605ef0e4798 hash=7921fcf0e21a79ecdd148be29662f810c7fedf57094c8db2b51a3c11007cf20a -->
 # Personal instructions
 
 Portable conventions for AI coding agents. Everything here holds in any clone of any repository, including a fresh checkout on a cloud VM; nothing depends on one machine's paths or tools. Where a project-specific section of the file that carries this text says otherwise, the project-specific section takes precedence.
@@ -63,13 +63,13 @@ Portable conventions for AI coding agents. Everything here holds in any clone of
 ## Reporting
 
 - No interim progress reports. Report once, when the work is done, with the results.
-- Write the chat in concise, plain Japanese.
+- Write the chat in concise, plain Japanese: prose is short, but items the rules require (the decisions table, PR URLs, test counts, and other structured facts) are never omitted or aggregated for brevity.
 
 ## Decisions
 
 - When implementation needs a judgment call, do not ask the user. Propose a solution, then run rounds of searching for a strictly better alternative or a silver bullet; stop the search when a round produces no new option.
 - Then extract the principle that generates the constraint and check whether the problem can be dissolved structurally. Only after that pick the best option.
-- In the final report, state for each decision in which round no new options appeared.
+- The final report lists every judgment call in a table with three columns: decision, chosen option, and the round in which no new option appeared. Never summarize or aggregate this table; when relaying another agent's report, keep it intact.
 
 ## Delivery
 
