@@ -155,6 +155,12 @@ function eligibleAction(repo: RepoForDistribution): string {
   return repo.shape === "agents-imported" ? `${action} (${IMPORTED_NOTE})` : action;
 }
 
+/** `file:line`, `file`, or the empty string: where a status entry points in the repository. */
+export function statusLocation(entry: PackStatusEntry): string {
+  if (entry.file === null) return "";
+  return entry.line === null ? entry.file : `${entry.file}:${entry.line}`;
+}
+
 /** Status of one repository for one pack. */
 export function classifyPackStatus(repo: RepoForDistribution, pack: Pack): PackStatusEntry {
   const base = { repo: repo.name, pack: pack.id };

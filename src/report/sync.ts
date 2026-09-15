@@ -1,6 +1,6 @@
 import { diffStats, unifiedDiff } from "../domain/diff.ts";
+import { statusLocation } from "../domain/pack.ts";
 import type { SyncPlan } from "../domain/sync.ts";
-import type { PackStatusEntry } from "../domain/types.ts";
 import type { SyncAllResult, SyncOutcome } from "../sync/all.ts";
 import type { SyncResult } from "../sync/sync.ts";
 import { renderFailure } from "./failure.ts";
@@ -17,7 +17,7 @@ export function renderSync(result: SyncResult): string {
   switch (result.kind) {
     case "nothing-to-do":
       out.push(
-        `${result.repo}: block \`${result.status.pack}\` is ${status} (${where(result.status)}); ${outcome}`,
+        `${result.repo}: block \`${result.status.pack}\` is ${status} (${statusLocation(result.status)}); ${outcome}`,
       );
       break;
     case "planned":
@@ -82,8 +82,7 @@ export function renderSyncAll(result: SyncAllResult): string {
 
 /** The pack status the target measured, or `-` when it never got that far. */
 function statusOf(outcome: SyncOutcome): string {
-  if (outcome.kind === "failed" || outcome.status === null) return UNMEASURED;
-  return STATUS_LABEL[outcome.status.status];
+  return outcome.status === null ? UNMEASURED : STATUS_LABEL[outcome.status.status];
 }
 
 /** The outcome label followed by its detail. */
@@ -99,7 +98,7 @@ function describe(outcome: SyncOutcome): string {
           : outcome.error.message
       }`;
     case "nothing-to-do":
-      return `${label} (block at ${where(outcome.status)})`;
+      return `${label} (block at ${statusLocation(outcome.status)})`;
     case "up-to-date":
       return `${label} (PR #${outcome.pullRequest.number} open, ${outcome.pullRequest.url})`;
     case "planned":
@@ -128,11 +127,6 @@ function summary(result: SyncAllResult): string {
     return count === 0 ? null : `${count} ${OUTCOME_LABEL[kind]}`;
   }).filter((part) => part !== null);
   return `${result.rows.length} targets: ${parts.join(", ") || "none"}`;
-}
-
-function where(entry: PackStatusEntry): string {
-  if (entry.file === null) return "";
-  return entry.line === null ? entry.file : `${entry.file}:${entry.line}`;
 }
 
 function pad(text: string, width: number): string {

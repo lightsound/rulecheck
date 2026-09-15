@@ -28,7 +28,7 @@ Rules:
 | `scan --json` | `repos[].shape`, `totals.shapes` | `repos[].normalization` | `distribution.entries[].status`, `distribution.counts` | — |
 | `sync <owner/repo> --dry-run` | drives the plan; the status message names the normalization | in the status message and the planned actions | first line: the status measured on the base branch | `planned`, `up-to-date`, `nothing-to-do`; a refusal is one stderr line `rulecheck: refused: …` (exit 1) |
 | `sync <owner/repo>` | same | same, plus the pull request body | same | `opened`, `updated`, `up-to-date`, `nothing-to-do`; refusal as above; a GitHub error is one stderr line (exit 1) |
-| `sync --all --dry-run` | — | inside the `planned` detail | `status` column: the default-branch status; `-` when the target was never measured | `outcome` column and the summary line; the remote distribution report (D14) |
+| `sync --all --dry-run` | — | inside the `planned` detail | `status` column: the default-branch status, also for `refused` and `failed` rows; `-` when the target was never measured | `outcome` column and the summary line; the remote distribution report (D14) |
 | `sync --all` | — | same | same | same, with `opened` / `updated` instead of `planned`; exit 1 only when a row is `failed` |
 
 `scan` measures local checkouts (whatever branch each one is on); `sync` measures the default
@@ -110,7 +110,7 @@ base branch before anything else; an outcome never changes that status.
 | `opened` | `opened` | One commit on the base head, the branch created or force-moved, and a new pull request opened. | `eligible`, `outdated` | `sync` without `--dry-run` | D10 |
 | `updated` | `updated` | The branch was rewritten under an already open pull request, whose title and body were refreshed. | `eligible`, `outdated` | `sync` without `--dry-run` | D10, D14 |
 | `refused` | `refused` | rulecheck declined to write and says why, with `file:line` where it applies. Results from the status when it is `not-subscribed`, `modified`, or `blocked`; from `eligible` / `outdated` when a later check fails (the planner refuses, the planned tree does not read `current`, a foreign region would change, the block would introduce a reference finding, or `agent-rules/<pack>` has a tip rulecheck did not write); or before measurement (bad target, missing base branch), in which case the status column reads `-`. Exit 0 in `--all`: a refusal is an answer, not a failure. | `not-subscribed`, `modified`, `blocked`, `eligible`, `outdated`, or unmeasured | `sync`: stderr `rulecheck: refused: …`, exit 1; `--all`: a row | D10, D14 |
-| `failed` | `failed` | The target's truth is unknown: GitHub could not be read or written (404, 401, network, `gh` missing). The status column reads `-`. `sync --all` exits 1 when any row is `failed`. | unmeasured | `sync`: stderr `rulecheck: GitHub … failed`, exit 1; `--all`: a row | D14 |
+| `failed` | `failed` | The target's truth is unknown: GitHub could not be read or written (404, 401, network, `gh` missing). When the failure came after the base branch was measured (a read while checking the tool-owned branch, or a write call), the row keeps the measured status (`SyncFailed`); when the target could not even be read, the status column reads `-`. `sync --all` exits 1 when any row is `failed`. | `eligible`, `outdated` (failure after measurement), or unmeasured | `sync`: stderr `rulecheck: GitHub … failed`, exit 1; `--all`: a row | D14, D17 |
 
 `refused` and `blocked` are different things: `blocked` is a state of the repository (a human
 must look before a write), `refused` is what a sync does about `blocked`, about `modified` and
@@ -141,7 +141,7 @@ One repository against one pack. Pack statuses are boxes; sync outcomes are the 
 
   side states of a sync run (per target, status unchanged):
     refused   ← not-subscribed | modified | blocked | a check after measurement failed
-    failed    ← GitHub unreadable or unwritable; status `-`
+    failed    ← GitHub unreadable or unwritable; status `-` unless measured before the failure
     nothing-to-do ← current
 ```
 
@@ -152,7 +152,7 @@ One repository against one pack. Pack statuses are boxes; sync outcomes are the 
 | `current` was both a pack status and a `SyncResult` kind ("base already current, nothing written"). | The result kind is `nothing-to-do`, matching the label the reports already printed. |
 | `SyncResult` kind `written` printed as two labels, `opened` or `updated`, via a boolean `pullRequestCreated`. | Two kinds, `opened` and `updated`; the boolean is gone. |
 | `planned` was summarized as `would write` and its row said `would open or update a pull request`. | Label `planned`; the row reads `planned +N -M: <actions>`. |
-| The `sync --all` `status` column showed `refused` or `failed` (outcomes) for rows without a result, and pack statuses for the others. | The column always shows the pack status; `SyncRefused` carries the measured status, so a `modified` or `blocked` refusal shows that status; `-` when the target was never measured. The last column is `outcome` and starts with the outcome label. |
+| The `sync --all` `status` column showed `refused` or `failed` (outcomes) for rows without a result, and pack statuses for the others. | The column always shows the pack status; `SyncRefused` carries the measured status, so a `modified` or `blocked` refusal shows that status, and a GitHub error after measurement is a `SyncFailed` that keeps it too; `-` only when the target was never measured. The last column is `outcome` and starts with the outcome label. |
 | `SyncOutcome` wrapped results in a `done` kind, so the outcome identifier lived two levels deep. | `SyncOutcome = SyncResult \| refused \| failed`; `outcome.kind` is the identifier. |
 | Only `both-full` had normalization identifiers (`wrapper` / `merge` in `repos[].bothFull`, null elsewhere); the other shapes' normalizations were prose only, and the prose disagreed: the `eligible` row said `rename to AGENTS.md` (`claude-only`) and `swap the pair` (`claude-canonical`) while the plan's action for both said `move CLAUDE.md content to AGENTS.md`, and the planner runs the same code for both shapes. | `Normalization` with six identifiers on every repository (`repos[].normalization`); `rename` and `swap` are `move`; `wrapper` is `drop`, because `wrapper` also names the file every normalization ends with and collided with `add-wrapper`. D6's "`CLAUDE.md only` via rename" is superseded. |
 | Label tables lived in `src/report/render.ts` and inline strings in `src/report/sync.ts`. | One module, `src/report/labels.ts`; the normalization sentences in `describeNormalization`. |
@@ -171,3 +171,5 @@ Not part of the four vocabularies; listed so nobody mistakes them for one.
   `matches lock`, `lock hash differs`, `locked`), D9.
 - `BlockIssueKind`: `malformed-marker`, `foreign-marker`; `FindingKind`: `unknown-script`,
   `missing-path`. Reasons a row is `blocked` or a sync is `refused`, not states.
+- `SyncRefused` and `SyncFailed` (`src/sync/sync.ts`): the errors of the single-target path that
+  `sync --all` turns into the `refused` and `failed` outcomes; both carry the measured status.

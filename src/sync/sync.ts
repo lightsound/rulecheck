@@ -1,6 +1,7 @@
 import { Data, Effect, FileSystem, type Path, type Semaphore } from "effect";
 import type { PlatformError } from "effect/PlatformError";
 import { foreignRegionDrift } from "../domain/block.ts";
+import { statusLocation } from "../domain/pack.ts";
 import { isRulecheckCommit, planSync, pullRequestText, type SyncPlan } from "../domain/sync.ts";
 import type { Finding, Pack, PackStatusEntry, RepoReport } from "../domain/types.ts";
 import {
@@ -100,7 +101,17 @@ export type SyncResult =
  */
 export class SyncRefused extends Data.TaggedError("SyncRefused")<{
   readonly message: string;
-  readonly status?: PackStatusEntry;
+  readonly status: PackStatusEntry | null;
+}> {}
+
+/**
+ * GitHub failed after the base branch was measured (a read while checking the tool-owned branch,
+ * or one of the write calls), so the measured status is known but the delivery is not. A
+ * `GitHubError` before measurement escapes as itself: nothing about the target is known then.
+ */
+export class SyncFailed extends Data.TaggedError("SyncFailed")<{
+  readonly error: GitHubError;
+  readonly status: PackStatusEntry;
 }> {}
 
 export const branchFor = (pack: string): string => `agent-rules/${pack}`;
@@ -118,7 +129,7 @@ export const sync = (
   options: SyncOptions,
 ): Effect.Effect<
   SyncResult,
-  SyncRefused | PackSourceError | GitHubError | PlatformError,
+  SyncRefused | SyncFailed | PackSourceError | GitHubError | PlatformError,
   GitHub | FileSystem.FileSystem | Path.Path
 > =>
   Effect.gen(function* () {
@@ -133,6 +144,7 @@ export const selectPack = (loaded: LoadedPacks, id: string): Effect.Effect<Pack,
     ? Effect.succeed(pack)
     : new SyncRefused({
         message: `pack \`${id}\` not found in ${loaded.source} (have: ${loaded.packs.map((p) => p.id).join(", ") || "none"})`,
+        status: null,
       });
 };
 
@@ -146,7 +158,7 @@ export const syncTarget = (
   pack: Pack,
 ): Effect.Effect<
   SyncResult,
-  SyncRefused | GitHubError | PlatformError,
+  SyncRefused | SyncFailed | GitHubError | PlatformError,
   GitHub | FileSystem.FileSystem | Path.Path
 > =>
   Effect.gen(function* () {
@@ -155,6 +167,7 @@ export const syncTarget = (
     if (parsed === null || parsed.ref !== null) {
       return yield* new SyncRefused({
         message: `target must be owner/repo, got \`${options.repo}\``,
+        status: null,
       });
     }
     const target = parsed.repo;
@@ -163,13 +176,56 @@ export const syncTarget = (
     const base = options.base ?? (yield* github.getRepository(target)).defaultBranch;
     const baseSha = yield* github.getRef(target, `heads/${base}`);
     if (baseSha === null) {
-      return yield* new SyncRefused({ message: `branch \`${base}\` not found in ${name}` });
+      return yield* new SyncRefused({
+        message: `branch \`${base}\` not found in ${name}`,
+        status: null,
+      });
     }
 
     const mount = mountPath(target);
     const snapshot = yield* repositorySnapshot(github, target, baseSha, mount);
     const before = yield* measure(snapshot, mount, name, loaded, pack);
+    const context: Target = {
+      github,
+      options,
+      loaded,
+      pack,
+      target,
+      name,
+      base,
+      baseSha,
+      snapshot,
+      mount,
+      before,
+    };
+    return yield* deliver(context).pipe(
+      // The status is known from here on; a GitHub failure keeps it for the `sync --all` row.
+      Effect.catchTag("GitHubError", (error) => new SyncFailed({ error, status: before.entry })),
+    );
+  });
 
+/** One target after its base branch was measured. */
+interface Target {
+  readonly github: GitHubService;
+  readonly options: SyncTargetOptions;
+  readonly loaded: LoadedPacks;
+  readonly pack: Pack;
+  readonly target: RepositoryRef;
+  readonly name: string;
+  readonly base: string;
+  readonly baseSha: string;
+  readonly snapshot: Snapshot;
+  readonly mount: string;
+  readonly before: Measurement;
+}
+
+/** Decide, plan, measure again, and write (or report what would be written) for a measured target. */
+const deliver = (
+  context: Target,
+): Effect.Effect<SyncResult, SyncRefused | GitHubError | PlatformError, Path.Path> =>
+  Effect.gen(function* () {
+    const { github, options, loaded, pack, target, name, base, baseSha, snapshot, mount, before } =
+      context;
     // Every refusal from here on names the measured status, so a `sync --all` row shows it.
     const refuse = (message: string) => new SyncRefused({ message, status: before.entry });
 
@@ -182,10 +238,10 @@ export const syncTarget = (
         );
       case "modified":
         return yield* refuse(
-          `${name} ${where(before.entry)}: block \`${pack.id}\` was edited in place (${before.entry.message}); a human must reconcile it`,
+          `${name} ${statusLocation(before.entry)}: block \`${pack.id}\` was edited in place (${before.entry.message}); a human must reconcile it`,
         );
       case "blocked":
-        return yield* refuse(`${name} ${where(before.entry)}: ${before.entry.message}`);
+        return yield* refuse(`${name} ${statusLocation(before.entry)}: ${before.entry.message}`);
       case "eligible":
       case "outdated":
         break;
@@ -334,7 +390,10 @@ const measure = (
       (e) => e.pack === pack.id && e.repo === repo?.name,
     );
     if (!repo || !entry) {
-      return yield* new SyncRefused({ message: `${name}: could not measure the repository tree` });
+      return yield* new SyncRefused({
+        message: `${name}: could not measure the repository tree`,
+        status: null,
+      });
     }
     const contents = new Map<string, string>();
     for (const file of repo.files) {
@@ -376,11 +435,6 @@ function newFindings(
 ): Finding[] {
   const known = new Set(before.map((f) => findingKey(f, pairIsOneFile)));
   return after.filter((f) => !known.has(findingKey(f, pairIsOneFile)));
-}
-
-function where(entry: PackStatusEntry): string {
-  if (entry.file === null) return "";
-  return entry.line === null ? entry.file : `${entry.file}:${entry.line}`;
 }
 
 interface WriteInput {

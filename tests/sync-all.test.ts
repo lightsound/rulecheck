@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { BunServices } from "@effect/platform-bun";
 import { Effect, Layer } from "effect";
 import { hashBlockBody } from "../src/domain/block.ts";
-import type { GitHub } from "../src/github/client.ts";
+import { GitHub, GitHubError } from "../src/github/client.ts";
 import { renderSyncAll } from "../src/report/sync.ts";
 import { resolvePacks } from "../src/scan/packs.ts";
 import { type SyncAllOptions, type SyncAllResult, syncAll } from "../src/sync/all.ts";
@@ -186,6 +186,37 @@ describe("syncAll", () => {
       ),
     );
     expect(github.maxWriters()).toBe(2);
+  });
+
+  test("a GitHub failure after measurement keeps the measured status in its row", async () => {
+    const { github } = world();
+    const broken = Layer.succeed(GitHub, {
+      ...github.service,
+      createPullRequest: () =>
+        Effect.fail(
+          new GitHubError({ operation: "createPullRequest", status: 502, message: "Bad Gateway" }),
+        ),
+    });
+    const result = await Effect.runPromise(
+      syncAll({ packs: "acme/agent-rules", pack: "base", dryRun: false }).pipe(
+        Effect.provide(Layer.mergeAll(BunServices.layer, broken)),
+      ),
+    );
+    const eligible = result.rows.find((row) => row.target.repo === "acme/eligible")?.outcome;
+    expect(eligible).toMatchObject({
+      kind: "failed",
+      status: { status: "eligible", file: "AGENTS.md" },
+    });
+    // The target that never existed has no status to show.
+    const gone = result.rows.find((row) => row.target.repo === "acme/gone")?.outcome;
+    expect(gone).toMatchObject({ kind: "failed", status: null });
+    expect(result.failed).toBe(3);
+    const text = renderSyncAll(result);
+    expect(text).toMatch(
+      /acme\/eligible\s+base\s+eligible\s+failed: GitHub createPullRequest failed \(HTTP 502\): Bad Gateway/,
+    );
+    expect(text).toMatch(/acme\/gone\s+base\s+-\s+failed: GitHub getRepository failed/);
+    expect(text).toEndWith("6 targets: 1 nothing to do, 2 refused, 3 failed");
   });
 
   test("--pack restricts the run; an unknown pack refuses the whole run", async () => {

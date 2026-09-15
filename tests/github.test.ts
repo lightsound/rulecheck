@@ -149,7 +149,7 @@ function world() {
           Effect.succeed({
             kind: "refused" as const,
             message: e.message,
-            status: e.status ?? null,
+            status: e.status,
           }),
         ),
       ),

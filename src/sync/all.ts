@@ -3,7 +3,13 @@ import type { PlatformError } from "effect/PlatformError";
 import type { Pack, PackStatusEntry } from "../domain/types.ts";
 import type { GitHub, GitHubError } from "../github/client.ts";
 import { type LoadedPacks, type PackSourceError, resolvePacks } from "../scan/packs.ts";
-import { type SyncRefused, type SyncResult, selectPack, syncTarget } from "./sync.ts";
+import {
+  type SyncFailed,
+  type SyncRefused,
+  type SyncResult,
+  selectPack,
+  syncTarget,
+} from "./sync.ts";
 
 /**
  * Fan-out (D14): every repository in `subscriptions.json`, for one pack or for all of them, runs
@@ -29,8 +35,8 @@ export interface SyncTargetRef {
 
 /**
  * One target's sync outcome (`docs/status-model.md`): a `SyncResult`, or one of the two ways the
- * target path ends without a result. `refused` carries the pack status measured on the base
- * branch when the refusal came after that measurement; `failed` never measured anything.
+ * target path ends without a result. Both carry the pack status measured on the base branch
+ * when they came after that measurement, null otherwise.
  */
 export type SyncOutcome =
   | SyncResult
@@ -39,7 +45,12 @@ export type SyncOutcome =
       readonly message: string;
       readonly status: PackStatusEntry | null;
     }
-  | { readonly kind: "failed"; readonly error: GitHubError | PlatformError };
+  | {
+      readonly kind: "failed";
+      readonly error: GitHubError | PlatformError;
+      /** Known when GitHub failed after the base branch was measured (`SyncFailed`). */
+      readonly status: PackStatusEntry | null;
+    };
 
 export interface SyncAllRow {
   readonly target: SyncTargetRef;
@@ -61,7 +72,7 @@ export const syncAll = (
   options: SyncAllOptions,
 ): Effect.Effect<
   SyncAllResult,
-  SyncRefused | PackSourceError | GitHubError | PlatformError,
+  SyncRefused | SyncFailed | PackSourceError | GitHubError | PlatformError,
   GitHub | FileSystem.FileSystem | Path.Path
 > =>
   Effect.gen(function* () {
@@ -102,12 +113,11 @@ const runTarget = (
     Effect.map((result): SyncOutcome => result),
     Effect.catchTags({
       SyncRefused: (e) =>
-        Effect.succeed<SyncOutcome>({
-          kind: "refused",
-          message: e.message,
-          status: e.status ?? null,
-        }),
-      GitHubError: (error) => Effect.succeed<SyncOutcome>({ kind: "failed", error }),
-      PlatformError: (error) => Effect.succeed<SyncOutcome>({ kind: "failed", error }),
+        Effect.succeed<SyncOutcome>({ kind: "refused", message: e.message, status: e.status }),
+      SyncFailed: (e) =>
+        Effect.succeed<SyncOutcome>({ kind: "failed", error: e.error, status: e.status }),
+      GitHubError: (error) => Effect.succeed<SyncOutcome>({ kind: "failed", error, status: null }),
+      PlatformError: (error) =>
+        Effect.succeed<SyncOutcome>({ kind: "failed", error, status: null }),
     }),
   );
