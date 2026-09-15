@@ -407,12 +407,19 @@ bytes, so blocking there asked a human to look at nothing. Revised rule:
   (`<!-- generated:task-matrix:start -->`, `<!-- convex-ai-end -->`). The name is the comment
   text without the token, compared case-insensitively. A `start` followed by the `end` of the same
   name, with no other region marker between them, is a **well-formed region**.
-- A well-formed region is **opaque**: rulecheck never reads or writes inside it. Every line
-  between its markers is ignored by marker detection too, so a "Managed by X. Do not edit inside
-  this block" line inside a region describes the region, not the file. Inserting our block outside
-  the regions (append at the end of the file, after the last region; or replace our own existing
-  block) is allowed, and the row reads `eligible` / `outdated` as usual, with the number of regions
-  left untouched named in the message.
+- A well-formed region is **opaque**: rulecheck never reads or writes inside it. No region marker
+  inside it is read, and a file-level marker inside it is opaque when it names the region's owner
+  (a token of the region name appears in it: "Managed by solid2-agent-kit v0.11.1. Do not edit
+  inside this block" inside `solid2-agent-kit:agents-section` describes the region, not the file).
+  A file-level marker inside a region that does not name its owner may belong to a third tool
+  marking the whole file, and blocks as it did under D9: the pair shape alone does not buy
+  opacity for someone else's marker. Inserting our block outside the regions (append at the end
+  of the file, after the last region; or replace our own existing block) is allowed, and the row
+  reads `eligible` / `outdated` as usual, with the number of regions left untouched named in the
+  message. Names ending in `ignore` or `disable` (`prettier-ignore-start`) are formatter or
+  linter directives about a span, not ownership, and are not region markers. Lines inside our
+  own `agent-rules` blocks are never read for markers: a pack body may quote marker-shaped
+  comments.
 - Everything that is not a well-formed region keeps the file `blocked` with `file:line`: a
   `start` without its `end` or an `end` without its `start`, a `start` inside an open region
   (nested regions are not supported; the outer tool owns the inner marker and we cannot tell
