@@ -357,7 +357,11 @@ not be read or written (404, 401, network, `gh` missing). Refusals exit 0. Princ
 code says whether the report is complete, not whether every repository is in the desired state;
 the rows say that. A refusal is rulecheck's answer for that repository (a human must look), and
 answering is success. An unknown outcome means the report is missing a row's truth, which a
-script chaining on the command must not mistake for "nothing to do".
+script chaining on the command must not mistake for "nothing to do". No retry or backoff is
+built in: a `failed` row may be transient (a secondary rate limit, a 5xx), and the answer is to
+run the command again, which the idempotence below makes cheap because every target that was
+delivered reads `current` or `up to date` and issues no write. Retries move inside the `GitHub`
+layer if a real run over tens of repositories shows them necessary.
 
 **Idempotence by content, default branch first.** A rerun must not push again when nothing is
 left to deliver. The single-target path already measures the default-branch HEAD before anything

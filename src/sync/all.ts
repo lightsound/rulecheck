@@ -46,7 +46,7 @@ export interface SyncAllResult {
 }
 
 /** Targets are read in parallel up to this many at a time; writes are serialized (D14). */
-export const CONCURRENCY = 3;
+const CONCURRENCY = 3;
 
 export const syncAll = (
   options: SyncAllOptions,

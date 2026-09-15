@@ -4,7 +4,9 @@ import { Effect, Layer } from "effect";
 import { hashBlockBody } from "../src/domain/block.ts";
 import type { GitHub } from "../src/github/client.ts";
 import { renderSyncAll } from "../src/report/sync.ts";
+import { resolvePacks } from "../src/scan/packs.ts";
 import { type SyncAllOptions, type SyncAllResult, syncAll } from "../src/sync/all.ts";
+import { syncTarget } from "../src/sync/sync.ts";
 import { type FakeRepoInput, fakeGitHub } from "./fake-github.ts";
 
 const BODY = "- Respond in Japanese.\n- Use Bun.";
@@ -127,6 +129,10 @@ describe("syncAll", () => {
     expect(github.pulls("acme/modified")).toHaveLength(0);
     expect(github.pulls("acme/foreign")).toHaveLength(0);
     expect(github.calls.filter((c) => c.startsWith("createPullRequest"))).toHaveLength(3);
+    // Three targets read at once (D13); the write lock keeps one repository in its write
+    // sequence at a time, so no two targets' tree/commit/ref/pull request calls interleave.
+    expect(github.maxInFlight()).toBe(3);
+    expect(github.maxWriters()).toBe(1);
     expect(renderSyncAll(first)).toEndWith("7 targets: 3 opened, 1 current, 2 refused, 1 failed");
     expect(renderSyncAll(first)).toMatch(
       /acme\/eligible\s+base\s+eligible\s+opened PR #1 \(https:\/\/github.com\/acme\/eligible\/pull\/1\)/,
@@ -164,6 +170,21 @@ describe("syncAll", () => {
       "base acme/gone failed",
     ]);
     expect(github.calls).toEqual([]);
+  });
+
+  test("without the write lock, concurrent targets interleave their writes (the lock test has teeth)", async () => {
+    const { github, run } = world();
+    const loaded = await run(resolvePacks("acme/agent-rules"));
+    const base = loaded.packs.find((p) => p.id === "base");
+    if (!base) throw new Error("no base pack");
+    await run(
+      Effect.forEach(
+        ["acme/eligible", "acme/outdated"],
+        (repo) => syncTarget({ repo, dryRun: false }, loaded, base),
+        { concurrency: 2 },
+      ),
+    );
+    expect(github.maxWriters()).toBe(2);
   });
 
   test("--pack restricts the run; an unknown pack refuses the whole run", async () => {

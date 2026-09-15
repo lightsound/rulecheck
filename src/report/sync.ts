@@ -72,20 +72,9 @@ export function renderSyncAll(result: SyncAllResult): string {
   return out.join("\n").trimEnd();
 }
 
-const STATUS_LABEL: Record<string, string> = {
-  current: "current",
-  outdated: "outdated",
-  modified: "modified",
-  eligible: "eligible",
-  blocked: "blocked",
-  "not-subscribed": "not subscribed",
-};
-
+/** A `done` row carries its remote status; a refusal names the status in its message. */
 function statusOf(row: SyncAllRow): string {
-  if (row.outcome.kind === "done") {
-    return STATUS_LABEL[row.outcome.result.status.status] ?? row.outcome.result.status.status;
-  }
-  return row.outcome.kind === "refused" ? "refused" : "failed";
+  return row.outcome.kind === "done" ? row.outcome.result.status.status : row.outcome.kind;
 }
 
 function describe(row: SyncAllRow): string {
