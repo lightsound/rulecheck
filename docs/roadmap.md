@@ -131,8 +131,10 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
 - Remaining: after the block is in the repositories used daily (the `personalCopies` line lists
   them), delete the pack import from `~/.claude/CLAUDE.md`, delete the Cursor User Rule copy and
   `/sync-agent-rules`, set Claude Code's `language` setting for third-party repos. Verify with
-  probes (tool-behavior.md method) that nothing loads twice; the `personalCopies` line must be
-  gone from the scan.
+  probes (tool-behavior.md method) that nothing loads twice. The `personalCopies` line must be
+  gone from the scan, and that is necessary, not sufficient: the detector matches whole files
+  and the pack's source path only, so a pack pasted inside a larger personal file goes
+  unreported; the probe is what closes the gap.
 
 ## Step 5: Update fan-out and drift
 

@@ -285,12 +285,14 @@ D3 wired the pack into Cursor as a User Rule copy refreshed by a slash command
 automate it. Researched 2026-09-15 against Cursor's published docs (facts and sources in
 [tool-behavior.md](tool-behavior.md), "User Rules have no headless write path"): User Rules live in
 the Cursor account, are edited only in Customize → Rules or by the in-app agent, are absent from
-the Admin API (which logs `team_rule` events but has no rules endpoint), absent from the `agent`
-CLI (`generate-rule` writes a project `.mdc`), and their legacy on-disk mirror
+the Admin API (it logs `team_rule` events and exposes `/grok-bot/team-rules`, a team-plan
+surface documented for the review bot; nothing addresses a user's rules), absent from the
+`agent` CLI (`generate-rule` writes a project `.mdc`), and their legacy on-disk mirror
 (`state.vscdb`, key `aicontext.personalContext`) is declared stale by Cursor staff now that the
-account is authoritative. Team Rules are dashboard-only as well. So option (c), a headless
-`sync-user-rule`, has no supported target, and option (b), drift detection against an on-disk
-copy, has no safe file to read.
+account is authoritative. Team Rules need a team plan and admin rights and are Cursor-only, so
+they are no channel for a personal pack either. So option (c), a headless `sync-user-rule`, has
+no supported target, and option (b), drift detection against an on-disk copy, has no safe file
+to read.
 
 The structural answer is already in D4 and D5: the repository is the only input every agent
 shares, so the pack reaches Cursor, local and cloud, through the managed block in each
@@ -315,7 +317,10 @@ shrinking benefit. Decision:
   a personal file that equals a pack body, or that is the pack's own source path
   (`packs/<id>/AGENTS.md`) with a different hash, is reported under the pack with the
   repositories in which the pack now loads twice (`personalCopies` in `scan --json`). Two exact
-  signals, no similarity guess, following the precision rule for findings.
+  signals, no similarity guess, following the precision rule for findings. The bound that buys:
+  a pack pasted inside a larger personal file, or wrapped in a managed block there, is not
+  reported, so an empty `personalCopies` is necessary for the removal, not sufficient; the probe
+  run in roadmap Step 4 is what confirms that nothing loads twice.
 
 Considered and rejected: a Cloud Agent environment symlink `/.cursor -> ~/.cursor` plus an
 install script that clones the pack (a staff-acknowledged workaround for the rules lookup; per

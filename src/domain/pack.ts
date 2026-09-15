@@ -241,6 +241,10 @@ function carriesBlock(repo: RepoForDistribution, packId: string): boolean {
  * checkout the import points at is not the pack as loaded). `contentHash` is the sha256 of the
  * trimmed content and the block hash the sha256 of the CRLF-normalized, trimmed body, so they
  * agree for any file with `\n` line endings.
+ *
+ * Not detected, by design: a pack pasted inside a larger personal file, or wrapped in a managed
+ * block there. An empty result is therefore necessary for removing the interim wiring, not
+ * sufficient; the probe run in roadmap Step 4 confirms that nothing loads twice.
  */
 export function findPersonalPackCopies(
   personal: ReadonlyArray<InstructionFile>,

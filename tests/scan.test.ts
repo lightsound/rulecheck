@@ -487,7 +487,7 @@ describe("scan", () => {
     ]);
     const text = renderText(report);
     expect(text).toContain(
-      "! personal layer ~/agent-rules/packs/base/AGENTS.md is the pack source but differs from the pack as loaded (checkout behind or ahead); loads twice in 1 repository carrying the block (acme/blocked).",
+      "! personal layer ~/agent-rules/packs/base/AGENTS.md is the pack source but differs from the pack as loaded (checkout behind or ahead); loads a second, divergent copy in 1 repository carrying the block (acme/blocked).",
     );
     expect(text).toContain("have no headless write path");
   });

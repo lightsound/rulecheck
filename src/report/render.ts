@@ -136,10 +136,11 @@ function describePersonalCopy(copy: PersonalPackCopy): string {
     copy.state === "current"
       ? "equals the pack body"
       : "is the pack source but differs from the pack as loaded (checkout behind or ahead)";
+  const count = copy.doubleLoaded.length;
   const twice =
-    copy.doubleLoaded.length === 0
+    count === 0
       ? "no scanned repository carries the block yet"
-      : `loads twice in ${copy.doubleLoaded.length} ${plural(copy.doubleLoaded.length, "repository", "repositories")} carrying the block (${copy.doubleLoaded.join(", ")})`;
+      : `${copy.state === "current" ? "loads twice" : "loads a second, divergent copy"} in ${count} ${plural(count, "repository", "repositories")} carrying the block (${copy.doubleLoaded.join(", ")})`;
   return `personal layer ${copy.file} ${state}; ${twice}. Remove the personal copy once the block covers the repositories used daily`;
 }
 
