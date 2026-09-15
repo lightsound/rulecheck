@@ -282,8 +282,12 @@ export function pullRequestText(
   status: PackStatusEntry,
 ): { title: string; body: string } {
   const block = pack.files.find((f) => f.kind === "agents-block");
-  const verb = status.status === "outdated" ? "update" : "add";
-  const title = `${COMMIT_PREFIX} ${verb} \`${pack.id}\` instruction block`;
+  const update = status.status === "outdated";
+  const title = `${COMMIT_PREFIX} ${update ? "update" : "add"} \`${pack.id}\` instruction block`;
+  // An update replaces the block in place and leaves the shape of the root pair as it was.
+  const shapeCheck = update
+    ? "its existing block was replaced in place (the shape of the root pair is unchanged)"
+    : "its root pair is `AGENTS.md` canonical (already, or by the changes above)";
   const body = [
     `Managed by rulecheck. This branch is rewritten on every sync; edit the pack \`${pack.id}\`, not this branch.`,
     "",
@@ -295,7 +299,7 @@ export function pullRequestText(
     "Changes:",
     ...plan.actions.map((action) => `- ${action}`),
     "",
-    "Checks passed before this pull request was opened: the repository is subscribed, its root pair is `AGENTS.md` canonical (already, or by the changes above), and the block adds no reference to a script or path that does not exist here.",
+    `Checks passed before this pull request was opened: the repository is subscribed, ${shapeCheck}, and the block adds no reference to a script or path that does not exist here.`,
   ].join("\n");
   return { title, body };
 }

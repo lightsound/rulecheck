@@ -278,7 +278,14 @@ describe("pullRequestText", () => {
     expect(text.body).toContain(`- rev: \`${REV}\``);
     expect(text.body).toContain(`- hash: \`${hashBlockBody(BODY)}\``);
     expect(text.body).toContain("- create AGENTS.md with block `base`");
-    expect(pullRequestText(p, base, status("outdated")).title).toContain("update");
+    expect(text.body).toContain(
+      "its root pair is `AGENTS.md` canonical (already, or by the changes above)",
+    );
+    const update = pullRequestText(p, base, status("outdated"));
+    expect(update.title).toContain("update");
+    // An update never normalizes the pair, so the body must not claim a canonical shape.
+    expect(update.body).toContain("replaced in place (the shape of the root pair is unchanged)");
+    expect(update.body).not.toContain("canonical");
   });
 });
 
