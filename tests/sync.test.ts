@@ -141,6 +141,20 @@ describe("planSync", () => {
     expect(
       planSync(input("agents-imported", { "AGENTS.md": "# P\n", "CLAUDE.md": "# Own\n" })),
     ).toEqual({ reason: "root files do not match shape `agents-imported`; rescan the repository" });
+    // An outdated block that sits in CLAUDE.md would make the update write CLAUDE.md: refused.
+    const oldBlock = `<!-- agent-rules:begin source=base rev=old hash=${hashBlockBody(OLD_BODY)} -->\n${OLD_BODY}\n<!-- agent-rules:end -->`;
+    expect(
+      planSync(
+        input(
+          "agents-imported",
+          { "AGENTS.md": "# P\n", "CLAUDE.md": `# Own\n\n@AGENTS.md\n\n${oldBlock}\n` },
+          { status: status("outdated", "CLAUDE.md") },
+        ),
+      ),
+    ).toEqual({
+      reason:
+        "CLAUDE.md imports AGENTS.md and is left untouched (D16), but the plan would write it; refusing to plan",
+    });
   });
 
   test("claude-only: moves CLAUDE.md content into AGENTS.md and leaves the wrapper behind", () => {

@@ -76,6 +76,15 @@ export function planSync(input: SyncPlanInput): SyncPlan | SyncRefusal {
   }
   if ("reason" in plan) return plan;
 
+  // D16: whatever the plan did, an `agents-imported` CLAUDE.md is not a file the sync writes.
+  if (input.shape === "agents-imported") {
+    const claude = plan.changes.find((c) => ROOT_CLAUDE.includes(c.path as never));
+    if (claude) {
+      return {
+        reason: `${claude.path} imports AGENTS.md and is left untouched (D16), but the plan would write it; refusing to plan`,
+      };
+    }
+  }
   // D15: whatever the plan did, every region another tool owns must read byte for byte as before.
   for (const change of plan.changes) {
     const drift = foreignRegionDrift(change.path, change.before, change.after);

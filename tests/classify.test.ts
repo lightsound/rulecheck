@@ -138,6 +138,10 @@ describe("importsAgentsMd", () => {
   test("inside a multi-line HTML comment is stripped by Claude Code, so it is not an import", () => {
     expect(importsAgentsMd("<!--\n@AGENTS.md\n-->\n")).toBe(false);
     expect(importsAgentsMd("<!-- note\n@AGENTS.md\nend -->\n@AGENTS.md\n")).toBe(true);
+    // A closed comment followed by an opening one on the same line still opens a span.
+    expect(importsAgentsMd("<!-- a --> <!--\n@AGENTS.md\n-->\n")).toBe(false);
+    expect(importsAgentsMd("<!--\nx --> <!--\n@AGENTS.md\n-->\n")).toBe(false);
+    expect(importsAgentsMd("<!--\nx --> y\n@AGENTS.md\n")).toBe(true);
     expect(claudeContentBeyondImport("<!--\n@AGENTS.md\n-->\n@AGENTS.md\n")).toBe(
       "<!--\n@AGENTS.md\n-->",
     );

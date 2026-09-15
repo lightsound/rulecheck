@@ -496,9 +496,17 @@ So the shape is decided by the presence of the import line, not by the length of
 - Only the root `CLAUDE.md` qualifies. A `.claude/CLAUDE.md` with the same line stays
   `both-full`: Claude Code resolves a relative import against the importing file's directory, so
   the line there points at `.claude/AGENTS.md`, not at the root file.
-- The line must sit where Claude Code parses imports: outside fenced code and outside a
-  multi-line HTML comment (block comments are stripped before injection). A single-line comment
-  next to it, such as a region marker, changes nothing.
+- The line must sit where Claude Code parses imports: outside fenced code (documented) and
+  outside a multi-line HTML comment (block comments are stripped before injection; that this
+  happens before import parsing is an inference, marked as such in tool-behavior.md). The
+  comment rule errs on the safe side: wrongly excluding a line yields `both-full` and a D12
+  rewrite, wrongly including one would leave `AGENTS.md` unloaded. A single-line comment next to
+  the line, such as a region marker, changes nothing.
+- The invariant "CLAUDE.md is never a change" holds on the update path too. A block for the pack
+  that sits in an `agents-imported` `CLAUDE.md` (hand-placed; the sync only ever inserts into
+  `AGENTS.md`) reads `current` or `modified` as under D9, but when it is outdated the row is
+  `blocked` at the block ("move the block into AGENTS.md") instead of being rewritten there, and
+  the planner refuses any plan for this shape that names a root `CLAUDE.md`.
 
 Consequence for D12: a `CLAUDE.md` that repeats `AGENTS.md` verbatim next to an import line is
 no longer collapsed into the wrapper; it is `agents-imported` and left alone, so Claude Code keeps

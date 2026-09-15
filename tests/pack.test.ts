@@ -314,6 +314,24 @@ describe("classifyPackStatus", () => {
       status: "outdated",
       message: "rev 2222222 -> 1111111",
     });
+    // A block that sits in the untouched CLAUDE.md cannot be updated there: blocked, not rewritten.
+    const inClaude = repo("acme/canonical", "agents-imported", {
+      blocks: [block("base", OLD_BODY, { file: "CLAUDE.md", line: 12, endLine: 15 })],
+    });
+    expect(classifyPackStatus(inClaude, base)).toEqual({
+      repo: "acme/canonical",
+      pack: "base",
+      status: "blocked",
+      file: "CLAUDE.md",
+      line: 12,
+      message:
+        "block at line 12 is outdated (rev 2222222 -> 1111111); it sits in CLAUDE.md, which the sync leaves untouched because it imports AGENTS.md (D16); move the block into AGENTS.md",
+    });
+    // Current and modified blocks there need no write, so they keep their status.
+    const currentInClaude = repo("acme/canonical", "agents-imported", {
+      blocks: [block("base", BODY, { file: "CLAUDE.md" })],
+    });
+    expect(classifyPackStatus(currentInClaude, base).status).toBe("current");
   });
 
   test("not subscribed", () => {

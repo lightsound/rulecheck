@@ -162,6 +162,16 @@ export function classifyPackStatus(repo: RepoForDistribution, pack: Pack): PackS
     // that rewrite unsafe: the block would be replaced inside a file another tool or a broken
     // marker owns. Current and modified rows need no write, so the marker stays a repo-level note.
     const pending = `block at line ${block.line} is outdated (${revChange(block, pack)})`;
+    // D16: an `agents-imported` CLAUDE.md is never written, so a block that sits there cannot be
+    // updated in place; a human moves it into AGENTS.md first.
+    if (repo.shape === "agents-imported" && ROOT_CLAUDE.has(block.file)) {
+      return {
+        ...base,
+        ...at,
+        status: "blocked",
+        message: `${pending}; it sits in ${block.file}, which the sync leaves untouched because it imports AGENTS.md (D16); move the block into AGENTS.md`,
+      };
+    }
     const issue = repo.blockIssues.find((i) => i.file === block.file);
     if (issue) {
       return {

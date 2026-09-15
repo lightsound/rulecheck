@@ -234,16 +234,18 @@ function classifyLines(content: string): ClassifiedLine[] {
   const lines: ClassifiedLine[] = [];
   let fence: string | null = null;
   let comment = false;
+  // A line leaves a comment open when its last `<!--` comes after its last `-->`.
+  const opensComment = (line: string) => line.lastIndexOf("<!--") > line.lastIndexOf("-->");
   for (const line of content.replace(/\r\n/g, "\n").split("\n")) {
     if (comment) {
       lines.push({ line, inert: true });
-      if (line.includes("-->")) comment = false;
+      if (line.includes("-->")) comment = opensComment(line);
       continue;
     }
     const marker = FENCE.exec(line)?.[1];
     if (fence === null) {
       if (marker) fence = marker;
-      else if (line.includes("<!--") && !line.includes("-->")) comment = true;
+      else if (opensComment(line)) comment = true;
       lines.push({ line, inert: fence !== null || comment });
       continue;
     }
