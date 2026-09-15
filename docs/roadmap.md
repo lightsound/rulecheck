@@ -8,18 +8,28 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
 
 - rulecheck: read-only scan works on `~/ghq` (shape, duplicates, budget, rot detection, personal
   layer). No write path.
-- `lightsound/agent-rules/AGENTS.md`: the personal pack prototype, one file, mixing portable rules
-  with machine facts (`~/ghq` layout, "run rulecheck in lightsound/rulecheck").
+- `lightsound/agent-rules/packs/base/AGENTS.md`: the portable pack `base` (D7 naming),
+  environment-neutral only (Step 1, [agent-rules#1](https://github.com/lightsound/agent-rules/pull/1)).
+  The repository's root `AGENTS.md` instructs agents working in agent-rules itself and is not
+  distributed. Machine facts (`~/ghq` layout, "run rulecheck in lightsound/rulecheck") live in
+  `~/.claude/CLAUDE.md` directly; `agent-rules/machine/CLAUDE.local.example.md` is the template.
 - Interim wiring, to be dismantled in step 4: `~/.claude/CLAUDE.md` imports the pack;
   Cursor User Rule holds a copy synced by `/sync-agent-rules`
   (`~/.cursor/commands/sync-agent-rules.md` symlink). `~/AGENTS.md` and `~/CLAUDE.md` do not exist.
 
-## Step 1: Split the pack (agent-rules, no code)
+## Step 1: Split the pack (agent-rules, no code) — done 2026-09-15
 
 - Move machine facts out of `agent-rules/AGENTS.md` into `~/.claude/CLAUDE.md` directly (machine
   layer, D5). What stays must be true in any repository on any machine.
-- Wrap the remaining body in the managed-block markers so the file *is* the block body's source.
 - Done when: the pack references no path or command outside the target repository.
+- Result: [agent-rules#1](https://github.com/lightsound/agent-rules/pull/1). The pack lives at
+  `packs/base/AGENTS.md`; the root `AGENTS.md` is repo-local and the README is gone. It states that
+  project-specific sections of the destination file take precedence. `extractReferences` on the
+  pack returns nothing, so rot detection cannot flag it in any destination. Machine layer applied
+  on the primary machine; `scan ~/ghq` findings unchanged (3 before, 3 after), personal layer
+  still imports the pack.
+- Deferred to Step 3: wrapping the body in managed-block markers, so that the file *is* the block
+  body's source. The markers land together with the first write path that consumes them.
 
 ## Step 2: Block and Skills detection, distribution report (rulecheck, read-only)
 
