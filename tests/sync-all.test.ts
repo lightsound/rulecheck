@@ -129,7 +129,7 @@ describe("syncAll", () => {
     expect(github.pulls("acme/modified")).toHaveLength(0);
     expect(github.pulls("acme/foreign")).toHaveLength(0);
     expect(github.calls.filter((c) => c.startsWith("createPullRequest"))).toHaveLength(3);
-    // Three targets read at once (D13); the write lock keeps one repository in its write
+    // Three targets read at once (D14); the write lock keeps one repository in its write
     // sequence at a time, so no two targets' tree/commit/ref/pull request calls interleave.
     expect(github.maxInFlight()).toBe(3);
     expect(github.maxWriters()).toBe(1);
