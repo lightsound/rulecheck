@@ -49,6 +49,36 @@ the page fill in (a row per repository as its report arrives; the page reloads w
 `<meta http-equiv="refresh">` while a run is in flight). Without a pack source the page has no
 `Pack distribution` section and says so with a link to the next step.
 
+**Bootstrap: an installation with no pack repository yet.** Until a pack source is registered
+the dashboard is the read-only inventory: shapes, budgets, duplicates, findings, skills, the
+`Next actions` list without pack rows. That is already useful and needs no write permission
+exercised. The onboarding banner offers three ways to get a pack repository:
+
+- **(a) Create a pack repository.** The App publishes a public GitHub template repository
+  (`lightsound/agent-rules-template`: `packs/base/AGENTS.md` as a commented starter,
+  `subscriptions.json` as `{}`, the D23 `Sync packs` workflow included but disabled by a
+  comment, a root `AGENTS.md` explaining the layout). The banner links to GitHub's create page
+  with the template preselected
+  (`https://github.com/new?template_owner=lightsound&template_name=agent-rules-template&owner=<account>&name=agent-rules`),
+  the user clicks `Use this template`, then adds the new repository to the installation (GitHub's
+  install page again, or the link the banner gives) and selects it in the App. The
+  `installation_repositories` webhook makes the new repository appear in the selector without a
+  reload. Three clicks, all of them GitHub's own pages, and the App never holds the permission to
+  create repositories. Least privilege decided this: creating the repository from the App
+  (`POST /repos/{template_owner}/{template_repo}/generate` or `POST /orgs/{org}/repos`) needs
+  `Administration: write` on the installation, a permission that also deletes and transfers
+  every repository the App can see, for one click at onboarding; asking for it through the user
+  token needs the same permission on the App registration. Neither is worth it.
+- **(b) Use an existing repository.** The registration flow below, for a team that already keeps
+  a rules repository; the App shows the `loadPacks` warnings (`subscriptions.json not found`,
+  `no packs/<id>/ directories`) as the checklist of what the repository still lacks.
+- **(c) Derive a starter pack from the installation (post-MVP).** Once the inventory has
+  scanned every `AGENTS.md`, propose a `base` pack from the sections that recur across
+  repositories (the duplicate groups the scan already finds, plus headings shared by most root
+  files), as a pull request to the pack repository that the team edits before merging. Content
+  authoring is out of scope for the CLI (D1) and stays so for the App at MVP; this is a
+  proposal from measured text, and it needs its own decision entry before it is built.
+
 **Register a pack source.** An installation admin enters `owner/repo` (optionally `@branch`).
 The repository must be one of the installation's repositories (the App reads it with the same
 installation token; a source outside the installation is refused with the reason). The App reads
@@ -333,30 +363,50 @@ babysit.
 
 | Concern | Choice | Alternatives |
 | --- | --- | --- |
-| Infrastructure as code | [Alchemy](https://alchemy.run): the Workers, Queues, Durable Objects, D1, Cron Triggers, and secrets are one TypeScript stack (`alchemy.run.ts`, an Effect program, so it is the same language and library as the App and reviewable in the same pull request), with `alchemy plan` / `deploy` / `destroy` and state in the account's Cloudflare-hosted state store (`Cloudflare.state()`, encrypted at rest). Environments are Alchemy stages: `prod` is the stage the webhook URL and domain point at; `dev_<user>` is each developer's own copy (the default stage), and a pull request in the App repository deploys stage `pr-<n>` from GitHub Actions, gets its URL as a comment, and is destroyed when the pull request closes. State and resource names are namespaced by stage, so no environment can touch another's D1 or queue. Secrets (App private key, webhook secret, session key) are set per stage; the GitHub App registration is per stage too (a `prod` App and a `dev` App with different webhook URLs), because one registration has one webhook URL | `wrangler.jsonc` plus `wrangler deploy` (the resources exist as configuration, not as code; per-environment copies are hand-named and secrets are set by hand per environment); Terraform / Pulumi (a second language or a heavier toolchain for six resource types); SST (AWS-first; its Cloudflare support is thinner and it is not Effect) |
+| Infrastructure as code | [Alchemy](https://alchemy.run): the Workers, Queues, Durable Objects, D1, Cron Triggers, and secrets are one TypeScript stack (`alchemy.run.ts`, an Effect program, so it is the same language and library as the App and reviewable in the same pull request), with `alchemy plan` / `deploy` / `destroy` and state in the account's Cloudflare-hosted state store (`Cloudflare.state()`, encrypted at rest). Environments are Alchemy stages: `prod` is the stage the webhook URL and domain point at; `dev_<user>` is each developer's own copy (passed as an explicit `--stage`; Alchemy's own default for `alchemy deploy` is `$ALCHEMY_STAGE` or `live_$USER`), and a pull request in the App repository deploys stage `pr-<n>` from GitHub Actions, gets its URL as a comment, and is destroyed when the pull request closes. State and resource names are namespaced by stage, so no environment can touch another's D1 or queue. Secrets (App private key, webhook secret, session key) are set per stage; the GitHub App registration is per stage too (a `prod` App and a `dev` App with different webhook URLs), because one registration has one webhook URL | `wrangler.jsonc` plus `wrangler deploy` (the resources exist as configuration, not as code; per-environment copies are hand-named and secrets are set by hand per environment); Terraform / Pulumi (a second language or a heavier toolchain for six resource types); SST (AWS-first; its Cloudflare support is thinner and it is not Effect) |
 | Auth | GitHub OAuth through the App's user authorization (one registration, one login button, tokens 8 h); session in a signed cookie holding the user id and the token encrypted with a Worker secret; access recomputed from `GET /user/installations` at sign-in | A separate OAuth App (a second registration to keep in step); email/password (nothing to gain, a password database to protect) |
 
 **Recommendation.** Workers + Queues + Durable Objects + D1 defined and deployed with Alchemy,
 Effect programs as the job bodies, `fetchTransport` for GitHub. The Fly.io and Vercel columns
 are the comparison, not a fallback: Effect v4 on Workers is a stack the owner already runs.
 The queue and the lock are still the two interfaces the App defines for itself (`JobQueue`,
-`WriteLock`), because they are the only places the job model touches the platform.
+`WriteLock`), because they are the only places the job model touches the platform. A broader
+platform comparison (Cloudflare, Vercel, a Prisma-centred stack) is being written separately as
+`docs/platform-comparison.md`; link it here once it lands.
 
-### Technology decisions still open
+### Technology decisions
 
-Small choices that do not change sections 3–5 and are made when the code that needs them is
-written (M1 for most). Each with its default.
+Decided by the owner (2026-09-16); none changes sections 3–5.
 
-| Choice | Default | Alternative |
+| Choice | Decided | Notes |
 | --- | --- | --- |
-| Front-end rendering | Server-rendered HTML from the same string builders as `html.ts`, forms with `POST` and redirects, no client framework; the D21 page is already that | A small framework (Hono JSX, or React server-rendered) once forms outgrow string building |
-| Web framework on Workers | Effect `HttpApi` (`effect/unstable/http`): routes, schema-validated inputs, and the `GitHub` / queue services in one Effect layer, matching the CLI's `effect/unstable/cli` | Hono (smaller, more examples on Workers, but a second request model next to Effect) |
-| D1 access and migrations | Raw SQL through the D1 binding with hand-written, numbered migration files applied by Alchemy on deploy; the schema is small and the queries are few | Drizzle (typed queries and `drizzle-kit` migrations; adopt when the schema passes a dozen tables) |
-| Session storage | Encrypted, signed cookie only (user id, login, token, expiry), no server-side session table | KV or D1 session rows (needed for server-side revocation before token expiry) |
-| Webhook verification | Hand-written HMAC-SHA256 over the raw body with `crypto.subtle`, constant-time compare; twenty lines, no dependency | `@octokit/webhooks` (verification plus typed payloads; the payload types are the argument for it) |
-| Observability | Workers Logs and Traces plus the `runs` table; alert on `failed` rows and signature failures | Sentry (when errors need grouping across installations) |
-| CI/CD | GitHub Actions in the App repository: `bun run check`, then `alchemy deploy --stage pr-<n>` on pull requests and `--stage prod` on `main`; credentials provisioned as code by an Alchemy `github` stack (a scoped Cloudflare API token written as Actions secrets) | Deploy from a laptop (no preview, one machine that can deploy) |
-| Domain | A subdomain of a domain the owner already holds on Cloudflare (`app.<domain>`), managed as a custom domain in the same stack; `workers.dev` for `dev_*` and `pr-*` stages | A new product domain (decide with the name, after M2) |
+| Web framework on Workers | Effect `HttpApi` (`effect/unstable/httpapi`) | Routes, schema-validated inputs, and the `GitHub` / queue services in one Effect layer, matching the CLI's `effect/unstable/cli`. Hono was the alternative (more Workers examples, a second request model next to Effect) |
+| Database access and migrations | D1 with Drizzle | Typed queries from the schema in section 4; `drizzle-kit` generates the numbered migrations, applied on deploy by the Alchemy stack. The schema stays Postgres-portable, which Drizzle keeps easy |
+| Observability | Workers Logs | Plus the `runs` table as the domain-level trace; alerts on `failed` rows above zero in a run and on webhook signature failures. Sentry is added only if errors need grouping across installations |
+| CI/CD | GitHub Actions + Alchemy deploy | `bun run check`, then `alchemy deploy --stage pr-<n>` on pull requests and `--stage prod` on `main`; credentials provisioned as code by an Alchemy `github` stack (a scoped Cloudflare API token written as Actions secrets). Revisit if Cloudflare ships a first-party build and deploy pipeline for Workers ("Cloudflare Artifacts") |
+| Session storage | Decided at implementation | Candidates: encrypted, signed cookie only (no server-side table; revocation waits for the 8 h expiry), or KV / D1 session rows (server-side revocation). The choice is local to the auth module |
+| Domain | Later | `workers.dev` for every stage until a product name exists; the custom domain is one resource in the same Alchemy stack when it does |
+| Webhook verification | Hand-written HMAC-SHA256 over the raw body with `crypto.subtle`, constant-time compare | Twenty lines, no dependency; `@octokit/webhooks` is the alternative when its typed payloads become worth the package |
+
+### Front-end library: open, candidates on Workers
+
+The D21 page is server-rendered HTML from string builders, and M1 serves it as is. The owner
+wants room for a front-end library for the UI that follows, so the choice is not made here; it
+is open question 8. Candidates, each already deployable on Workers:
+
+| Candidate | For | Against |
+| --- | --- | --- |
+| SolidStart / Solid 2 | Fine-grained reactivity, small bundles, SSR + islands on Workers; the owner maintains `lightsound/solid2-agent-kit`, so the agent tooling and conventions exist | Solid 2 is pre-release; smaller ecosystem for tables and forms; fewer Effect integrations |
+| TanStack Start | Type-safe routing and loaders, SSR on Workers, React ecosystem for components; pairs with TanStack Table for the matrix and rows | React's bundle and rendering model for pages that are mostly static tables; framework still young |
+| React Router (Remix) | Mature SSR and forms model (`action` / `loader`) that fits the App's `POST` + redirect flows; first-class Workers adapter | React as above; the D21 no-script pages become a React tree to maintain |
+| Astro islands | Static-first pages with islands only where interaction is needed (the checkbox matrix, the run banner); SSR adapter for Workers; any island framework | Two component models in one App if islands use a second framework; less suited if most pages become interactive |
+| HTMX-style progressive enhancement | Keeps `renderHtml`'s string builders as the whole rendering path; interaction by swapping server-rendered fragments; no build step, no hydration | No component model for a later design system; the fragments are still hand-built strings |
+
+Constraint every candidate must satisfy: the words on the page stay the ones `labels.ts` prints
+and `html.ts`'s sections stay the source of the report markup (exported as data or as
+components in M2), so the D21 design system is carried, not re-implemented. M1 serves the
+`renderHtml` page inside the chosen framework's shell if the choice is made before M1 starts;
+otherwise behind `HttpApi` as a plain response, which every candidate above can wrap later.
 
 ## 7. Security
 
@@ -406,7 +456,7 @@ the unit is a week because the milestones gate on each other, not because any on
 
 | Milestone | Done when | Weeks |
 | --- | --- | --- |
-| M0: design accepted | This document merged with the open questions answered or defaulted; D25 recorded; the App registered on GitHub (name, permissions, webhook URL to a stub), one registration per stage | 0.5 |
+| M0: design accepted | This document merged with the open questions answered or defaulted; D25 recorded; the App registered on GitHub (name, permissions, webhook URL to a stub), one registration per stage; the template repository `lightsound/agent-rules-template` published | 0.5 |
 | M1: install and read-only dashboard | The transport split and `fetchTransport` land in rulecheck (with `fake-github.ts` coverage); the App repository exists and depends on rulecheck at a sha; the Alchemy stack deploys `prod`, `dev_*`, and `pr-*` stages from GitHub Actions; install → `scan-installation` → Overview page served from `repo_reports`; `push` rescans one repository; daily rescan. Dogfood on `lightsound` | 3 |
 | M2: sync and subscriptions | Pack source registration; `sync-target` on pack push, `Sync now`, dry run; runs and audit; `src/sync/subscribe.ts` in rulecheck with `fake-github.ts` coverage and its decision entry; Pack & subscriptions page with the subscriptions matrix writing D25 pull requests through it; Repository page; `html.ts` sections exported; the D23 workflow in agent-rules switched off once the App has opened the next real pull requests | 3 |
 | M3: organizations and billing | Pricing decided (section 8), plan column and repository gate live; Stripe checkout and portal; installation switcher for users in several organizations; uninstall lifecycle; the truncated-tree fallback; status page and the alerts in section 6 | 3 |
@@ -438,6 +488,10 @@ Each with the default this document assumes.
    requests); running both would race on the same tool-owned branches.
 7. **Retention.** Default: reports 90 days, snapshots, runs, and audit 12 months, rows deleted
    30 days after uninstall. Alternative: keep everything until the customer deletes it.
+8. **Front-end library.** Candidates and trade-offs in section 6 ("Front-end library: open").
+   No default is set: the owner picks. What the design fixes regardless: `html.ts` stays the
+   source of the report markup, labels come from `labels.ts`, and the decision lands before M2
+   (M1 serves `renderHtml` either way).
 
 ## Decisions
 
@@ -451,7 +505,9 @@ better option that produced nothing new.
 | Hosting | Cloudflare Workers + Queues + Durable Objects, Cron Triggers for the daily runs; Effect v4 on Workers is a stack the owner already runs, so no fallback is planned | Fly.io Bun container (full reuse, a server to run); Vercel functions plus a queue service (two vendors for one job model); Deno Deploy (Deno, a third runtime; no queue with retries) | 2 |
 | Infrastructure as code | Alchemy: one Effect-based TypeScript stack for every Cloudflare resource and secret; stages `prod` / `dev_<user>` / `pr-<n>`; deployed from GitHub Actions with credentials provisioned as code (decided by the owner) | `wrangler.jsonc` + `wrangler deploy`; Terraform / Pulumi; SST | decided by owner, n/a |
 | Pricing | Deferred to after M2; the design fixes only the `plan` column, the repository gate, and the over-limit rule (decided by the owner) | a placeholder tier table now (removed: numbers before the first buyer conversation anchor the wrong thing) | decided by owner, n/a |
-| Open technology choices | Listed under "Technology decisions still open" with a default each, decided when the code that needs them is written | decide all now (the design would fix choices no section depends on) | 1 |
+| Technology decisions | Effect `HttpApi`; D1 + Drizzle; Workers Logs; GitHub Actions + Alchemy deploy; session storage at implementation; domain later (decided by the owner) | Hono; raw SQL; Sentry; laptop deploys | decided by owner, n/a |
+| Front-end library | Left open (open question 8) with five candidates compared on Workers; `html.ts` remains the source of the report markup whatever is chosen | pick server-rendered strings for good (closes the door the owner wants open); pick one now (the owner's call) | 1 |
+| Bootstrap without a pack repository | Read-only inventory until a source is registered; (a) a public GitHub template repository the user instantiates with `Use this template` via a prefilled `github.com/new` link, then adds to the installation; (b) an existing repository; (c) a derived starter pack, post-MVP | the App creating the repository through the installation or user token (`Administration: write` on every visible repository for one onboarding click); the App pushing starter files into an empty repository the user created (`Contents: write` suffices, but the user still creates the repository, so the template saves the same click with fewer bytes of ours in the flow) | 2 |
 | Database | D1, schema kept Postgres-portable | Neon Postgres (right when multi-region or large joins appear, not now); Durable Object SQLite storage per installation (no cross-installation query for the operator, no single backup) | 2 |
 | Job model | One queue message per unit of work (`scan-installation`, `scan-repository`, `sync-target`), idempotent by key; a run groups messages; a Durable Object per installation is the D14 write lock | `syncAll` as one message (a 200-target run inside one 15-minute invocation, no partial progress); a Durable Object per installation running the whole sync (single-threaded, so no read parallelism); Workflows (durable steps, but a step per target is the queue with more ceremony) | 2 |
 | Scan unit | Full scan mounts every repository of the installation into one snapshot and runs `scan` once (duplicates and counts come out unchanged); a push rescans one repository and duplicates are recomputed from stored hashes | one `scan` per repository always (cross-repository duplicates need a second implementation); full rescan on every push (3,000 calls per push at 200 repositories) | 2 |
