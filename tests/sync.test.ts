@@ -388,6 +388,15 @@ describe("pullRequestText", () => {
     expect(update.body).toContain("replaced in place (the shape of the root pair is unchanged)");
     expect(update.body).not.toContain("canonical");
   });
+
+  test("links the automated run only when a run URL is given", () => {
+    const p = plan(input("none", {}));
+    const url = "https://github.com/acme/agent-rules/actions/runs/42";
+    expect(pullRequestText(p, base, status("eligible")).body).not.toContain("Written by");
+    expect(pullRequestText(p, base, status("eligible"), url).body).toEndWith(
+      `Written by [this run](${url}).`,
+    );
+  });
 });
 
 describe("unifiedDiff", () => {

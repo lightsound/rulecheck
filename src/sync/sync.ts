@@ -37,6 +37,8 @@ export interface SyncTargetOptions {
   /** Branch to base the change on; the repository's default branch when null. */
   readonly base?: string | null;
   readonly dryRun: boolean;
+  /** `--run-url`: the automated run issuing the write, linked from the pull request body (D23). */
+  readonly runUrl?: string | null;
   /**
    * Serializes the write calls of concurrent targets (D14): GitHub asks for content-creating
    * requests not to run concurrently. Reads run in parallel regardless.
@@ -334,6 +336,7 @@ const deliver = (
       plan,
       pack,
       status: before.entry,
+      runUrl: options.runUrl ?? null,
     });
     const gated = options.writeLock ? options.writeLock.withPermits(1)(writing) : writing;
     const { created, ...written } = yield* gated;
@@ -446,6 +449,7 @@ interface WriteInput {
   readonly plan: SyncPlan;
   readonly pack: Pack;
   readonly status: PackStatusEntry;
+  readonly runUrl: string | null;
 }
 
 /** The only function in rulecheck that issues GitHub writes. Every check has run by now. */
@@ -455,8 +459,8 @@ const write = (
   input: WriteInput,
 ): Effect.Effect<{ commit: string; pullRequest: PullRequest; created: boolean }, GitHubError> =>
   Effect.gen(function* () {
-    const { baseSha, base, branch, plan, pack, status } = input;
-    const text = pullRequestText(plan, pack, status);
+    const { baseSha, base, branch, plan, pack, status, runUrl } = input;
+    const text = pullRequestText(plan, pack, status, runUrl);
     const baseCommit = yield* github.getCommit(target, baseSha);
     const tree = yield* github.createTree(
       target,

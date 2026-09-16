@@ -11,6 +11,8 @@ import {
 /**
  * `GitHub` implemented over the GitHub CLI: every operation is one `gh api` call, so
  * authentication, hosts, and tokens stay with `gh auth` and rulecheck never holds a credential.
+ * `gh` is spawned with this process's environment, so a `GH_TOKEN` variable (the form GitHub
+ * Actions uses, D23) authenticates it without any `gh auth login` state.
  */
 
 export interface GhResult {
@@ -62,7 +64,7 @@ export function makeGh(run: GhRunner): GitHubService {
           new GitHubError({
             operation,
             status: null,
-            message: `could not run gh (${String(cause)}); install the GitHub CLI and run \`gh auth login\``,
+            message: `could not run gh (${String(cause)}); install the GitHub CLI and run \`gh auth login\` or set GH_TOKEN`,
           }),
       });
       if (result.exitCode !== 0) {

@@ -306,11 +306,16 @@ export function isRulecheckCommit(message: string): boolean {
   return message.startsWith(COMMIT_PREFIX);
 }
 
-/** Title and body of the pull request that carries a plan. */
+/**
+ * Title and body of the pull request that carries a plan. `runUrl` names the automated run that
+ * issued the write (a GitHub Actions run, D23) so a reviewer can open its log from the pull
+ * request; omitted for a run from a developer's shell.
+ */
 export function pullRequestText(
   plan: SyncPlan,
   pack: Pack,
   status: PackStatusEntry,
+  runUrl: string | null = null,
 ): { title: string; body: string } {
   const block = pack.files.find((f) => f.kind === "agents-block");
   const update = status.status === "outdated";
@@ -331,6 +336,7 @@ export function pullRequestText(
     ...plan.actions.map((action) => `- ${action}`),
     "",
     `Checks passed before this pull request was opened: the repository is subscribed, ${shapeCheck}, and the block adds no reference to a script or path that does not exist here.`,
+    ...(runUrl === null ? [] : ["", `Written by [this run](${runUrl}).`]),
   ].join("\n");
   return { title, body };
 }
