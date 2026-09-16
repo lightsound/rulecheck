@@ -906,11 +906,13 @@ that changes `subscriptions.json`, on the tool-owned branch `rulecheck/subscript
 D10 ownership check (tip commit prefixed `chore(agent-rules):`), one open pull request carrying
 every pending change; the App never commits to a default branch. Subscribing a repository
 therefore takes two pull requests, one to the pack repository and one into the subscriber. The
-pack repository must be inside the App's installation so the App holds `Contents: write` on it.
-This is the second write path after `sync` (D10) and, like it, writes only through the `GitHub`
-service as a pull request; a pull-style CLI command that opens the same pull request from inside
-a repository is listed in the design as a candidate and needs its own entry before it is built.
-Nothing in the CLI changes with this entry.
+pack repository must be inside the App's installation so the App holds `Contents: write` on it
+(the design's open question 2; this entry records its default and is amended if the owner
+answers otherwise). The writer is rulecheck code, `src/sync/subscribe.ts`, so `src/sync/` stays
+the only write path and the `fake-github.ts` rule applies; it writes only through the `GitHub`
+service as a pull request, and it gets its own entry when it is built (M2). A pull-style CLI
+command that opens the same pull request from inside a repository is listed in the design as a
+candidate calling the same function. Nothing in the CLI changes with this entry.
 
 | Decision | Chosen | Alternatives considered | Settled in round |
 | --- | --- | --- | --- |

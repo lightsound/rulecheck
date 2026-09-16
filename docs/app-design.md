@@ -79,8 +79,8 @@ the user's own `gh` authentication, as `sync` does today. Either way the command
 dashboard flow ends: a subscription pull request open on the pack repository, and, once it
 merges, the block's pull request arrives by push. Distribution and status stay the App's job;
 the command only shortens the first step for a developer who is in the repository already. It
-is the third write path candidate after `sync` and D25 and needs its own decision entry before
-it is built.
+adds no writer of its own: it calls the D25 subscriptions writer (section 4), and needs its own
+decision entry before it is built.
 
 **Sync.** Three triggers, one code path (`syncTarget`, D10; the fan-out rule in `AGENTS.md`
 holds: no check lives outside it):
@@ -169,6 +169,15 @@ permission. The mitigations are structural: the only code that issues a write is
 both through the `GitHub` service, and every write is a row in the audit log with the pull
 request URL. The App's user-facing pages state this in the same words.
 
+**Where the D25 writer lives.** In rulecheck, not in the App: `src/sync/subscribe.ts`
+(measure the pack repository's `subscriptions.json` at the default-branch HEAD, plan the edit as
+a pure function in `src/domain`, write the branch and pull request under the D10 ownership
+check), tested against `tests/fake-github.ts` like `sync`. The App calls it from the checkbox
+job; the candidate `rulecheck subscribe` command (section 2) calls the same function from a
+checkout. One implementation, so the CLI and the App cannot disagree on what a subscription
+pull request contains, and `AGENTS.md`'s rule that `src/sync/` is the only write path keeps
+holding. It is built in M2 and gets its decision entry then.
+
 ### Jobs
 
 Three kinds of job, each a message on one queue, each idempotent by its key so a redelivered
@@ -176,8 +185,8 @@ webhook or a retried message does no second write:
 
 | Job | Trigger | Key | Work | GitHub calls |
 | --- | --- | --- | --- | --- |
-| `scan-installation` | install, source registered, daily schedule, `Rescan` button | `(installation, requested sha set)` | One `Snapshot` mounting every repository at its default-branch HEAD (`/github.com/<owner>/<repo>` each), one `scan("/", { packs })` call, so cross-repository duplicates and the per-pack counts come out of the unchanged pipeline; stores one `RepoReport` per repository and the distribution entries | per repository: `getRepository`, `getRef`, `getCommit`, `getTree`, then one `getBlob` per file the scan reads (root pair, rule files, nested `AGENTS.md`, `package.json` for the script check, `SKILL.md`, `skills-lock.json`); typically 6–15 |
-| `scan-repository` | `push` to a default branch (subscriber or not), `repository` events | `(installation, repo, head sha)` | Same pipeline over one repository; the installation's duplicates are recomputed from the stored `contentHash` values without refetching the others | 6–15 |
+| `scan-installation` | install, source registered, daily schedule, `Rescan` button | `(installation, requested sha set)` | One `repositorySnapshot` per repository at its default-branch HEAD, each attempted on its own; the ones that succeed are merged into one `Snapshot` (`/github.com/<owner>/<repo>` each) and `scan("/", { packs })` runs once over it, so cross-repository duplicates and the per-pack counts come out of the unchanged pipeline; stores one `RepoReport` per measured repository and the distribution entries. A repository whose snapshot could not be built (empty repository: no default-branch ref; removed, transferred, or archived mid-run: 404; truncated tree; a 5xx after the transport's retry) is left out of the snapshot and gets a `scan_error` (message, time) on its `repositories` row instead, shown as an issue on its repository row (`could not be measured: <reason>`) and excluded from the counts; the other repositories scan normally. The word is a row-level failure outside the status model, like `failed` for a sync row, and is listed as such in `status-model.md` when it is built | per repository: `getRepository`, `getRef`, `getCommit`, `getTree`, then one `getBlob` per file the scan reads (root pair, rule files, nested `AGENTS.md`, `package.json` for the script check, `SKILL.md`, `skills-lock.json`); typically 6–15 |
+| `scan-repository` | `push` to a default branch (subscriber or not), `repository` events | `(installation, repo, head sha)` | Same pipeline over one repository, same `scan_error` handling; the installation's duplicates are recomputed from the stored `contentHash` values without refetching the others (a repository without a stored report contributes nothing until it has one) | 6–15 |
 | `sync-target` | `push` to the pack repository (one message per `subscriptions.json` target), `Sync now`, daily dry run | `(installation, repo, pack, pack sha, dry-run flag)` | `syncTarget` unchanged: measure, plan, measure, write. `writeLock` is the per-installation serializer below | reads as `scan-repository`, plus for a write: `getRef`, `getCommit`, `createTree`, `createCommit`, `setRef`, `listOpenPullRequests`, `createPullRequest` or `updatePullRequest` |
 
 A **run** groups the messages one trigger produced (one `sync` run per pack push, one `scan`
@@ -231,14 +240,19 @@ What must change in `src/github` (small, and useful to the CLI too):
 2. **Installation token provider.** `installationToken(appId, privateKey, installationId)`: an
    RS256 JWT signed with WebCrypto (`crypto.subtle`, available on Bun, Node, and workerd), `POST
    /app/installations/{id}/access_tokens`, cached until five minutes before `expires_at`.
+   GitHub hands out the App private key as PKCS#1 (`BEGIN RSA PRIVATE KEY`) and
+   `crypto.subtle.importKey` takes RSA keys as `pkcs8` only, so the key is converted once
+   (`openssl pkcs8 -topk8 -nocrypt`) before it is stored as the secret; the signer refuses a
+   PKCS#1 header with a message that names the command.
 3. **Rate-limit handling** in `fetchTransport` as described above. `GitHubError` gains
    `retryAfter: number | null`; nothing else in the interface changes.
 4. **Truncated trees.** `repositorySnapshot` refuses a tree the API truncates (about 100,000
    entries). The CLI never met one; a customer might. M2 adds a fallback that lists the root and
    the directories rulecheck reads (`.cursor/rules`, `.claude`, `.agents/skills`, …)
    non-recursively and marks the report `partial` (nested `AGENTS.md` and `missing-path`
-   verification are then incomplete and say so). Until then such a repository is a row with an
-   issue, not a crash.
+   verification are then incomplete and say so). Until then such a repository is a `scan_error`
+   row (job table above), not a failed run: snapshot assembly is per repository, so one
+   unreadable repository never aborts the others.
 
 `src/main.ts` (`BunServices`, `BunRuntime`) is the CLI's entry and is not reused; the App has its
 own entry that provides `Path`, the snapshot `FileSystem` per job, and `GitHub` over
@@ -384,7 +398,7 @@ the unit is a week because the milestones gate on each other, not because any on
 | --- | --- | --- |
 | M0: design accepted | This document merged with the open questions answered or defaulted; D25 recorded; the App registered on GitHub (name, permissions, webhook URL to a stub) | 0.5 |
 | M1: install and read-only dashboard | The transport split and `fetchTransport` land in rulecheck (with `fake-github.ts` coverage); the App repository exists and depends on rulecheck at a sha; install → `scan-installation` → Overview served from `repo_reports`; `push` rescans one repository; daily rescan; the Effect-on-workerd spike passed or the fallback chosen. Dogfood on `lightsound` | 3 |
-| M2: sync and subscriptions | Pack source registration; `sync-target` on pack push, `Sync now`, dry run; runs and audit; Pack source screen with the subscriptions matrix writing D25 pull requests; Repository detail; `html.ts` sections exported; the D23 workflow in agent-rules switched off once the App has opened the next real pull requests | 3 |
+| M2: sync and subscriptions | Pack source registration; `sync-target` on pack push, `Sync now`, dry run; runs and audit; `src/sync/subscribe.ts` in rulecheck with `fake-github.ts` coverage and its decision entry; Pack source screen with the subscriptions matrix writing D25 pull requests through it; Repository detail; `html.ts` sections exported; the D23 workflow in agent-rules switched off once the App has opened the next real pull requests | 3 |
 | M3: organizations and billing | Plan table and repository gate; Stripe checkout and portal; installation switcher for users in several organizations; uninstall lifecycle; the truncated-tree fallback; status page and the alerts in section 6 | 3 |
 
 Total about ten weeks to a chargeable product. M1 is the milestone with the technical risk
@@ -399,9 +413,9 @@ Each with the default this document assumes.
    so the "dependencies resolved afresh" concern is moot), and rulecheck adds an `exports` map
    in M1. Alternative: an `app/` workspace in this repository, which makes the App public.
 2. **Must the pack source be inside the installation?** Default: yes (one token, one permission
-   set, the D25 write has what it needs). Alternative: a public pack repository outside the
-   installation, read anonymously, with subscriptions then necessarily in the App (contradicts
-   D25).
+   set, the D25 write has what it needs); D25 records this default and is amended if the answer
+   changes. Alternative: a public pack repository outside the installation, read anonymously,
+   with subscriptions then necessarily in the App (contradicts D25).
 3. **May an admin commit a subscription change straight to the pack repository's default
    branch?** Default: no; always a pull request (D6). Alternative: a per-source opt-in when the
    branch has no protection, for solo installations.
@@ -433,6 +447,8 @@ better option that produced nothing new.
 | Where retries live | In `fetchTransport`: `retry-after` honored, one retry on secondary limit, job delayed below a remaining-calls floor | in the job runner (loses the header information); in `syncTarget` (D14 named the GitHub layer) | 1 |
 | App code location | Private repository depending on rulecheck at a sha; rulecheck gains an `exports` map (open question 1) | `app/` workspace here (public App code); npm publish (a version to bump for one consumer; D23's argument still holds) | 2 |
 | Pull-style onboarding | A candidate CLI command (`rulecheck subscribe <owner>/<pack-repo> --pack <id>`, name open) run inside a repository, opening the D25 subscription pull request directly or through the App when it is installed; documented, not scheduled, needs its own decision entry | make it the only subscription path (a developer must be in the repository; an admin subscribing twenty repositories wants the matrix); have it write the subscriber's block directly (skips the pack repository, so the CLI and the App would disagree on who is subscribed); a GitHub Action in the subscriber (a workflow per repository to onboard one line) | 1 |
+| Per-repository failure in a full scan | Snapshots are built per repository; a failure becomes a `scan_error` on that repository's row (a word outside the status model, glossary-listed when built) and the rest scan normally | one snapshot, one failure aborts the run (the CLI's behavior for one target; unacceptable over 200 repositories); a synthetic `RepoReport` with shape `none` (lies about the repository) | 1 |
+| Where the D25 writer lives | rulecheck `src/sync/subscribe.ts`, pure plan in `src/domain`, `fake-github.ts` tests; called by the App and by the candidate CLI command | App-only code (two writers once the CLI command exists, and outside the `fake-github.ts` rule); the App calling the CLI as a process (no `Bun.spawn` on Workers) | 1 |
 | Pack source scope | One source per installation, inside the installation | several sources (a merge order between sources nobody asked for); a source outside the installation (open question 2) | 1 |
 | Overview in M1 | `renderHtml` output served as is under an App header | rebuilding the page as components first (three screens' worth of work before anything is live) | 1 |
 | Manual sync control | `Dry run` is the default state of the button; a live run is a second, confirmed action | one `Sync` button (a live write one click away); no manual trigger (a missed webhook then waits for the daily run) | 1 |

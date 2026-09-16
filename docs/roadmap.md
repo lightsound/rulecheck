@@ -206,6 +206,7 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
 - Later: GitHub App + webhook so status updates without a local tree; the web/desktop UI on top.
   The `--html` page (D19–D22) is the static preview of that view: the same numbers, next
   actions, matrix, and rows from one scan, for judging whether the live version is worth building.
+  Designed in [app-design.md](app-design.md); see Step 6's "Later" for the state.
 
 ## Step 6: Automatic sync from the pack repository — workflow landed 2026-09-16, secret pending
 
@@ -234,8 +235,9 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
   token's repository list, or its row reads `failed` and the run exits 1.
 - Later: a GitHub App replaces the PAT (installation token per run, writes attributed to the
   app) when the tool leaves the single-owner phase; it is the same App the dashboard's webhook
-  needs. Its MVP design is [app-design.md](app-design.md) (D25; nothing built yet). Candidates not built now: a nightly `schedule` as a safety net, a `pull_request` dry
-  run on pack changes, the `--html` page as a run artifact.
+  needs. Its MVP design is [app-design.md](app-design.md) (D25; nothing built yet). Candidates
+  not built now: a nightly `schedule` as a safety net, a `pull_request` dry run on pack
+  changes, the `--html` page as a run artifact.
 
 ## Deferred: Skills distribution (D18, 2026-09-16)
 
