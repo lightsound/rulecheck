@@ -66,7 +66,7 @@ exercised. The onboarding banner offers three ways to get a pack repository:
   reload. Three clicks, all of them GitHub's own pages, and the App never holds the permission to
   create repositories. Least privilege decided this: creating the repository from the App
   (`POST /repos/{template_owner}/{template_repo}/generate` or `POST /orgs/{org}/repos`) needs
-  `Administration: write` on the installation, a permission that also deletes and transfers
+  `Administration: write` on the installation, a permission that also deletes and reconfigures
   every repository the App can see, for one click at onboarding; asking for it through the user
   token needs the same permission on the App registration. Neither is worth it.
 - **(b) Use an existing repository.** The registration flow below, for a team that already keeps
@@ -456,7 +456,7 @@ the unit is a week because the milestones gate on each other, not because any on
 
 | Milestone | Done when | Weeks |
 | --- | --- | --- |
-| M0: design accepted | This document merged with the open questions answered or defaulted; D25 recorded; the App registered on GitHub (name, permissions, webhook URL to a stub), one registration per stage; the template repository `lightsound/agent-rules-template` published | 0.5 |
+| M0: design accepted | This document merged with the open questions answered or defaulted (question 8 excepted, due before M2); D25 recorded; the App registered on GitHub (name, permissions, webhook URL to a stub), one registration per stage; the template repository `lightsound/agent-rules-template` published | 0.5 |
 | M1: install and read-only dashboard | The transport split and `fetchTransport` land in rulecheck (with `fake-github.ts` coverage); the App repository exists and depends on rulecheck at a sha; the Alchemy stack deploys `prod`, `dev_*`, and `pr-*` stages from GitHub Actions; install → `scan-installation` → Overview page served from `repo_reports`; `push` rescans one repository; daily rescan. Dogfood on `lightsound` | 3 |
 | M2: sync and subscriptions | Pack source registration; `sync-target` on pack push, `Sync now`, dry run; runs and audit; `src/sync/subscribe.ts` in rulecheck with `fake-github.ts` coverage and its decision entry; Pack & subscriptions page with the subscriptions matrix writing D25 pull requests through it; Repository page; `html.ts` sections exported; the D23 workflow in agent-rules switched off once the App has opened the next real pull requests | 3 |
 | M3: organizations and billing | Pricing decided (section 8), plan column and repository gate live; Stripe checkout and portal; installation switcher for users in several organizations; uninstall lifecycle; the truncated-tree fallback; status page and the alerts in section 6 | 3 |
@@ -466,7 +466,8 @@ two pull requests per subscription); M3 the commercial one (pricing is decided t
 
 ## 10. Open questions for the owner
 
-Each with the default this document assumes.
+Each with the default this document assumes, except question 8, which the owner chose to leave
+without one; M0 accepts it open, and it is due before M2 starts.
 
 1. **Where does the App code live?** Default: a private repository `lightsound/rulecheck-app`
    that depends on `rulecheck` at a commit sha (D23's pinning method; `effect` is exact-pinned,
