@@ -892,6 +892,42 @@ another `.git` owns. `walk` already knew both facts and only lacked the rule tha
 boundary wins. Stopping at the inner `.git` is that rule, so the problem dissolves at the walk
 and nothing downstream needs to know a repository was nested.
 
+## 2026-09-16 D25: For the hosted App, the pack repository's files stay the source of truth; its database is a cache
+
+[app-design.md](app-design.md) designs the GitHub App MVP. Its one decision that changes what
+rulecheck writes: `subscriptions.json` and `packs/**` on the pack repository's default branch
+remain canonical for the App as they are for the CLI and the D23 workflow. The App's database
+holds a cache of those files keyed by commit sha, plus the history the App alone produces (status
+snapshots, runs, audit). Every cache row is reproducible from GitHub; dropping the database loses
+history, never configuration.
+
+Consequences: a subscription edit made in the App's UI changes `subscriptions.json` in the pack
+repository, never the database alone. How it lands is a per-installation setting,
+`subscriptionChanges`: `pull-request` (the default) opens a pull request on the tool-owned branch
+`rulecheck/subscriptions`, under the D10 ownership check (tip commit prefixed
+`chore(agent-rules):`), one open pull request carrying every pending change, so subscribing a
+repository takes two pull requests, one to the pack repository and one into the subscriber;
+`direct-commit`, meant for solo accounts, writes one commit on the pack repository's default
+branch as a fast-forward-only update (no force; when the branch moved between read and write the
+writer measures and plans again from the new head once, and a second rejection is `refused`;
+branch protection still applies), so the block's pull request follows at once. Under either value
+a subscriber repository is written only through the D10 pull request. The pack repository must be
+inside the App's installation (confirmed by the owner): the installation token reads and writes
+it, and a source outside would need a second credential. The writer is rulecheck code,
+`src/sync/subscribe.ts`, so `src/sync/` stays the only write path and the `fake-github.ts` rule
+applies; it writes only through the `GitHub` service, and it gets its own entry when it is built
+(M2). A pull-style CLI command that makes the same change from inside a repository is listed in
+the design as a candidate calling the same function. Nothing in the CLI changes with this entry.
+
+| Decision | Chosen | Alternatives considered | Settled in round |
+| --- | --- | --- | --- |
+| Source of truth for the App | Files in the pack repository; the database is a sha-keyed cache plus the App's own history | App database canonical with a generated file for the CLI (a second configuration store and an export the CLI must trust, roles to rebuild, branch protection lost); both writable with a merge rule (the conflict the D9 hash exists to detect, moved to configuration) | 2 |
+| How a UI edit lands in the file | Per-installation `subscriptionChanges`: `pull-request` default, `direct-commit` for solo accounts; subscribers never written directly (decided by the owner) | pull request only (a review of one's own list is a formality for a solo account) | decided by owner, n/a |
+
+**Structural check.** The constraint is "one configuration, many readers" (CLI, workflow, App).
+It dissolves only if all three read one place, and the one place they already read is the pack
+repository; a database in front of it would be the second place, a cache behind it is not.
+
 ## Recording rule
 
 Add an entry here whenever a decision changes what rulecheck writes, what it reports, or which
