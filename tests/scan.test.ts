@@ -6,6 +6,7 @@ import { BunServices } from "@effect/platform-bun";
 import { Effect } from "effect";
 import { hashBlockBody } from "../src/domain/block.ts";
 import { computeSkillHash } from "../src/domain/skills.ts";
+import { renderHtml } from "../src/report/html.ts";
 import { renderText } from "../src/report/render.ts";
 import { displayName, scan } from "../src/scan/scan.ts";
 import { walk } from "../src/scan/walk.ts";
@@ -387,6 +388,15 @@ describe("scan", () => {
     expect(text).toContain("AGENTS.md:1  another tool marks the whole file");
     expect(text).toContain("AGENTS.md:7-9");
     expect(text).toContain("MODIFIED");
+
+    // The HTML report renders the same report with the same words (details in html.test.ts).
+    const html = renderHtml(report, { version: "test" });
+    expect(html).toContain("<h2>Pack distribution</h2>");
+    expect(html).toContain('<span class="chip status-blocked">blocked</span>');
+    expect(html).toContain("AGENTS.md:1</span> another tool marks the whole file");
+    expect(html).toContain('<span class="tag tag-modified">MODIFIED</span>');
+    expect(html).toContain('<td class="mono">.agents/skills/review</td>');
+    expect(html).not.toContain("<!-- managed by ruler");
   });
 
   test("an unreadable subscriptions.json is a warning, not silence", async () => {
