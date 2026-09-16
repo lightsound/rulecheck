@@ -41,6 +41,7 @@ Health check for AI coding agent instruction files (`AGENTS.md`, `CLAUDE.md`, `.
 - `docs/status-model.md` the glossary of the distribution state model (shape, normalization, pack status, sync outcome): identifier, label, definition, transitions, and the command that surfaces each, plus the repo × pack lifecycle. Read it before touching a status, a label, or a `--json` field.
 - `docs/roadmap.md` ordered next steps with done criteria and the current wiring state. Read it first in a new session; update it when a step finishes.
 - `docs/landscape.md` dated survey of overlapping tools and vendor features, with the verdict behind D8. Re-survey when a vendor ships repo-resident instruction distribution.
+- `docs/platform-comparison.md` dated survey of hosting stacks for the GitHub App (Cloudflare Workers + Queues + Durable Objects + D1 with Alchemy, versus Vercel Functions + Workflows/Queues + Neon, versus Prisma Compute + Postgres + Composer): runtime fit for Effect v4 and `src/*`, job and lock primitives, database, IaC, observability, price at 10 / 100 / 500 installations, GA versus beta, and the recommendation "Cloudflare unless …" with the switch conditions. Read it before changing the App's hosting; re-survey when a named beta reaches GA or a limit it relies on changes.
 
 ## Rules
 
