@@ -95,9 +95,10 @@ structure, and are out of scope for automation (a lint may point them out later)
 ## 2026-09-15 D8: Scope is the agent configuration surface; Rules and Skills first
 
 Scope is the whole agent configuration surface: Rules, Skills, MCP, Hooks, Subagents/Commands.
-Delivery order is developer productivity first: Rules, then Skills, then MCP/Hooks. MCP and Hooks
-are **governance targets** (inventory, allow/deny, required), not pack-distribution targets,
-because they carry secrets and execution rights.
+Delivery order is developer productivity first: Rules, then Skills (distribution deferred by
+D18; the inventory stands), then MCP/Hooks. MCP and Hooks are **governance targets** (inventory,
+allow/deny, required), not pack-distribution targets, because they carry secrets and execution
+rights.
 
 The pack unit is generalized from "an `AGENTS.md` fragment" to **a set of files**: Skills are
 distributed as directories (`.cursor/skills/<name>/SKILL.md`, `.claude/skills/<name>/`), so a pack
@@ -220,10 +221,11 @@ is the only directory that issues writes. `src/domain/sync.ts` (plan, block rend
 request text) and `src/domain/diff.ts` stay pure. `src/scan/` remains read-only.
 
 **Not in this step.** Whole managed files in a pack (D8 `file` entries) are inventoried by scan
-but not written; nested `AGENTS.md` blocks are not touched; the pack `AGENTS.md` in
-`lightsound/agent-rules` is not yet wrapped in its own markers (both marker-wrapped and bare
-bodies are read; settled by D11: it stays bare); no fan-out (`--all`, Step 5, now D14, which also
-replaces the unconditional rerun force-push above with a content check).
+but not written (deferred indefinitely by D18); nested `AGENTS.md` blocks are not touched; the
+pack `AGENTS.md` in `lightsound/agent-rules` is not yet wrapped in its own markers (both
+marker-wrapped and bare bodies are read; settled by D11: it stays bare); no fan-out (`--all`,
+Step 5, now D14, which also replaces the unconditional rerun force-push above with a content
+check).
 
 ## 2026-09-15 D11: Pack sources stay unwrapped; markers are rendered at sync time
 
@@ -517,14 +519,15 @@ touching it would be authoring (D1). D12's `wrapper` normalization therefore fir
 
 ## 2026-09-15 D17: One glossary for the distribution state model; identifiers, labels, and `--json` follow it
 
-Skills distribution and a status dashboard are next, and both build on the words `scan` and
-`sync` already print. Those words came from five decisions written one at a time (D6, D9, D10,
-D12, D14, D16) and had drifted: `current` was a pack status and also the `SyncResult` kind for
-"nothing written"; `written` printed as `opened` or `updated`; `planned` was summarized as
-`would write`; the `sync --all` status column showed `refused` or `failed` for some rows and a
-pack status for the others; only `both-full` had normalization identifiers (`wrapper` / `merge`
-in `bothFull`), while the `eligible` row said `rename` or `swap` where the plan said `move` for
-the same operation. [status-model.md](status-model.md) is now the one glossary, with four
+Skills distribution and a status dashboard are next (Skills distribution deferred by D18; the
+dashboard stands), and both build on the words `scan` and `sync` already print. Those words
+came from five decisions written one at a time (D6, D9, D10, D12, D14, D16) and had drifted:
+`current` was a pack status and also the `SyncResult` kind for "nothing written"; `written`
+printed as `opened` or `updated`; `planned` was summarized as `would write`; the `sync --all`
+status column showed `refused` or `failed` for some rows and a pack status for the others; only
+`both-full` had normalization identifiers (`wrapper` / `merge` in `bothFull`), while the
+`eligible` row said `rename` or `swap` where the plan said `move` for the same operation.
+[status-model.md](status-model.md) is now the one glossary, with four
 vocabularies (shape, normalization, pack status, sync outcome), a transition table, the
 lifecycle, and the surfaces each word appears on. Rule: a new value is added to the glossary
 first; `tests/status-model.test.ts` fails on an identifier or label the glossary does not name.
@@ -562,6 +565,46 @@ same `eligible` row ends in `planned`, `opened`, `updated`, `up-to-date`, or `re
 on the dry-run flag, the tool-owned branch, and checks that run after measurement. Two
 vocabularies with an explicit "results from" relation is the minimum, and that relation is what
 the glossary's outcome table records.
+
+## 2026-09-16 D18: Skills distribution is deferred; rulecheck keeps the inventory, `skills` keeps the install
+
+D8 put Skills second in the delivery order and generalized the pack to a set of files so that a
+pack could carry whole skill directories; D10 left those `file` entries "inventoried but not
+written", and the roadmap carried the gap forward as unfinished work. It is not unfinished; it is
+not being built, for four reasons:
+
+1. **The installer exists and D8 says not to rebuild it.** `npx skills` (vercel-labs/skills) is
+   the de facto installer: it resolves a source, copies the directory into `.agents/skills/`,
+   symlinks the per-tool directories, and records source and hash in `skills-lock.json`.
+   rulecheck already reads that lock (D9) instead of defining a manifest; writing skill
+   directories through the sync would be a second installer with its own copy semantics, the kind
+   of overlap D8 rules out.
+2. **No concrete cross-repository skill need has appeared.** Every subscriber so far needs the
+   `AGENTS.md` block; none needs the same skill in many repositories. A distribution path without
+   a first consumer would be designed against a guess.
+3. **Skills are stack-specific more often than repository-agnostic.** A skill for one framework
+   or one deployment target belongs to the repositories on that stack, which is a per-repository
+   install decision, not a pack subscription. The pack model fits rules that hold everywhere
+   (D5); it fits few skills.
+4. **Visibility is already covered.** The Step 2 inventory lists every installed skill per
+   repository with its lock state, and the one finding (a lock entry whose directory is missing)
+   is reported. What a dashboard needs to show about skills is there without a write path.
+
+Decision: **no skill directory is written by `sync`**, and a pack's `file` entries stay what they
+are today, inventoried by `scan` and ignored by the planner. The D8 generalization (a pack is a
+set of files) is kept as vocabulary; nothing is removed.
+
+If a cross-repository skill need does appear, the direction is **rulecheck manages subscription
+and status, `skills` performs the install**: a pack lists skill sources, `scan` reports per
+subscriber whether each listed skill is present and matches its lock (the inventory already
+knows), and the sync's pull request carries the `npx skills add <source>` command (or runs it
+through the GitHub API only if that proves necessary) rather than copying files. That keeps one
+installer, one lock format, and rulecheck's role as the status view (D6). It needs its own
+decision entry before it is built.
+
+Considered and rejected: removing the `file` pack kind and the D8 generalization (churn without
+benefit; the inventory code is used); building the copy now behind a flag (a second write path
+without a consumer, contrary to the rule that every write path is a decision entry).
 
 ## Recording rule
 
