@@ -563,6 +563,46 @@ on the dry-run flag, the tool-owned branch, and checks that run after measuremen
 vocabularies with an explicit "results from" relation is the minimum, and that relation is what
 the glossary's outcome table records.
 
+## 2026-09-16 D18: Skills distribution is deferred; rulecheck keeps the inventory, `skills` keeps the install
+
+D8 put Skills second in the delivery order and generalized the pack to a set of files so that a
+pack could carry whole skill directories; D10 left those `file` entries "inventoried but not
+written", and the roadmap carried the gap forward as unfinished work. It is not unfinished; it is
+not being built, for four reasons:
+
+1. **The installer exists and D8 says not to rebuild it.** `npx skills` (vercel-labs/skills) is
+   the de facto installer: it resolves a source, copies the directory into `.agents/skills/`,
+   symlinks the per-tool directories, and records source and hash in `skills-lock.json`.
+   rulecheck already reads that lock (D9) instead of defining a manifest; writing skill
+   directories through the sync would be a second installer with its own copy semantics, the kind
+   of overlap D8 rules out.
+2. **No concrete cross-repository skill need has appeared.** Every subscriber so far needs the
+   `AGENTS.md` block; none needs the same skill in many repositories. A distribution path without
+   a first consumer would be designed against a guess.
+3. **Skills are stack-specific more often than repository-agnostic.** A skill for one framework
+   or one deployment target belongs to the repositories on that stack, which is a per-repository
+   install decision, not a pack subscription. The pack model fits rules that hold everywhere
+   (D5); it fits few skills.
+4. **Visibility is already covered.** The Step 2 inventory lists every installed skill per
+   repository with its lock state, and the one finding (a lock entry whose directory is missing)
+   is reported. What a dashboard needs to show about skills is there without a write path.
+
+Decision: **no skill directory is written by `sync`**, and a pack's `file` entries stay what they
+are today, inventoried by `scan` and ignored by the planner. The D8 generalization (a pack is a
+set of files) is kept as vocabulary; nothing is removed.
+
+If a cross-repository skill need does appear, the direction is **rulecheck manages subscription
+and status, `skills` performs the install**: a pack lists skill sources, `scan` reports per
+subscriber whether each listed skill is present and matches its lock (the inventory already
+knows), and the sync's pull request carries the `npx skills add <source>` command (or runs it
+through the GitHub API only if that proves necessary) rather than copying files. That keeps one
+installer, one lock format, and rulecheck's role as the status view (D6). It needs its own
+decision entry before it is built.
+
+Considered and rejected: removing the `file` pack kind and the D8 generalization (churn without
+benefit; the inventory code is used); building the copy now behind a flag (a second write path
+without a consumer, contrary to the rule that every write path is a decision entry).
+
 ## Recording rule
 
 Add an entry here whenever a decision changes what rulecheck writes, what it reports, or which
