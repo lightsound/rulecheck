@@ -263,6 +263,17 @@ export function classifyPackStatus(repo: RepoForDistribution, pack: Pack): PackS
   };
 }
 
+/**
+ * The status the repository would read for the pack if it were subscribed: `eligible` with the
+ * normalization the sync would apply, or `blocked` with the obstacle. A repository that already
+ * carries the pack's block keeps its block status. Used by the HTML report's candidate list of
+ * `not-subscribed` repositories (D20); the same classifier with the subscription assumed, so
+ * nothing is decided twice.
+ */
+export function classifyIfSubscribed(repo: RepoForDistribution, pack: Pack): PackStatusEntry {
+  return classifyPackStatus(repo, { ...pack, subscribers: [normalizeRepoName(repo.name)] });
+}
+
 /** Shapes whose AGENTS.md keeps its text where it is; the block is appended or replaced there. */
 const KEEPS_AGENTS_IN_PLACE: ReadonlySet<CanonicalShape> = new Set([
   "agents-canonical",
@@ -297,7 +308,8 @@ function revChange(block: ManagedBlock, pack: Pack): string {
   return `rev ${from} -> ${to}`;
 }
 
-const STATUS_ORDER: ReadonlyArray<PackStatus> = [
+/** Pack statuses by how urgently a human should look; the row order of every distribution report. */
+export const STATUS_ORDER: ReadonlyArray<PackStatus> = [
   "modified",
   "outdated",
   "blocked",

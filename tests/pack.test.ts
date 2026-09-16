@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { hashBlockBody } from "../src/domain/block.ts";
 import {
+  classifyIfSubscribed,
   classifyPackStatus,
   distribute,
   findPackedRef,
@@ -467,6 +468,33 @@ describe("classifyPackStatus", () => {
       foreignRegions: [REGION],
     });
     expect(classifyPackStatus(current, base).status).toBe("current");
+  });
+});
+
+describe("classifyIfSubscribed", () => {
+  test("a not-subscribed repository reads what a sync would do once subscribed", () => {
+    const stranger = repo("acme/stranger", "none");
+    expect(classifyPackStatus(stranger, base).status).toBe("not-subscribed");
+    expect(classifyIfSubscribed(stranger, base)).toMatchObject({
+      status: "eligible",
+      message: "create AGENTS.md with the block and a CLAUDE.md wrapper",
+    });
+
+    const obstructed = repo("acme/obstructed", "claude-only", {
+      files: [file("CLAUDE.md")],
+      foreignRegions: [{ ...REGION, file: "CLAUDE.md" }],
+    });
+    expect(classifyPackStatus(obstructed, base).status).toBe("not-subscribed");
+    expect(classifyIfSubscribed(obstructed, base)).toMatchObject({
+      status: "blocked",
+      file: "CLAUDE.md",
+      line: 89,
+    });
+  });
+
+  test("a repository that carries the block keeps its block status", () => {
+    const carrier = repo("acme/stranger", "agents-canonical", { blocks: [block("base", BODY)] });
+    expect(classifyIfSubscribed(carrier, base).status).toBe("current");
   });
 });
 
