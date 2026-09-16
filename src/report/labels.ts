@@ -1,4 +1,4 @@
-import type { CanonicalShape, PackStatus } from "../domain/types.ts";
+import type { CanonicalShape, PackStatus, SkillLockState } from "../domain/types.ts";
 import type { SyncOutcome } from "../sync/all.ts";
 
 /**
@@ -48,6 +48,14 @@ export const OUTCOME_LABEL: Record<SyncOutcomeKind, string> = {
   updated: "updated",
   refused: "refused",
   failed: "failed",
+};
+
+/** Per-skill relation to `skills-lock.json` (D9); listed in the glossary as a word outside the model. */
+export const LOCK_STATE_LABEL: Record<SkillLockState, string> = {
+  unlocked: "no lock entry",
+  match: "matches lock",
+  differs: "lock hash differs",
+  locked: "locked",
 };
 
 /** Shown in the status column of `sync --all` when the target was never measured. */

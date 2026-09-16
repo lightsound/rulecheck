@@ -69,7 +69,7 @@ export function renderSyncAll(result: SyncAllResult): string {
     `  ${pad("repository", repoWidth)}  ${pad("pack", packWidth)}  ${pad("status", 14)}  outcome`,
   );
   for (const row of result.rows) {
-    const [first, ...rest] = describe(row.outcome).split("\n");
+    const [first, ...rest] = describeOutcome(row.outcome).split("\n");
     out.push(
       `  ${pad(row.target.repo, repoWidth)}  ${pad(row.target.pack, packWidth)}  ${pad(statusOf(row.outcome), 14)}  ${first ?? ""}`.trimEnd(),
     );
@@ -86,7 +86,7 @@ function statusOf(outcome: SyncOutcome): string {
 }
 
 /** The outcome label followed by its detail. */
-function describe(outcome: SyncOutcome): string {
+export function describeOutcome(outcome: SyncOutcome): string {
   const label = OUTCOME_LABEL[outcome.kind];
   switch (outcome.kind) {
     case "refused":
