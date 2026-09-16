@@ -37,8 +37,9 @@ better option appeared. Words in `code` that name a status, shape, or outcome ar
   prints (skills, lock state) is shown; nothing more.
 - Billing and pricing (section 8: deferred to after M2; only the `plan` column and a repository-count gate exist in the schema).
 - GitHub Enterprise Server, GitLab, Bitbucket. GitHub.com only.
-- Any write to a repository other than the D10 pull request into a subscriber and the D25 pull
-  request into the pack repository.
+- Any write to a repository other than the D10 pull request into a subscriber and the D25
+  `subscriptions.json` change in the pack repository (a pull request, or a direct commit when
+  the installation opts in).
 
 ## 2. User flows
 
@@ -80,8 +81,10 @@ exercised. The onboarding banner offers three ways to get a pack repository:
   proposal from measured text, and it needs its own decision entry before it is built.
 
 **Register a pack source.** An installation admin enters `owner/repo` (optionally `@branch`).
-The repository must be one of the installation's repositories (the App reads it with the same
-installation token; a source outside the installation is refused with the reason). The App reads
+The repository must be one of the installation's repositories, because the installation token
+can then read and write it and nothing else is needed; a source outside the installation would
+need a second credential to be issued, stored, and rotated. A source outside is refused with
+that reason. The App reads
 `packs/<id>/AGENTS.md` and `subscriptions.json` at the default-branch HEAD with `loadPacks`
 unchanged, stores the packs and subscriptions as a cache keyed by the commit sha (section 3),
 and re-runs the installation scan with `packs` set so every repository × pack gets a status.
@@ -90,18 +93,28 @@ One pack source per installation in the MVP.
 **Subscriptions.** The Pack & subscriptions page lists every pack with its subscribers and every
 installed repository with its `not-subscribed` projection (`classifyIfSubscribed`, D20: what a
 sync would do the moment it is subscribed). Ticking a repository under a pack does not write the
-database: it opens a pull request against the pack repository that edits `subscriptions.json`
-(D25). The pending change is shown on the page as "subscription PR #n open" until it merges;
-the merge's `push` webhook reloads the cache and the row becomes `eligible`. Consequence stated
-plainly on the page: subscribing takes two pull requests, one to the pack repository and one
-into the subscriber.
+database: it changes `subscriptions.json` in the pack repository (D25), in one of two ways
+chosen by the per-installation setting `subscriptionChanges`:
+
+- `pull-request` (default): a pull request against the pack repository; the pending change is
+  shown on the page as "subscription PR #n open" until it merges, and the merge's `push`
+  webhook reloads the cache and the row becomes `eligible`. Consequence stated plainly on the
+  page: subscribing takes two pull requests, one to the pack repository and one into the
+  subscriber.
+- `direct-commit`: one commit on the pack repository's default branch, for solo accounts where
+  a review of one's own subscription list is a formality; the `push` webhook that follows is
+  the same, so the row becomes `eligible` at once. GitHub's branch protection still applies (a
+  protected default branch makes the commit fail with that reason, and the page says to switch
+  the setting back). Either way the subscriber repository is never written directly: the block
+  always arrives as the D10 pull request.
 
 **Pull-style entry point (candidate CLI command, not implemented).** The dashboard is the
 push side: an admin subscribes repositories from the pack's point of view. The lightweight
 onboarding path is the other direction, from inside a repository, the way `npx skills add`
 installs a skill: `npx rulecheck subscribe <owner>/<pack-repo> --pack base` (name to be decided)
-reads the current repository's `origin` remote, and opens the same D25 pull request on the pack
-repository that adds `owner/repo` to `subscriptions.json` under `base`; with `--dry-run` it
+reads the current repository's `origin` remote, and makes the same D25 change to the pack
+repository's `subscriptions.json` that adds `owner/repo` under `base` (a pull request, or a
+direct commit where the installation opted in); with `--dry-run` it
 prints the planned diff. When the App is installed on the pack repository, the command calls
 the App instead (one endpoint, the same job as the checkbox), so the pull request is written by
 `rulecheck[bot]` and appears in the App's run and audit log; without the App it writes through
@@ -120,8 +133,30 @@ holds: no check lives outside it):
   target per (repository, pack) in `subscriptions.json`;
 - the `Sync now` button (admin), with `Dry run` as the default state of the button and a second
   click to confirm a live run;
-- `Dry run` on a schedule (daily) so the distribution report cannot go stale when no webhook
-  arrived (a missed delivery, a suspended installation).
+- `Dry run` on the full-rescan schedule below, so the distribution report cannot go stale when
+  no webhook arrived (a missed delivery, a suspended installation).
+
+**What each webhook does.** Every delivery is verified, recorded by `delivery_id`, and turned
+into at most one job; the paths are matched against the push payload's `added` / `modified` /
+`removed` lists (when GitHub truncates those lists the push counts as touching everything):
+
+| Event | Condition | Job |
+| --- | --- | --- |
+| `push` | to the pack repository's default branch; a touched path is under `packs/**` or is `subscriptions.json` | reload the pack cache at the pushed sha; one `sync-target` per subscriber × pack (live, or dry run when the setting says so) |
+| `push` | to a subscriber's (or any installed repository's) default branch; a touched path is `AGENTS.md`, `CLAUDE.md`, `.claude/CLAUDE.md`, a nested `AGENTS.md`, under `.cursor/**`, `.claude/**`, `.agents/skills/**`, or is `package.json` (the script check) | `scan-repository` at the pushed sha |
+| `push` | any other branch, or no matching path | nothing (recorded, no job) |
+| `installation_repositories` | `added` | `scan-repository` for each added repository; the selector on the Pack & subscriptions page updates |
+| `installation_repositories` | `removed` | prune: mark `removed_at`, drop the repository from the matrix and the candidate list; its rows stay for history |
+| `installation` | `created` / `unsuspend` | full `scan-installation` |
+| `installation` | `suspend` / `deleted` | stop jobs; `deleted` starts the 30-day deletion (section 7) |
+| `pull_request` | `closed` on a branch `agent-rules/*` or `rulecheck/subscriptions` | status refresh: `scan-repository` for the base repository (a merge is also a `push`, so this catches a close without merge, where the row stays `eligible` / `outdated` and the run row is annotated `PR closed`) |
+| `repository` | `renamed`, `transferred`, `archived`, `deleted` | update `full_name` / `archived` / `removed_at`; an archived repository keeps its rows and gets no sync |
+| `github_app_authorization` | `revoked` | end that user's sessions |
+
+**Full rescan interval** is a per-installation setting, `fullRescan: "daily" | "weekly" | "off"`,
+default `daily`: one `scan-installation` and one dry-run sync run per interval, as a safety net
+under the webhooks. `off` is for an installation that trusts deliveries and wants the API budget
+for something else; the page shows when the last full measurement happened either way.
 
 A run page shows the D14 table as it fills: repository, pack, remote status, outcome
 (`planned +N -M`, `opened`, `updated`, `up-to-date`, `nothing-to-do`, `refused: …`,
@@ -170,10 +205,13 @@ reproducible from GitHub; dropping the database loses history, never configurati
 
 **Consequences.**
 
-- UI edits are pull requests to the pack repository: `subscriptions.json` on the tool-owned
-  branch `rulecheck/subscriptions`, force-updated on rerun with the D10 ownership check (tip
-  commit prefixed `chore(agent-rules):`), one open pull request at a time carrying every pending
-  subscription change. The App never commits to the default branch.
+- UI edits change `subscriptions.json` in the pack repository, never the database alone. By
+  default (`subscriptionChanges: "pull-request"`) as a pull request on the tool-owned branch
+  `rulecheck/subscriptions`, force-updated on rerun with the D10 ownership check (tip commit
+  prefixed `chore(agent-rules):`), one open pull request at a time carrying every pending
+  change; with `subscriptionChanges: "direct-commit"` (a per-installation setting meant for solo
+  accounts) as one commit on the default branch. Subscriber repositories are never written
+  directly under either setting.
 - The App needs `Contents: write` on the pack repository, which it has because the source must
   be inside the installation.
 - A team that prefers the CLI or the D23 workflow keeps working; the App is a view and a runner
@@ -202,7 +240,8 @@ request URL. The App's user-facing pages state this in the same words.
 **Where the D25 writer lives.** In rulecheck, not in the App: `src/sync/subscribe.ts`
 (measure the pack repository's `subscriptions.json` at the default-branch HEAD, plan the edit as
 a pure function in `src/domain`, write the branch and pull request under the D10 ownership
-check), tested against `tests/fake-github.ts` like `sync`. The App calls it from the checkbox
+check, or one commit on the default branch when the installation's `subscriptionChanges`
+setting says `direct-commit`), tested against `tests/fake-github.ts` like `sync`. The App calls it from the checkbox
 job; the candidate `rulecheck subscribe` command (section 2) calls the same function from a
 checkout. One implementation, so the CLI and the App cannot disagree on what a subscription
 pull request contains, and `AGENTS.md`'s rule that `src/sync/` is the only write path keeps
@@ -297,7 +336,7 @@ own history):
 
 | Table | Kind | Columns (key) |
 | --- | --- | --- |
-| `installations` | cache | `id` (GitHub installation id), `account_login`, `account_type` (`Organization` / `User`), `suspended_at`, `created_at`, `plan` (section 8) |
+| `installations` | cache | `id` (GitHub installation id), `account_login`, `account_type` (`Organization` / `User`), `suspended_at`, `created_at`, `plan` (section 8); settings `subscription_changes` (`pull-request` / `direct-commit`) and `full_rescan` (`daily` / `weekly` / `off`) |
 | `repositories` | cache | `id` (GitHub repo id), `installation_id`, `full_name`, `default_branch`, `archived`, `removed_at`; plus the index columns `scan_error` (message, null when the last scan measured it) and `scan_error_at` |
 | `users`, `user_installations` | cache | `id`, `login`; `(user_id, installation_id, is_admin, refreshed_at)` from the user token |
 | `pack_sources` | cache | `installation_id`, `repository_id`, `branch`, `head_sha`, `loaded_at`, `warnings` (the `loadPacks` warnings) |
@@ -310,7 +349,7 @@ own history):
 | `webhook_deliveries` | index | `delivery_id`, `event`, `received_at`; the replay guard |
 
 Sizes are small: hundreds of repositories × a few packs × one row per measurement. Reports are
-kept for 90 days, snapshots and runs for 12 months, audit for 12 months (open question 7).
+kept for 90 days, snapshots and runs for 12 months, audit for 12 months (section 10, answer 8).
 
 ## 5. Dashboard pages
 
@@ -371,8 +410,9 @@ Effect programs as the job bodies, `fetchTransport` for GitHub. The Fly.io and V
 are the comparison, not a fallback: Effect v4 on Workers is a stack the owner already runs.
 The queue and the lock are still the two interfaces the App defines for itself (`JobQueue`,
 `WriteLock`), because they are the only places the job model touches the platform. A broader
-platform comparison (Cloudflare, Vercel, a Prisma-centred stack) is being written separately as
-`docs/platform-comparison.md`; link it here once it lands.
+platform comparison (Cloudflare, Vercel, a Prisma-centred stack, with prices at 10 / 100 / 500
+installations and the conditions under which to switch) is
+[platform-comparison.md](platform-comparison.md).
 
 ### Technology decisions
 
@@ -388,25 +428,37 @@ Decided by the owner (2026-09-16); none changes sections 3–5.
 | Domain | Later | `workers.dev` for every stage until a product name exists; the custom domain is one resource in the same Alchemy stack when it does |
 | Webhook verification | Hand-written HMAC-SHA256 over the raw body with `crypto.subtle`, constant-time compare | Twenty lines, no dependency; `@octokit/webhooks` is the alternative when its typed payloads become worth the package |
 
-### Front-end library: open, candidates on Workers
+### Front end: React on Workers, framework to be picked
 
-The D21 page is server-rendered HTML from string builders, and M1 serves it as is. The owner
-wants room for a front-end library for the UI that follows, so the choice is not made here; it
-is open question 8. Candidates, each already deployable on Workers:
+Decided by the owner: the dashboard is **React-based** and lives in a **private repository**.
+The reason is one fact: the owner holds a paid React component library whose license forbids
+redistribution in open source, and the dashboard's UI is built on it. So the App repository is
+private (`lightsound/rulecheck-app` or a repository under a product organization; the account is
+pending, M0), the component library is a private dependency there, and the CLI in this
+repository stays open source and framework-free. The one remaining open question (section 10)
+is which React meta-framework runs it on Workers:
 
 | Candidate | For | Against |
 | --- | --- | --- |
-| SolidStart / Solid 2 | Fine-grained reactivity, small bundles, SSR + islands on Workers; the owner maintains `lightsound/solid2-agent-kit`, so the agent tooling and conventions exist | Solid 2 is pre-release; smaller ecosystem for tables and forms; fewer Effect integrations |
-| TanStack Start | Type-safe routing and loaders, SSR on Workers, React ecosystem for components; pairs with TanStack Table for the matrix and rows | React's bundle and rendering model for pages that are mostly static tables; framework still young |
-| React Router (Remix) | Mature SSR and forms model (`action` / `loader`) that fits the App's `POST` + redirect flows; first-class Workers adapter | React as above; the D21 no-script pages become a React tree to maintain |
-| Astro islands | Static-first pages with islands only where interaction is needed (the checkbox matrix, the run banner); SSR adapter for Workers; any island framework | Two component models in one App if islands use a second framework; less suited if most pages become interactive |
-| HTMX-style progressive enhancement | Keeps `renderHtml`'s string builders as the whole rendering path; interaction by swapping server-rendered fragments; no build step, no hydration | No component model for a later design system; the fragments are still hand-built strings |
+| TanStack Start (recommended) | Type-safe file routes, loaders, and server functions; SSR on Workers through Vite with the Cloudflare plugin; TanStack Table and Query for the matrix, rows, and run pages; the owner's component library is plain React and drops in | The youngest of the three; fewer production reports on Workers; server functions are its own convention next to `HttpApi` (kept for webhooks and the job API, so two request models coexist by design) |
+| React Router v7 (framework mode) | The mature Remix `loader` / `action` model, which fits the App's form-and-redirect flows; first-class Cloudflare Workers template; large ecosystem | Less type inference across routes than TanStack; data APIs shaped around HTML forms, so the checkbox matrix needs client code either way |
+| Next.js on Workers (OpenNext) | The most React tooling and the most familiar to hires or contractors; App Router server components | Runs through an adapter layer (OpenNext) rather than natively; heaviest bundle and cold start of the three; the adapter is another thing that can break on a Next release |
 
-Constraint every candidate must satisfy: the words on the page stay the ones `labels.ts` prints
-and `html.ts`'s sections stay the source of the report markup (exported as data or as
-components in M2), so the D21 design system is carried, not re-implemented. M1 serves the
-`renderHtml` page inside the chosen framework's shell if the choice is made before M1 starts;
-otherwise behind `HttpApi` as a plain response, which every candidate above can wrap later.
+**Recommendation: TanStack Start.** Best type story end to end (routes, loaders, table, query
+in one family), native Workers deployment through Vite, and nothing between React and the
+runtime. React Router v7 is the safe second; Next-on-Workers is not recommended for a product
+whose whole surface is three data pages.
+
+Not chosen, and why: SolidStart / Solid 2 (the owner maintains `lightsound/solid2-agent-kit`,
+but the component library is React), Astro islands (a second component model next to React
+for no gain on three interactive pages), HTMX-style fragments over `renderHtml`'s strings (no
+component model for the library to plug into).
+
+Constraint whatever is picked: the words on the page stay the ones `labels.ts` prints, and the
+report's structure comes from `html.ts` (its sections exported as data in M2, rendered by React
+components that carry the D21 tokens), so the design system is carried, not re-implemented. M1
+serves the `renderHtml` page as a plain response behind `HttpApi`, inside the framework's route
+shell once the pick is made; every candidate above can wrap a server-rendered HTML string.
 
 ## 7. Security
 
@@ -428,8 +480,10 @@ otherwise behind `HttpApi` as a plain response, which every candidate above can 
   into memory for the measurement and dropped with the job. No source code is fetched: the
   snapshot lists every path but reads only the files `scan` opens. Reports older than 90 days
   are deleted.
-- **What is never written**: anything outside the two pull request paths (section 1); the
-  default branch of any repository; a branch whose tip rulecheck did not write (D10).
+- **What is never written**: anything outside the two paths of section 1; the default branch
+  of any repository, except the pack repository's under `subscriptionChanges: "direct-commit"`
+  and then only `subscriptions.json`; a subscriber repository other than through the D10 pull
+  request; a branch whose tip rulecheck did not write (D10).
 - **Audit log**: every write (pull request opened or updated, with URL and run) and every
   action taken by a person (sign-in, pack source registered or removed, `Sync now`, `Rescan`,
   subscription change requested) and by GitHub (install, repositories added or removed,
@@ -456,43 +510,37 @@ the unit is a week because the milestones gate on each other, not because any on
 
 | Milestone | Done when | Weeks |
 | --- | --- | --- |
-| M0: design accepted | This document merged with the open questions answered or defaulted (question 8 excepted, due before M2); D25 recorded; the App registered on GitHub (name, permissions, webhook URL to a stub), one registration per stage; the template repository `lightsound/agent-rules-template` published | 0.5 |
-| M1: install and read-only dashboard | The transport split and `fetchTransport` land in rulecheck (with `fake-github.ts` coverage); the App repository exists and depends on rulecheck at a sha; the Alchemy stack deploys `prod`, `dev_*`, and `pr-*` stages from GitHub Actions; install → `scan-installation` → Overview page served from `repo_reports`; `push` rescans one repository; daily rescan. Dogfood on `lightsound` | 3 |
-| M2: sync and subscriptions | Pack source registration; `sync-target` on pack push, `Sync now`, dry run; runs and audit; `src/sync/subscribe.ts` in rulecheck with `fake-github.ts` coverage and its decision entry; Pack & subscriptions page with the subscriptions matrix writing D25 pull requests through it; Repository page; `html.ts` sections exported; the D23 workflow in agent-rules switched off once the App has opened the next real pull requests | 3 |
-| M3: organizations and billing | Pricing decided (section 8), plan column and repository gate live; Stripe checkout and portal; installation switcher for users in several organizations; uninstall lifecycle; the truncated-tree fallback; status page and the alerts in section 6 | 3 |
+| M0: design accepted | This document merged with the questions in section 10 answered (the framework pick excepted, due before M2); D25 recorded; **Accounts**: the GitHub organization that owns the App registration and the private repository, and the Cloudflare account, chosen; the App registered on GitHub (name, permissions, webhook URL to a stub), one registration per stage; the template repository `lightsound/agent-rules-template` published | 0.5 |
+| M1: install and read-only dashboard | The transport split and `fetchTransport` land in rulecheck (with `fake-github.ts` coverage); the private App repository exists and depends on rulecheck at a sha; the Alchemy stack deploys `prod`, `dev_*`, and `pr-*` stages from GitHub Actions; install → `scan-installation` → Overview page served from `repo_reports`; `push` rescans one repository; the `fullRescan` schedule. Dogfood on `lightsound`, personal installation included | 3 |
+| M2: sync and subscriptions | Pack source registration; `sync-target` on pack push, `Sync now`, dry run; runs and audit; `src/sync/subscribe.ts` in rulecheck with `fake-github.ts` coverage and its decision entry; the `subscriptionChanges` and `fullRescan` settings; Pack & subscriptions page with the subscriptions matrix writing D25 changes through it; Repository page; `html.ts` sections exported and rendered by the React framework picked; the D23 workflow removed from `agent-rules` once the App has opened the next real pull requests (replacement, not coexistence) | 3 |
+| M3: organizations and billing | Product name decided and the custom domain added to the stack; pricing decided (section 8), plan column and repository gate live; Stripe checkout and portal; installation switcher for users in several organizations; uninstall lifecycle; the truncated-tree fallback; status page and the alerts in section 6 | 3 |
 
 Total about ten weeks to a chargeable product. M2 carries the product risk (does a team accept
-two pull requests per subscription); M3 the commercial one (pricing is decided there).
+two pull requests per subscription, or does it switch to `direct-commit`); M3 the commercial
+one (name and pricing are decided there).
 
-## 10. Open questions for the owner
+## 10. Questions for the owner: answers and the one still open
 
-Each with the default this document assumes, except question 8, which the owner chose to leave
-without one; M0 accepts it open, and it is due before M2 starts.
+Answered 2026-09-16; the answers are folded into the sections above and recorded here so the
+document does not have to be diffed to find them.
 
-1. **Where does the App code live?** Default: a private repository `lightsound/rulecheck-app`
-   that depends on `rulecheck` at a commit sha (D23's pinning method; `effect` is exact-pinned,
-   so the "dependencies resolved afresh" concern is moot), and rulecheck adds an `exports` map
-   in M1. Alternative: an `app/` workspace in this repository, which makes the App public.
-2. **Must the pack source be inside the installation?** Default: yes (one token, one permission
-   set, the D25 write has what it needs); D25 records this default and is amended if the answer
-   changes. Alternative: a public pack repository outside the installation, read anonymously,
-   with subscriptions then necessarily in the App (contradicts D25).
-3. **May an admin commit a subscription change straight to the pack repository's default
-   branch?** Default: no; always a pull request (D6). Alternative: a per-source opt-in when the
-   branch has no protection, for solo installations.
-4. **Scan cadence.** Default: webhooks plus one full rescan per installation per day and one
-   dry run per day. Alternative: webhooks only (cheaper, stale after a missed delivery).
-5. **Personal (user) installations in the MVP?** Default: yes on Free, since the owner's own
-   estate is one and it is the dogfood; billing is organizations only in M3.
-6. **Should the App replace the D23 workflow for `lightsound` at M2, or run beside it?**
-   Default: replace (the workflow is switched off when the App has opened one real set of pull
-   requests); running both would race on the same tool-owned branches.
-7. **Retention.** Default: reports 90 days, snapshots, runs, and audit 12 months, rows deleted
-   30 days after uninstall. Alternative: keep everything until the customer deletes it.
-8. **Front-end library.** Candidates and trade-offs in section 6 ("Front-end library: open").
-   No default is set: the owner picks. What the design fixes regardless: `html.ts` stays the
-   source of the report markup, labels come from `labels.ts`, and the decision lands before M2
-   (M1 serves `renderHtml` either way).
+| # | Question | Answer |
+| --- | --- | --- |
+| 1 | Where does the App code live? | A **private repository** (`lightsound/rulecheck-app`, or a repository under a product organization; see 10), depending on `rulecheck` at a commit sha (D23's pinning; `effect` is exact-pinned) with an `exports` map added to rulecheck in M1. Private because the dashboard uses the owner's paid React component library, whose license forbids redistribution in open source. The CLI stays open source here |
+| 2 | Front end | **React-based**, for the same reason. Framework: see the one open question below |
+| 3 | Must the pack source be inside the installation? | **Yes.** The installation token can read and write it and nothing else is needed; a source outside would need a second credential to issue, store, and rotate |
+| 4 | May a subscription change go straight to the default branch? | **A per-installation setting**, `subscriptionChanges: "pull-request" \| "direct-commit"`, default `pull-request`; `direct-commit` is meant for solo accounts. Subscriber repositories are never written directly under either value (D25 updated) |
+| 5 | Scan schedule | Webhooks as tabulated in section 2 ("What each webhook does"); the full rescan interval is a per-installation setting `fullRescan: "daily" \| "weekly" \| "off"`, default `daily` |
+| 6 | Personal (user) installations in the MVP? | **Included** |
+| 7 | The D23 workflow in `agent-rules` at M2 | **Removed when M2 ships**: the App replaces it; no coexistence (both would race on the same tool-owned branches) |
+| 8 | Retention | Defaults **accepted**: reports 90 days; snapshots, runs, audit 12 months; rows deleted 30 days after uninstall |
+| 9 | Product name | **Decided before M3** (the custom domain follows it) |
+| 10 | Accounts | The GitHub organization that owns the App registration and the private repository, and the Cloudflare account that runs it, are **pending**; an M0 done criterion |
+
+**Still open (one):** which React meta-framework runs the dashboard on Workers. Candidates
+and the recommendation (TanStack Start; React Router v7 as the safe second; Next-on-Workers not
+recommended) are in section 6, "Front end: React on Workers". Due before M2 starts; M1 serves
+`renderHtml` behind `HttpApi` either way.
 
 ## Decisions
 
@@ -502,12 +550,13 @@ better option that produced nothing new.
 | Decision | Chosen | Alternatives considered | Settled in round |
 | --- | --- | --- | --- |
 | Source of truth | Files in the pack repository (`subscriptions.json`, `packs/**`) on the default branch; the database is a cache keyed by sha plus the App's own history (D25) | App database canonical with a generated file for the CLI (a second configuration store, an export the CLI must trust, roles to rebuild); both writable with a merge rule (the conflict the D9 hash exists to detect, moved to configuration) | 2 |
-| How UI subscription edits reach the file | A pull request to the pack repository on the tool-owned branch `rulecheck/subscriptions`, D10 ownership check, one open pull request carrying every pending change | direct commit to the default branch (D6 forbids; open question 3); one branch per subscription change (N pull requests for one screen's worth of ticks); an issue asking a human to edit (a manual step the App exists to remove) | 1 |
+| How UI subscription edits reach the file | Per-installation setting `subscriptionChanges`: `pull-request` (default; the tool-owned branch `rulecheck/subscriptions`, D10 ownership check, one open pull request carrying every pending change) or `direct-commit` (one commit on the default branch, for solo accounts); subscriber repositories never written directly (decided by the owner) | pull request only (the first draft; a review of one's own list is a formality for a solo account); one branch per subscription change (N pull requests for one page's worth of ticks); an issue asking a human to edit (a manual step the App exists to remove) | decided by owner, n/a |
 | Hosting | Cloudflare Workers + Queues + Durable Objects, Cron Triggers for the daily runs; Effect v4 on Workers is a stack the owner already runs, so no fallback is planned | Fly.io Bun container (full reuse, a server to run); Vercel functions plus a queue service (two vendors for one job model); Deno Deploy (Deno, a third runtime; no queue with retries) | 2 |
 | Infrastructure as code | Alchemy: one Effect-based TypeScript stack for every Cloudflare resource and secret; stages `prod` / `dev_<user>` / `pr-<n>`; deployed from GitHub Actions with credentials provisioned as code (decided by the owner) | `wrangler.jsonc` + `wrangler deploy`; Terraform / Pulumi; SST | decided by owner, n/a |
 | Pricing | Deferred to after M2; the design fixes only the `plan` column, the repository gate, and the over-limit rule (decided by the owner) | a placeholder tier table now (removed: numbers before the first buyer conversation anchor the wrong thing) | decided by owner, n/a |
 | Technology decisions | Effect `HttpApi`; D1 + Drizzle; Workers Logs; GitHub Actions + Alchemy deploy; session storage at implementation; domain later (decided by the owner) | Hono; raw SQL; Sentry; laptop deploys | decided by owner, n/a |
-| Front-end library | Left open (open question 8) with five candidates compared on Workers; `html.ts` remains the source of the report markup whatever is chosen | pick server-rendered strings for good (closes the door the owner wants open); pick one now (the owner's call) | 1 |
+| Front end | React, in a private repository, because the owner's paid React component library cannot be redistributed in open source (decided by the owner); the meta-framework is the one question left open, with TanStack Start recommended over React Router v7 and Next-on-Workers | SolidStart / Solid 2, Astro islands, HTMX-style fragments (each would sit next to a React component library or leave it unused) | recommendation settled in round 2; pick by owner |
+| Scan schedule | Webhook table in section 2 plus a per-installation `fullRescan` setting (`daily` default, `weekly`, `off`) (decided by the owner) | fixed daily rescan; webhooks only | decided by owner, n/a |
 | Bootstrap without a pack repository | Read-only inventory until a source is registered; (a) a public GitHub template repository the user instantiates with `Use this template` via a prefilled `github.com/new` link, then adds to the installation; (b) an existing repository; (c) a derived starter pack, post-MVP | the App creating the repository through the installation or user token (`Administration: write` on every visible repository for one onboarding click); the App pushing starter files into an empty repository the user created (`Contents: write` suffices, but the user still creates the repository, so the template saves the same click with fewer bytes of ours in the flow) | 2 |
 | Database | D1, schema kept Postgres-portable | Neon Postgres (right when multi-region or large joins appear, not now); Durable Object SQLite storage per installation (no cross-installation query for the operator, no single backup) | 2 |
 | Job model | One queue message per unit of work (`scan-installation`, `scan-repository`, `sync-target`), idempotent by key; a run groups messages; a Durable Object per installation is the D14 write lock | `syncAll` as one message (a 200-target run inside one 15-minute invocation, no partial progress); a Durable Object per installation running the whole sync (single-threaded, so no read parallelism); Workflows (durable steps, but a step per target is the queue with more ceremony) | 2 |
@@ -515,11 +564,11 @@ better option that produced nothing new.
 | Team roles | None of the App's own: visibility from `GET /user/installations` and its repositories, admin from owner status of the installation account, subscription edits gated by the pack repository's own permissions | a roles table (a second permission system to keep in step with GitHub's); GitHub Teams mapping (adds `Members: read` for a gate the pack repository already enforces) | 2 |
 | GitHub client change | Split `makeGh` into shared response mapping plus a `Transport`; `ghTransport` for the CLI, `fetchTransport` with an installation token provider and rate-limit handling for the App | a second `GitHubService` implementation (duplicated mapping that drifts); Octokit (a dependency for twelve endpoints whose mapping exists) | 1 |
 | Where retries live | In `fetchTransport`: `retry-after` honored, one retry on secondary limit, job delayed below a remaining-calls floor | in the job runner (loses the header information); in `syncTarget` (D14 named the GitHub layer) | 1 |
-| App code location | Private repository depending on rulecheck at a sha; rulecheck gains an `exports` map (open question 1) | `app/` workspace here (public App code); npm publish (a version to bump for one consumer; D23's argument still holds) | 2 |
+| App code location | Private repository (`lightsound/rulecheck-app` or under a product organization, account pending) depending on rulecheck at a sha; rulecheck gains an `exports` map; private because the paid React component library cannot be redistributed (confirmed by the owner) | `app/` workspace here (public App code, impossible with the library's license); npm publish (a version to bump for one consumer; D23's argument still holds) | 2 |
 | Pull-style onboarding | A candidate CLI command (`rulecheck subscribe <owner>/<pack-repo> --pack <id>`, name open) run inside a repository, opening the D25 subscription pull request directly or through the App when it is installed; documented, not scheduled, needs its own decision entry | make it the only subscription path (a developer must be in the repository; an admin subscribing twenty repositories wants the matrix); have it write the subscriber's block directly (skips the pack repository, so the CLI and the App would disagree on who is subscribed); a GitHub Action in the subscriber (a workflow per repository to onboard one line) | 1 |
 | Per-repository failure in a full scan | Snapshots are built per repository; a failure becomes a `scan_error` on that repository's row (a row-level failure, not a shape or a pack status; glossary-listed as a word outside the four vocabularies when built) and the rest scan normally | one snapshot, one failure aborts the run (the CLI's behavior for one target; unacceptable over 200 repositories); a synthetic `RepoReport` with shape `none` (lies about the repository) | 1 |
 | Where the D25 writer lives | rulecheck `src/sync/subscribe.ts`, pure plan in `src/domain`, `fake-github.ts` tests; called by the App and by the candidate CLI command | App-only code (two writers once the CLI command exists, and outside the `fake-github.ts` rule); the App calling the CLI as a process (no `Bun.spawn` on Workers) | 1 |
-| Pack source scope | One source per installation, inside the installation | several sources (a merge order between sources nobody asked for); a source outside the installation (open question 2) | 1 |
+| Pack source scope | One source per installation, inside the installation (confirmed by the owner: the installation token reads and writes it; outside would mean a second credential) | several sources (a merge order between sources nobody asked for); a source outside the installation (a second credential to issue, store, and rotate) | 1 |
 | Overview in M1 | `renderHtml` output served as is under an App header | rebuilding the page as components first (three pages' worth of work before anything is live) | 1 |
 | Manual sync control | `Dry run` is the default state of the button; a live run is a second, confirmed action | one `Sync` button (a live write one click away); no manual trigger (a missed webhook then waits for the daily run) | 1 |
 | Report storage | The `RepoReport` JSON as `scan --json` produces it, `schemaVersion` recorded, block bodies kept | strip block bodies (the pack text is the customer's own distributed text, and the detail screen shows it); store instruction file contents for a diff view (content the security section promises not to keep) | 1 |
