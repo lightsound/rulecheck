@@ -179,11 +179,11 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
   repositories whose pull requests had merged, because the checkouts sat on other branches.
   `sync --all --dry-run` measures every subscriber's default-branch HEAD on GitHub and is the
   distribution report from now on; no separate `status` command (D14).
-- Carried from Step 3: auto-merge as a per-repository opt-in (D6); a stale `agent-rules/<pack>` branch whose
-  pull request was closed without merge is rewritten on the next sync (D10) rather than skipped;
-  written paths always get mode `100644` (an executable or symlinked root file is replaced by a
-  regular file). Not a target of `--all`: a repository that carries a block without a subscription
-  (only `scan --packs` over a checkout sees it).
+- Carried from Step 3: auto-merge as a per-repository opt-in (D6); a stale `agent-rules/<pack>`
+  branch whose pull request was closed without merge is rewritten on the next sync (D10) rather
+  than skipped; written paths always get mode `100644` (an executable or symlinked root file is
+  replaced by a regular file). Not a target of `--all`: a repository that carries a block without
+  a subscription (only `scan --packs` over a checkout sees it).
 - Multi-pack rollout, observed 2026-09-15 when `base` was split into `base` + `personal` across
   seven subscribers (14 pull requests): each pack is its own branch and pull request per
   repository (D10), both cut from the same default-branch head. The `base` update rewrites the

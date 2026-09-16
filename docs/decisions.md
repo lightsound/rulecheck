@@ -95,7 +95,8 @@ structure, and are out of scope for automation (a lint may point them out later)
 ## 2026-09-15 D8: Scope is the agent configuration surface; Rules and Skills first
 
 Scope is the whole agent configuration surface: Rules, Skills, MCP, Hooks, Subagents/Commands.
-Delivery order is developer productivity first: Rules, then Skills, then MCP/Hooks. MCP and Hooks
+Delivery order is developer productivity first: Rules, then Skills (distribution deferred by
+D18; the inventory stands), then MCP/Hooks. MCP and Hooks
 are **governance targets** (inventory, allow/deny, required), not pack-distribution targets,
 because they carry secrets and execution rights.
 
@@ -220,7 +221,7 @@ is the only directory that issues writes. `src/domain/sync.ts` (plan, block rend
 request text) and `src/domain/diff.ts` stay pure. `src/scan/` remains read-only.
 
 **Not in this step.** Whole managed files in a pack (D8 `file` entries) are inventoried by scan
-but not written; nested `AGENTS.md` blocks are not touched; the pack `AGENTS.md` in
+but not written (deferred indefinitely by D18); nested `AGENTS.md` blocks are not touched; the pack `AGENTS.md` in
 `lightsound/agent-rules` is not yet wrapped in its own markers (both marker-wrapped and bare
 bodies are read; settled by D11: it stays bare); no fan-out (`--all`, Step 5, now D14, which also
 replaces the unconditional rerun force-push above with a content check).
@@ -517,8 +518,8 @@ touching it would be authoring (D1). D12's `wrapper` normalization therefore fir
 
 ## 2026-09-15 D17: One glossary for the distribution state model; identifiers, labels, and `--json` follow it
 
-Skills distribution and a status dashboard are next, and both build on the words `scan` and
-`sync` already print. Those words came from five decisions written one at a time (D6, D9, D10,
+Skills distribution and a status dashboard are next (Skills distribution deferred by D18; the
+dashboard stands), and both build on the words `scan` and `sync` already print. Those words came from five decisions written one at a time (D6, D9, D10,
 D12, D14, D16) and had drifted: `current` was a pack status and also the `SyncResult` kind for
 "nothing written"; `written` printed as `opened` or `updated`; `planned` was summarized as
 `would write`; the `sync --all` status column showed `refused` or `failed` for some rows and a
