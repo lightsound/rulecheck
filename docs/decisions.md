@@ -221,10 +221,11 @@ is the only directory that issues writes. `src/domain/sync.ts` (plan, block rend
 request text) and `src/domain/diff.ts` stay pure. `src/scan/` remains read-only.
 
 **Not in this step.** Whole managed files in a pack (D8 `file` entries) are inventoried by scan
-but not written (deferred indefinitely by D18); nested `AGENTS.md` blocks are not touched; the pack `AGENTS.md` in
-`lightsound/agent-rules` is not yet wrapped in its own markers (both marker-wrapped and bare
-bodies are read; settled by D11: it stays bare); no fan-out (`--all`, Step 5, now D14, which also
-replaces the unconditional rerun force-push above with a content check).
+but not written (deferred indefinitely by D18); nested `AGENTS.md` blocks are not touched; the
+pack `AGENTS.md` in `lightsound/agent-rules` is not yet wrapped in its own markers (both
+marker-wrapped and bare bodies are read; settled by D11: it stays bare); no fan-out (`--all`,
+Step 5, now D14, which also replaces the unconditional rerun force-push above with a content
+check).
 
 ## 2026-09-15 D11: Pack sources stay unwrapped; markers are rendered at sync time
 
@@ -519,13 +520,13 @@ touching it would be authoring (D1). D12's `wrapper` normalization therefore fir
 ## 2026-09-15 D17: One glossary for the distribution state model; identifiers, labels, and `--json` follow it
 
 Skills distribution and a status dashboard are next (Skills distribution deferred by D18; the
-dashboard stands), and both build on the words `scan` and `sync` already print. Those words came from five decisions written one at a time (D6, D9, D10,
-D12, D14, D16) and had drifted: `current` was a pack status and also the `SyncResult` kind for
-"nothing written"; `written` printed as `opened` or `updated`; `planned` was summarized as
-`would write`; the `sync --all` status column showed `refused` or `failed` for some rows and a
-pack status for the others; only `both-full` had normalization identifiers (`wrapper` / `merge`
-in `bothFull`), while the `eligible` row said `rename` or `swap` where the plan said `move` for
-the same operation. [status-model.md](status-model.md) is now the one glossary, with four
+dashboard stands), and both build on the words `scan` and `sync` already print. Those words
+came from five decisions written one at a time (D6, D9, D10, D12, D14, D16) and had drifted:
+`current` was a pack status and also the `SyncResult` kind for "nothing written"; `written`
+printed as `opened` or `updated`; `planned` was summarized as `would write`; the `sync --all`
+status column showed `refused` or `failed` for some rows and a pack status for the others; only
+`both-full` had normalization identifiers (`wrapper` / `merge` in `bothFull`), while the
+`eligible` row said `rename` or `swap` where the plan said `move` for the same operation. [status-model.md](status-model.md) is now the one glossary, with four
 vocabularies (shape, normalization, pack status, sync outcome), a transition table, the
 lifecycle, and the surfaces each word appears on. Rule: a new value is added to the glossary
 first; `tests/status-model.test.ts` fails on an identifier or label the glossary does not name.
