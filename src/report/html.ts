@@ -13,6 +13,7 @@ import type {
 import type { SyncAllResult } from "../sync/all.ts";
 import {
   LOCK_STATE_LABEL,
+  NESTED_KIND_LABEL,
   OUTCOME_LABEL,
   OUTCOME_ORDER,
   SHAPE_LABEL,
@@ -21,7 +22,12 @@ import {
   type SyncOutcomeKind,
   UNMEASURED,
 } from "./labels.ts";
-import { describePersonalCopy, describeScope, SHAPE_NOTE } from "./render.ts";
+import {
+  describeExcludedNested,
+  describePersonalCopy,
+  describeScope,
+  SHAPE_NOTE,
+} from "./render.ts";
 import { outcomeDetail } from "./sync.ts";
 
 /**
@@ -69,6 +75,10 @@ export function renderHtml(report: ScanReport, options: HtmlOptions): string {
     body: sections.join("\n"),
     version: options.version,
     generatedAt: report.scannedAt,
+    footnote:
+      report.excludedNested.length > 0
+        ? `${esc(describeExcludedNested(report.excludedNested))}: ${report.excludedNested.map((n) => `<span class="mono">${esc(n.name)}</span> (${esc(NESTED_KIND_LABEL[n.kind])} in <span class="mono">${esc(n.parent)}</span>)`).join(", ")}`
+        : null,
   });
 }
 
@@ -782,6 +792,8 @@ interface Document {
   readonly body: string;
   readonly version: string;
   readonly generatedAt: string;
+  /** Already-escaped HTML printed above the footer line, or null for none (D24). */
+  readonly footnote?: string | null;
 }
 
 function document(doc: Document): string {
@@ -805,7 +817,7 @@ ${CSS}
 ${doc.body}
 </main>
 <footer>
-  rulecheck v${esc(doc.version)} · generated ${esc(doc.generatedAt)} · <a href="${GLOSSARY_URL}">status-model glossary</a>
+${doc.footnote ? `  <p class="footnote">${doc.footnote}</p>\n` : ""}  rulecheck v${esc(doc.version)} · generated ${esc(doc.generatedAt)} · <a href="${GLOSSARY_URL}">status-model glossary</a>
 </footer>
 </body>
 </html>
@@ -940,6 +952,7 @@ details.repo:target summary { box-shadow: inset 3px 0 0 var(--accent); }
 .card-body { padding: 0 0 16px 20px; }
 .card-body table { margin-top: 0; }
 footer { margin: 64px auto 40px; padding-top: 16px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+footer .footnote { margin: 0 0 8px; }
 @media print {
   body { font-size: 11px; }
   header, main, footer { max-width: none; padding: 0; }

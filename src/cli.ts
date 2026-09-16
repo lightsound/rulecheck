@@ -33,6 +33,13 @@ const maxDepth = Flag.Int("max-depth").pipe(
   Flag.withDefault(12),
 );
 
+const includeNested = Flag.Boolean("include-nested").pipe(
+  Flag.withDescription(
+    "Scan repositories nested inside other repositories (submodules, clones inside a checkout) as their own repositories. By default they are excluded from the scan and counted in the footer.",
+  ),
+  Flag.withDefault(false),
+);
+
 const personal = Flag.Boolean("personal").pipe(
   Flag.withDescription(
     "Include the personal layer (~/.claude/CLAUDE.md, its imports, ~/.claude/rules). Use --no-personal to skip.",
@@ -68,13 +75,14 @@ const writeHtml = (path: string, content: string) =>
 
 const scanCommand = Command.make(
   "scan",
-  { root, json, all, maxDepth, personal, packs, html },
+  { root, json, all, maxDepth, includeNested, personal, packs, html },
   (config) =>
     Effect.gen(function* () {
       const home = config.personal ? (process.env.HOME ?? null) : null;
       const spec = Option.getOrNull(config.packs);
       const report = yield* scan(config.root, {
         maxDepth: config.maxDepth,
+        includeNested: config.includeNested,
         home,
         packs: spec === null ? null : yield* resolvePacks(spec),
       });

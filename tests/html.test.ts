@@ -171,6 +171,7 @@ const REPORT: ScanReport = {
   root: "/tree",
   scannedAt: "2026-09-16T00:00:00.000Z",
   repos: [HOSTILE, QUIET, EMPTY, OTHER],
+  excludedNested: [],
   duplicates: [
     {
       contentHash: "d",
@@ -585,6 +586,28 @@ describe("renderHtml", () => {
     expect(html).toContain(
       `rulecheck v0.0.1 · generated 2026-09-16T00:00:00.000Z · <a href="${GLOSSARY_URL}">status-model glossary</a>`,
     );
+    expect(html).not.toContain('class="footnote"');
+  });
+
+  test("excluded nested repositories are a footnote, escaped (D24)", () => {
+    const nested = renderHtml(
+      {
+        ...REPORT,
+        excludedNested: [
+          {
+            root: "/tree/github.com/acme/quiet/<vendor>",
+            name: "acme/quiet/<vendor>",
+            parent: "acme/quiet",
+            kind: "submodule",
+          },
+        ],
+      },
+      { version: "0.0.1" },
+    );
+    expect(nested).toContain(
+      '<p class="footnote">1 nested repository excluded (1 submodule): a repository inside another repository is a different project; --include-nested scans them as their own: <span class="mono">acme/quiet/&lt;vendor&gt;</span> (submodule in <span class="mono">acme/quiet</span>)</p>',
+    );
+    expect(nested).not.toContain("<vendor>");
   });
 
   test("nothing taken from the scanned tree reaches the page unescaped", () => {

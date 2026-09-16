@@ -7,6 +7,7 @@ import {
   type BlockIssue,
   type CanonicalShape,
   type DuplicateGroup,
+  type ExcludedNestedRepo,
   type ForeignRegion,
   type InstructionFile,
   type ManagedBlock,
@@ -27,6 +28,8 @@ import { type DiscoveredRepo, walk } from "./walk.ts";
 
 export interface ScanOptions {
   readonly maxDepth?: number;
+  /** Scan repositories nested inside other repositories as their own entries (D24). */
+  readonly includeNested?: boolean;
   /** Files with fewer non-empty lines than this are excluded from duplicate detection. */
   readonly minDuplicateLines?: number;
   /** Home directory whose `~/.claude` layer should be included, or `null` to skip it. */
@@ -50,10 +53,13 @@ export const scan = (
     const path = yield* Path.Path;
     const resolvedRoot = path.resolve(root);
 
-    const discovered = yield* walk(resolvedRoot, { maxDepth: options.maxDepth ?? 12 });
+    const discovered = yield* walk(resolvedRoot, {
+      maxDepth: options.maxDepth ?? 12,
+      includeNested: options.includeNested ?? false,
+    });
 
     const repos = yield* Effect.forEach(
-      discovered,
+      discovered.repos,
       (repo) => analyzeRepo(repo, resolvedRoot, fs, path),
       { concurrency: 8 },
     );
@@ -88,6 +94,14 @@ export const scan = (
       root: resolvedRoot,
       scannedAt: new Date().toISOString(),
       repos,
+      excludedNested: discovered.excludedNested.map(
+        (nested): ExcludedNestedRepo => ({
+          root: nested.root,
+          name: displayName(nested.root, resolvedRoot),
+          parent: displayName(nested.parent, resolvedRoot),
+          kind: nested.kind,
+        }),
+      ),
       duplicates,
       personal,
       distribution,

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { describeNormalization } from "../src/domain/pack.ts";
 import type { Normalization } from "../src/domain/types.ts";
 import {
+  NESTED_KIND_LABEL,
   OUTCOME_LABEL,
   OUTCOME_ORDER,
   SHAPE_LABEL,
@@ -64,6 +65,13 @@ describe("docs/status-model.md", () => {
   test("names every normalization identifier and its eligible-row sentence", () => {
     for (const id of Object.keys(NORMALIZATIONS) as Normalization[]) {
       expectInGlossary(id, describeNormalization(id, "CLAUDE.md"));
+    }
+  });
+
+  test("names the nested repository kinds as words outside the model", () => {
+    for (const [id, label] of Object.entries(NESTED_KIND_LABEL)) {
+      expectInGlossary(id, `\`${label}\``);
+      expect(label).toBe(id.replaceAll("-", " "));
     }
   });
 

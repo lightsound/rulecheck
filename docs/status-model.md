@@ -195,3 +195,9 @@ Not part of the four vocabularies; listed so nobody mistakes them for one.
   `missing-path`. Reasons a row is `blocked` or a sync is `refused`, not states.
 - `SyncRefused` and `SyncFailed` (`src/sync/sync.ts`): the errors of the single-target path that
   `sync --all` turns into the `refused` and `failed` outcomes; both carry the measured status.
+- `NestedRepoKind`: `submodule` (label `submodule`; `.git` is a file, or the enclosing
+  repository's `.gitmodules` lists the path) and `nested-clone` (label `nested clone`; `.git` is
+  a directory nobody lists), D24. Why a repository inside another repository was left out of
+  `scan` (`excludedNested[].kind` in `--json`, the footer of the text report, the footnote of the
+  HTML page). Not a status: an excluded repository has no shape and no pack status until
+  `--include-nested` scans it as its own.

@@ -1,5 +1,7 @@
 import type {
   CanonicalShape,
+  ExcludedNestedRepo,
+  NestedRepoKind,
   PackDistribution,
   PackStatus,
   PersonalLayer,
@@ -7,7 +9,7 @@ import type {
   RepoReport,
   ScanReport,
 } from "../domain/types.ts";
-import { LOCK_STATE_LABEL, SHAPE_LABEL, STATUS_LABEL } from "./labels.ts";
+import { LOCK_STATE_LABEL, NESTED_KIND_LABEL, SHAPE_LABEL, STATUS_LABEL } from "./labels.ts";
 
 /** Advice printed under a repository whose shape is not the convention; null where nothing is to do. */
 export const SHAPE_NOTE: Record<CanonicalShape, string | null> = {
@@ -68,7 +70,31 @@ export function renderText(report: ScanReport, options: { readonly all?: boolean
     out.push("");
   }
 
+  if (report.excludedNested.length > 0) {
+    out.push(describeExcludedNested(report.excludedNested));
+    for (const nested of report.excludedNested) {
+      out.push(
+        `      ${pad(nested.name, 44)} ${pad(NESTED_KIND_LABEL[nested.kind], 15)} in ${nested.parent}`,
+      );
+    }
+    out.push("");
+  }
+
   return out.join("\n");
+}
+
+/**
+ * D24: the footer line of the text report and the footnote of the HTML page. Names the count,
+ * the breakdown by kind, and the flag that scans them anyway.
+ */
+export function describeExcludedNested(nested: ReadonlyArray<ExcludedNestedRepo>): string {
+  const count = nested.length;
+  const breakdown = (Object.keys(NESTED_KIND_LABEL) as NestedRepoKind[])
+    .map((kind) => [kind, nested.filter((n) => n.kind === kind).length] as const)
+    .filter(([, n]) => n > 0)
+    .map(([kind, n]) => `${n} ${plural(n, NESTED_KIND_LABEL[kind], `${NESTED_KIND_LABEL[kind]}s`)}`)
+    .join(", ");
+  return `${count} nested ${plural(count, "repository", "repositories")} excluded (${breakdown}): a repository inside another repository is a different project; --include-nested scans them as their own`;
 }
 
 function renderDistribution(distribution: PackDistribution): string[] {

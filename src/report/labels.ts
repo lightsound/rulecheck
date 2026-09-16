@@ -1,4 +1,9 @@
-import type { CanonicalShape, PackStatus, SkillLockState } from "../domain/types.ts";
+import type {
+  CanonicalShape,
+  NestedRepoKind,
+  PackStatus,
+  SkillLockState,
+} from "../domain/types.ts";
 import type { SyncOutcome } from "../sync/all.ts";
 
 /**
@@ -70,6 +75,12 @@ export const LOCK_STATE_LABEL: Record<SkillLockState, string> = {
   match: "matches lock",
   differs: "lock hash differs",
   locked: "locked",
+};
+
+/** Why a nested repository was left out of the scan (D24); a word outside the model in the glossary. */
+export const NESTED_KIND_LABEL: Record<NestedRepoKind, string> = {
+  submodule: "submodule",
+  "nested-clone": "nested clone",
 };
 
 /** Shown in the status column of `sync --all` when the target was never measured. */

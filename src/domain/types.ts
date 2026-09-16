@@ -388,6 +388,28 @@ export interface DuplicateGroup {
   readonly members: ReadonlyArray<DuplicateMember>;
 }
 
+/**
+ * Why a repository found inside another discovered repository was left out of the scan (D24).
+ *
+ * - `submodule`    `.git` is a file, or the enclosing repository's `.gitmodules` lists the path
+ * - `nested-clone` `.git` is a directory and no `.gitmodules` entry claims the path
+ */
+export type NestedRepoKind = "submodule" | "nested-clone";
+
+/**
+ * A repository inside another discovered repository (D24). A different project, so by default
+ * it is neither a scan target nor part of the enclosing repository: its tree is not walked.
+ * `--include-nested` scans it as its own repository instead, and this list is then empty.
+ */
+export interface ExcludedNestedRepo {
+  readonly root: string;
+  /** Display name, formed like `RepoReport.name`. */
+  readonly name: string;
+  /** Display name of the nearest enclosing repository. */
+  readonly parent: string;
+  readonly kind: NestedRepoKind;
+}
+
 export interface ScanTotals {
   readonly repos: number;
   readonly reposWithInstructions: number;
@@ -416,6 +438,8 @@ export interface ScanReport {
   readonly root: string;
   readonly scannedAt: string;
   readonly repos: ReadonlyArray<RepoReport>;
+  /** Repositories inside other repositories, not scanned (D24); empty with `--include-nested`. */
+  readonly excludedNested: ReadonlyArray<ExcludedNestedRepo>;
   readonly duplicates: ReadonlyArray<DuplicateGroup>;
   readonly personal: PersonalLayer | null;
   /** Null unless a pack directory was given. */
