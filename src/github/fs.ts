@@ -1,7 +1,14 @@
 import { ByteSize, Effect, FileSystem, Option } from "effect";
 import { type PlatformError, systemError } from "effect/PlatformError";
+import { isIgnoredDirectory } from "../domain/classify.ts";
 import type { FileChange } from "../domain/diff.ts";
-import { GitHubError, type GitHubService, type RepositoryRef, repositoryName } from "./client.ts";
+import {
+  GitHubError,
+  type GitHubService,
+  type RepositoryRef,
+  repositoryName,
+  type TreeEntry,
+} from "./client.ts";
 
 /**
  * A repository at one commit, presented as a read-only `FileSystem` (D10).
@@ -31,6 +38,9 @@ export function mountPath(repo: RepositoryRef): string {
   return `/github.com/${repo.owner}/${repo.name}`;
 }
 
+/** Most tree listings one snapshot may spend when the recursive listing is truncated. */
+export const MAX_TREE_LISTINGS = 200;
+
 /** Fetch the tree of `sha` and lay it out under `mount`. */
 export const repositorySnapshot = (
   github: GitHubService,
@@ -40,17 +50,10 @@ export const repositorySnapshot = (
 ): Effect.Effect<Snapshot, GitHubError> =>
   Effect.gen(function* () {
     const commit = yield* github.getCommit(repo, sha);
-    const tree = yield* github.getTree(repo, commit.tree);
-    if (tree.truncated) {
-      return yield* new GitHubError({
-        operation: "getTree",
-        status: null,
-        message: `the tree of ${repositoryName(repo)} is too large for the GitHub API to list in one call`,
-      });
-    }
+    const entries = yield* listTree(github, repo, commit.tree);
     const files = new Map<string, SnapshotEntry>();
     files.set(`${mount}/.git/HEAD`, textEntry(`${sha}\n`));
-    for (const entry of tree.entries) {
+    for (const entry of entries) {
       if (entry.type !== "blob") continue;
       // Both scan passes and the plan read the same few files; fetch each blob once.
       const read = yield* Effect.cached(
@@ -70,6 +73,61 @@ export const repositorySnapshot = (
     }
     return files;
   });
+
+/**
+ * Every blob below a tree. One recursive call answers for almost every repository; when the API
+ * truncates it (about 100,000 entries), the tree is listed one level and each subtree is asked
+ * for recursively in turn, so the cost is one call per subtree too large to list at once plus
+ * its children, not one call per directory. Directories the scan never descends into
+ * (`node_modules`, `.git`, build output; `isIgnoredDirectory`) are not listed. More than
+ * `MAX_TREE_LISTINGS` calls is a `GitHubError`, so one repository cannot spend a run's quota.
+ */
+const listTree = (
+  github: GitHubService,
+  repo: RepositoryRef,
+  treeSha: string,
+): Effect.Effect<ReadonlyArray<TreeEntry>, GitHubError> => {
+  let listings = 0;
+  const overBudget = () =>
+    new GitHubError({
+      operation: "getTree",
+      status: null,
+      message: `the tree of ${repositoryName(repo)} needs more than ${MAX_TREE_LISTINGS} listings; it is too large to snapshot`,
+    });
+  const list = (
+    sha: string,
+    options?: { readonly recursive?: boolean },
+  ): Effect.Effect<
+    { readonly entries: ReadonlyArray<TreeEntry>; readonly truncated: boolean },
+    GitHubError
+  > => {
+    if (listings >= MAX_TREE_LISTINGS) return overBudget();
+    listings += 1;
+    return github.getTree(repo, sha, options);
+  };
+  const below = (
+    sha: string,
+    dirName: string,
+  ): Effect.Effect<ReadonlyArray<TreeEntry>, GitHubError> =>
+    Effect.gen(function* () {
+      const full = yield* list(sha);
+      if (!full.truncated) return full.entries;
+      const shallow = yield* list(sha, { recursive: false });
+      const entries: TreeEntry[] = [];
+      for (const entry of shallow.entries) {
+        if (entry.type !== "tree") {
+          entries.push(entry);
+          continue;
+        }
+        if (isIgnoredDirectory(dirName, entry.path)) continue;
+        for (const child of yield* below(entry.sha, entry.path)) {
+          entries.push({ ...child, path: `${entry.path}/${child.path}` });
+        }
+      }
+      return entries;
+    });
+  return below(treeSha, repo.name);
+};
 
 /** Apply planned changes (paths relative to `mount`) to a snapshot. */
 export function withChanges(

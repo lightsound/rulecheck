@@ -8,6 +8,16 @@
   "bin": {
     "rulecheck": "./src/main.ts"
   },
+  "exports": {
+    "./domain/*": "./src/domain/*.ts",
+    "./scan/*": "./src/scan/*.ts",
+    "./sync/*": "./src/sync/*.ts",
+    "./report/html": "./src/report/html.ts",
+    "./report/labels": "./src/report/labels.ts",
+    "./report/render": "./src/report/render.ts",
+    "./report/sync": "./src/report/sync.ts",
+    "./github/*": "./src/github/*.ts"
+  },
   "scripts": {
     "dev": "bun run src/main.ts",
     "test": "bun test",
