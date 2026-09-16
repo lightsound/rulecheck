@@ -96,9 +96,9 @@ structure, and are out of scope for automation (a lint may point them out later)
 
 Scope is the whole agent configuration surface: Rules, Skills, MCP, Hooks, Subagents/Commands.
 Delivery order is developer productivity first: Rules, then Skills (distribution deferred by
-D18; the inventory stands), then MCP/Hooks. MCP and Hooks
-are **governance targets** (inventory, allow/deny, required), not pack-distribution targets,
-because they carry secrets and execution rights.
+D18; the inventory stands), then MCP/Hooks. MCP and Hooks are **governance targets** (inventory,
+allow/deny, required), not pack-distribution targets, because they carry secrets and execution
+rights.
 
 The pack unit is generalized from "an `AGENTS.md` fragment" to **a set of files**: Skills are
 distributed as directories (`.cursor/skills/<name>/SKILL.md`, `.claude/skills/<name>/`), so a pack
@@ -526,7 +526,8 @@ came from five decisions written one at a time (D6, D9, D10, D12, D14, D16) and 
 printed as `opened` or `updated`; `planned` was summarized as `would write`; the `sync --all`
 status column showed `refused` or `failed` for some rows and a pack status for the others; only
 `both-full` had normalization identifiers (`wrapper` / `merge` in `bothFull`), while the
-`eligible` row said `rename` or `swap` where the plan said `move` for the same operation. [status-model.md](status-model.md) is now the one glossary, with four
+`eligible` row said `rename` or `swap` where the plan said `move` for the same operation.
+[status-model.md](status-model.md) is now the one glossary, with four
 vocabularies (shape, normalization, pack status, sync outcome), a transition table, the
 lifecycle, and the surfaces each word appears on. Rule: a new value is added to the glossary
 first; `tests/status-model.test.ts` fails on an identifier or label the glossary does not name.
