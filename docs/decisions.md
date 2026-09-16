@@ -95,7 +95,8 @@ structure, and are out of scope for automation (a lint may point them out later)
 ## 2026-09-15 D8: Scope is the agent configuration surface; Rules and Skills first
 
 Scope is the whole agent configuration surface: Rules, Skills, MCP, Hooks, Subagents/Commands.
-Delivery order is developer productivity first: Rules, then Skills, then MCP/Hooks. MCP and Hooks
+Delivery order is developer productivity first: Rules, then Skills (distribution deferred by
+D18; the inventory stands), then MCP/Hooks. MCP and Hooks
 are **governance targets** (inventory, allow/deny, required), not pack-distribution targets,
 because they carry secrets and execution rights.
 
@@ -220,7 +221,7 @@ is the only directory that issues writes. `src/domain/sync.ts` (plan, block rend
 request text) and `src/domain/diff.ts` stay pure. `src/scan/` remains read-only.
 
 **Not in this step.** Whole managed files in a pack (D8 `file` entries) are inventoried by scan
-but not written; nested `AGENTS.md` blocks are not touched; the pack `AGENTS.md` in
+but not written (deferred indefinitely by D18); nested `AGENTS.md` blocks are not touched; the pack `AGENTS.md` in
 `lightsound/agent-rules` is not yet wrapped in its own markers (both marker-wrapped and bare
 bodies are read; settled by D11: it stays bare); no fan-out (`--all`, Step 5, now D14, which also
 replaces the unconditional rerun force-push above with a content check).
@@ -517,8 +518,8 @@ touching it would be authoring (D1). D12's `wrapper` normalization therefore fir
 
 ## 2026-09-15 D17: One glossary for the distribution state model; identifiers, labels, and `--json` follow it
 
-Skills distribution and a status dashboard are next, and both build on the words `scan` and
-`sync` already print. Those words came from five decisions written one at a time (D6, D9, D10,
+Skills distribution and a status dashboard are next (Skills distribution deferred by D18; the
+dashboard stands), and both build on the words `scan` and `sync` already print. Those words came from five decisions written one at a time (D6, D9, D10,
 D12, D14, D16) and had drifted: `current` was a pack status and also the `SyncResult` kind for
 "nothing written"; `written` printed as `opened` or `updated`; `planned` was summarized as
 `would write`; the `sync --all` status column showed `refused` or `failed` for some rows and a
@@ -562,6 +563,85 @@ same `eligible` row ends in `planned`, `opened`, `updated`, `up-to-date`, or `re
 on the dry-run flag, the tool-owned branch, and checks that run after measurement. Two
 vocabularies with an explicit "results from" relation is the minimum, and that relation is what
 the glossary's outcome table records.
+
+## 2026-09-16 D18: Skills distribution is deferred; rulecheck keeps the inventory, `skills` keeps the install
+
+D8 put Skills second in the delivery order and generalized the pack to a set of files so that a
+pack could carry whole skill directories; D10 left those `file` entries "inventoried but not
+written", and the roadmap carried the gap forward as unfinished work. It is not unfinished; it is
+not being built, for four reasons:
+
+1. **The installer exists and D8 says not to rebuild it.** `npx skills` (vercel-labs/skills) is
+   the de facto installer: it resolves a source, copies the directory into `.agents/skills/`,
+   symlinks the per-tool directories, and records source and hash in `skills-lock.json`.
+   rulecheck already reads that lock (D9) instead of defining a manifest; writing skill
+   directories through the sync would be a second installer with its own copy semantics, the kind
+   of overlap D8 rules out.
+2. **No concrete cross-repository skill need has appeared.** Every subscriber so far needs the
+   `AGENTS.md` block; none needs the same skill in many repositories. A distribution path without
+   a first consumer would be designed against a guess.
+3. **Skills are stack-specific more often than repository-agnostic.** A skill for one framework
+   or one deployment target belongs to the repositories on that stack, which is a per-repository
+   install decision, not a pack subscription. The pack model fits rules that hold everywhere
+   (D5); it fits few skills.
+4. **Visibility is already covered.** The Step 2 inventory lists every installed skill per
+   repository with its lock state, and the one finding (a lock entry whose directory is missing)
+   is reported. What a dashboard needs to show about skills is there without a write path.
+
+Decision: **no skill directory is written by `sync`**, and a pack's `file` entries stay what they
+are today, inventoried by `scan` and ignored by the planner. The D8 generalization (a pack is a
+set of files) is kept as vocabulary; nothing is removed.
+
+If a cross-repository skill need does appear, the direction is **rulecheck manages subscription
+and status, `skills` performs the install**: a pack lists skill sources, `scan` reports per
+subscriber whether each listed skill is present and matches its lock (the inventory already
+knows), and the sync's pull request carries the `npx skills add <source>` command (or runs it
+through the GitHub API only if that proves necessary) rather than copying files. That keeps one
+installer, one lock format, and rulecheck's role as the status view (D6). It needs its own
+decision entry before it is built.
+
+Considered and rejected: removing the `file` pack kind and the D8 generalization (churn without
+benefit; the inventory code is used); building the copy now behind a flag (a second write path
+without a consumer, contrary to the rule that every write path is a decision entry).
+
+## 2026-09-16 D19: `--html` is a rendering of the report, not a write path; the first read-only slice of the status view
+
+D6 said `rulecheck scan` is the backend of a status view; D14 made `sync --all --dry-run` the
+remote distribution report; D17 fixed the words both print. Before a dashboard is built, someone
+who does not run the CLI has to be able to read those reports and judge whether a dashboard is
+worth paying for. `scan --html <file>` and `sync --all --html <file>` write the same
+`ScanReport` / `SyncAllResult` the text report prints as one self-contained HTML page: inline
+CSS, no script, no external asset, readable in light and dark, printable.
+
+**What it is.** A second renderer next to the text one (`src/report/html.ts`), fed from the same
+data, using the same label tables (`src/report/labels.ts`) and the same sentences (the shape
+notes, `describeScope`, `describePersonalCopy`, the outcome detail are exported from the text
+renderer, not duplicated). It detects and computes nothing the report does not already carry.
+The page is a standalone report format today and the read-only first slice of the status view:
+the headline numbers, the repo × pack matrix, and the per-repository cards are the views a
+dashboard would show, rendered once from a scan instead of served live. A dashboard proper (a
+GitHub App plus webhook so the status updates without a local tree, the web or desktop UI on
+top) remains future work on the roadmap and is not started by this entry.
+
+**What it is not.** Not a write path in the D10 sense. The file goes to the path the user names,
+like stdout redirected; nothing is written into a scanned repository, a local checkout, `~/`, or
+GitHub. It is the only file `scan` writes. It is written after the stdout report, so an
+unwritable path loses nothing already measured or, on a live `sync --all`, already opened, and
+it fails as every expected failure does: one stderr line, exit 1. `AGENTS.md` records the same
+distinction under Rules so the "one write path" rule keeps its meaning.
+
+**Decisions, with the search rounds behind each:**
+
+| Decision | Chosen | Alternatives considered | Settled in round |
+| --- | --- | --- | --- |
+| Where `--html` lives | A flag on `scan` and on `sync --all` (refused with a single target: the table is what it renders), so one command produces both outputs of one measurement | a `report` subcommand reading `scan --json` (a second step, and a second parser of the JSON shape); `--format html` to stdout (the page is meant to be opened, and `--json` already owns stdout) | 2 |
+| Relation to stdout | Additive: text or `--json` still print, the file is written afterwards | replace stdout when `--html` is given (drops the shell-visible result, and the file failure would leave nothing) | 1 |
+| Distribution counts in the headline | All six statuses, `not subscribed` included, in glossary order | only `current` / `outdated` / `eligible` / `blocked` (hides `modified`, the one state that needs a human) | 1 |
+| Distribution table shape | Repo × pack matrix, packs as columns with rev, subscribers, and per-status counts in the header; rows subscribed to no pack dimmed | one table per pack as the text report prints (does not show a repository's whole subscription at a glance) | 1 |
+| Collapsing | `<details open>` per repository, no script; print gets every card expanded because they start open | a script to open all before print; collapsed by default (unprintable without a script) | 1 |
+| Duplicates section | Included between the cards and the personal layer when the report has any | omit (the spec order did not name it; leaving out data the text report prints would make the page the lesser report) | 1 |
+| Card badge | Counts findings, malformed `agent-rules` markers, and skill issues; shape notes and the prose-wrapper note are advice, not findings | findings only (a repository whose only problem is a malformed marker showed the marker with no badge) | 2 |
+| Version and glossary link | `version` from `package.json` passed in by the CLI; the glossary URL a constant in `html.ts` | a `repository` field in `package.json` (nothing else needs it) | 1 |
 
 ## Recording rule
 

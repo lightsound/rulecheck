@@ -20,7 +20,12 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
   distribution report (D14); `scan --packs` reflects local checkouts only. The words of that
   model (shape, normalization, pack status, sync outcome) are fixed in one glossary,
   [status-model.md](status-model.md), which code, labels, and `scan --json` (`schemaVersion: 1`)
-  follow (D17); Skills and a dashboard build on it.
+  follow (D17); a dashboard builds on it, and its first read-only slice exists: `scan --html
+  <file>` and `sync --all --html <file>` render the same reports as one self-contained HTML page
+  (headline numbers, repo × pack matrix, per-repository cards; a rendering, not a write path,
+  D19). Skills distribution is deferred (D18): `scan` keeps
+  the per-repository skills inventory and lock state, `npx skills` stays the installer, and no
+  skill directory is written by `sync`.
 - `lightsound/agent-rules/packs/base/AGENTS.md`: the portable pack `base` (D7 naming),
   environment-neutral only (Step 1, [agent-rules#1](https://github.com/lightsound/agent-rules/pull/1)).
   The repository's root `AGENTS.md` instructs agents working in agent-rules itself and is not
@@ -79,7 +84,8 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
 - Left for Step 3: `--packs` still needs a local checkout of the pack repository (D6 wants the
   remote); whole managed files in a pack are inventoried but not compared with the target repo;
   blocks in nested `AGENTS.md` or in `CLAUDE.md` are listed but do not enter the status.
-  (`--packs` remote form resolved in Step 3; the other two remain.)
+  (`--packs` remote form resolved in Step 3; the managed-file comparison is closed by the D18
+  deferral, not by code; nested blocks remain.)
 
 ## Step 3: First write path — done 2026-09-15
 
@@ -89,7 +95,7 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
   `--dry-run` prints the diff.
 - Shape normalization in the same PR for deterministic shapes (D6). Blocked shapes refuse.
 - A pack is a set of files (D8): the first pack carries only the `AGENTS.md` block; whole managed
-  files (skill directories) follow once Step 2 reports their inventory.
+  files (skill directories) were to follow once Step 2 reported their inventory (deferred by D18).
 - Done when: one PR on a solo lightsound repo, merged, and the next `scan` shows `current`.
 - Result: D10 records the write path. `rulecheck sync <owner/repo> --pack <id> --packs <source>
   [--base <branch>] [--dry-run]` in `src/sync/sync.ts`, the `GitHub` service and `gh api` layer in
@@ -176,12 +182,11 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
   repositories whose pull requests had merged, because the checkouts sat on other branches.
   `sync --all --dry-run` measures every subscriber's default-branch HEAD on GitHub and is the
   distribution report from now on; no separate `status` command (D14).
-- Carried from Step 3: whole managed files in a pack (D8 `file` entries) are inventoried but not
-  written; auto-merge as a per-repository opt-in (D6); a stale `agent-rules/<pack>` branch whose
-  pull request was closed without merge is rewritten on the next sync (D10) rather than skipped;
-  written paths always get mode `100644` (an executable or symlinked root file is replaced by a
-  regular file). Not a target of `--all`: a repository that carries a block without a subscription
-  (only `scan --packs` over a checkout sees it).
+- Carried from Step 3: auto-merge as a per-repository opt-in (D6); a stale `agent-rules/<pack>`
+  branch whose pull request was closed without merge is rewritten on the next sync (D10) rather
+  than skipped; written paths always get mode `100644` (an executable or symlinked root file is
+  replaced by a regular file). Not a target of `--all`: a repository that carries a block without
+  a subscription (only `scan --packs` over a checkout sees it).
 - Multi-pack rollout, observed 2026-09-15 when `base` was split into `base` + `personal` across
   seven subscribers (14 pull requests): each pack is its own branch and pull request per
   repository (D10), both cut from the same default-branch head. The `base` update rewrites the
@@ -195,6 +200,21 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
   removes the second phase at the cost of the one-pack-one-branch invariant in D10; needs a
   decision entry before it is built.
 - Later: GitHub App + webhook so status updates without a local tree; the web/desktop UI on top.
+
+## Deferred: Skills distribution (D18, 2026-09-16)
+
+- Not built: writing skill directories (a pack's D8 `file` entries) into subscribers through
+  `sync`. `npx skills` (vercel-labs/skills, `skills-lock.json`) is the de facto installer and D8
+  says not to rebuild it; no cross-repository skill need has appeared; skills are stack-specific
+  more often than repository-agnostic; the Step 2 inventory and lock-drift reporting already give
+  the visibility a dashboard needs.
+- What stays: `scan` lists every installed skill per repository with its lock state and reports a
+  lock entry whose directory is missing. A pack's `file` entries are inventoried and ignored by
+  the planner.
+- If a need appears: rulecheck manages subscription and status (which subscriber has which
+  listed skill, and whether it matches the lock) and delegates the install to the `skills` CLI,
+  with the pull request carrying the `npx skills add` command instead of copied files. Needs a
+  decision entry first.
 
 ## Not doing
 

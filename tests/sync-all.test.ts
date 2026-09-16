@@ -3,6 +3,7 @@ import { BunServices } from "@effect/platform-bun";
 import { Effect, Layer } from "effect";
 import { hashBlockBody } from "../src/domain/block.ts";
 import { GitHub, GitHubError } from "../src/github/client.ts";
+import { renderSyncAllHtml } from "../src/report/html.ts";
 import { renderSyncAll } from "../src/report/sync.ts";
 import { resolvePacks } from "../src/scan/packs.ts";
 import { type SyncAllOptions, type SyncAllResult, syncAll } from "../src/sync/all.ts";
@@ -105,6 +106,14 @@ describe("syncAll", () => {
       /acme\/gone\s+base\s+-\s+failed: GitHub getRepository failed \(HTTP 404\): Not Found/,
     );
     expect(text).toEndWith("7 targets: 1 nothing to do, 3 planned, 2 refused, 1 failed");
+
+    // `--html` renders the same rows: measured status, outcome label, `+N -M` detail.
+    const html = renderSyncAllHtml(result, { version: "test", generatedAt: "now" });
+    expect(html).toContain(
+      '<td class="mono">acme/eligible</td><td class="mono">base</td><td><span class="chip status-eligible">eligible</span></td><td><span class="chip outcome-planned">planned</span> +5 -0: insert block `base` into AGENTS.md',
+    );
+    expect(html).toContain('<span class="chip outcome-planned">3 planned</span>');
+    expect(html).toContain('<td><span class="muted">-</span></td>');
   });
 
   test("real run: one pull request per target, refusals and the failure isolated; a rerun is idempotent; merged targets read current", async () => {

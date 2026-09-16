@@ -1,4 +1,5 @@
 import { Console, Data, Effect, Runtime } from "effect";
+import type { PlatformError } from "effect/PlatformError";
 import type { GitHubError } from "../github/client.ts";
 import type { PackSourceError } from "../scan/packs.ts";
 import type { SyncRefused } from "../sync/sync.ts";
@@ -29,6 +30,15 @@ export const reportFailure = (
   error: SyncRefused | PackSourceError | GitHubError,
 ): Effect.Effect<never, Reported> =>
   Console.error(renderFailure(error)).pipe(Effect.andThen(new Reported()));
+
+/** The `--html` file could not be written; the stdout report has already been printed. */
+export const reportUnwritable = (
+  path: string,
+  error: PlatformError,
+): Effect.Effect<never, Reported> =>
+  Console.error(`rulecheck: could not write ${path}: ${error.message}`).pipe(
+    Effect.andThen(new Reported()),
+  );
 
 /** A run that finished but whose report contains targets GitHub could not answer for (D14). */
 export const reportIncomplete = (message: string): Effect.Effect<never, Reported> =>

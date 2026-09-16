@@ -1,6 +1,8 @@
-import { Console, Effect, Option } from "effect";
+import { Console, Effect, FileSystem, Option } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
-import { reportFailure, reportIncomplete } from "./report/failure.ts";
+import pkg from "../package.json" with { type: "json" };
+import { reportFailure, reportIncomplete, reportUnwritable } from "./report/failure.ts";
+import { renderHtml, renderSyncAllHtml } from "./report/html.ts";
 import { renderText } from "./report/render.ts";
 import { renderSync, renderSyncAll } from "./report/sync.ts";
 import { resolvePacks } from "./scan/packs.ts";
@@ -44,21 +46,43 @@ const packs = Flag.String("packs").pipe(
   Flag.optional,
 );
 
-const scanCommand = Command.make("scan", { root, json, all, maxDepth, personal, packs }, (config) =>
+const html = Flag.File("html").pipe(
+  Flag.withDescription(
+    "Also write the report as a single self-contained HTML file (inline CSS, no scripts) at this path, for reading in a browser or printing.",
+  ),
+  Flag.optional,
+);
+
+/**
+ * The HTML report is output the user asked for, like stdout; it is the only file `scan` writes.
+ * Written after the stdout report, so a bad path loses nothing already measured or opened, and it
+ * fails as every expected failure does: one stderr line, exit 1.
+ */
+const writeHtml = (path: string, content: string) =>
   Effect.gen(function* () {
-    const home = config.personal ? (process.env.HOME ?? null) : null;
-    const spec = Option.getOrNull(config.packs);
-    const report = yield* scan(config.root, {
-      maxDepth: config.maxDepth,
-      home,
-      packs: spec === null ? null : yield* resolvePacks(spec),
-    });
-    if (config.json) {
-      yield* Console.log(JSON.stringify(report, null, 2));
-      return;
-    }
-    yield* Console.log(renderText(report, { all: config.all }));
-  }).pipe(Effect.catchTags({ PackSourceError: reportFailure, GitHubError: reportFailure })),
+    const fs = yield* FileSystem.FileSystem;
+    yield* fs.writeFileString(path, content);
+  }).pipe(Effect.catchTag("PlatformError", (error) => reportUnwritable(path, error)));
+
+const scanCommand = Command.make(
+  "scan",
+  { root, json, all, maxDepth, personal, packs, html },
+  (config) =>
+    Effect.gen(function* () {
+      const home = config.personal ? (process.env.HOME ?? null) : null;
+      const spec = Option.getOrNull(config.packs);
+      const report = yield* scan(config.root, {
+        maxDepth: config.maxDepth,
+        home,
+        packs: spec === null ? null : yield* resolvePacks(spec),
+      });
+      if (config.json) yield* Console.log(JSON.stringify(report, null, 2));
+      else yield* Console.log(renderText(report, { all: config.all }));
+      const htmlPath = Option.getOrNull(config.html);
+      if (htmlPath !== null) {
+        yield* writeHtml(htmlPath, renderHtml(report, { version: pkg.version, all: config.all }));
+      }
+    }).pipe(Effect.catchTags({ PackSourceError: reportFailure, GitHubError: reportFailure })),
 ).pipe(
   Command.withDescription(
     "Find AGENTS.md, CLAUDE.md, .cursor/rules and related files across repositories and report their shape, duplicates, and context budget. Read-only.",
@@ -100,7 +124,7 @@ const dryRun = Flag.Boolean("dry-run").pipe(
 
 const syncCommand = Command.make(
   "sync",
-  { repo: target, pack, packs: syncPacks, all: syncAllFlag, base, dryRun },
+  { repo: target, pack, packs: syncPacks, all: syncAllFlag, base, dryRun, html },
   (config) =>
     Effect.gen(function* () {
       const repo = Option.getOrNull(config.repo);
@@ -116,6 +140,16 @@ const syncCommand = Command.make(
         }
         const result = yield* syncAll({ packs: config.packs, pack: packId, dryRun: config.dryRun });
         yield* Console.log(renderSyncAll(result));
+        const htmlPath = Option.getOrNull(config.html);
+        if (htmlPath !== null) {
+          yield* writeHtml(
+            htmlPath,
+            renderSyncAllHtml(result, {
+              version: pkg.version,
+              generatedAt: new Date().toISOString(),
+            }),
+          );
+        }
         if (result.failed > 0) {
           return yield* reportIncomplete(
             `${result.failed} of ${result.rows.length} targets failed; see the rows marked failed`,
@@ -126,6 +160,12 @@ const syncCommand = Command.make(
       if (repo === null || packId === null) {
         return yield* new SyncRefused({
           message: "sync needs `<owner/repo> --pack <id>`, or `--all [--pack <id>]`",
+          status: null,
+        });
+      }
+      if (Option.isSome(config.html)) {
+        return yield* new SyncRefused({
+          message: "--html is available with --all only (the table is the report it renders)",
           status: null,
         });
       }

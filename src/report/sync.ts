@@ -69,7 +69,7 @@ export function renderSyncAll(result: SyncAllResult): string {
     `  ${pad("repository", repoWidth)}  ${pad("pack", packWidth)}  ${pad("status", 14)}  outcome`,
   );
   for (const row of result.rows) {
-    const [first, ...rest] = describe(row.outcome).split("\n");
+    const [first, ...rest] = describeOutcome(row.outcome).split("\n");
     out.push(
       `  ${pad(row.target.repo, repoWidth)}  ${pad(row.target.pack, packWidth)}  ${pad(statusOf(row.outcome), 14)}  ${first ?? ""}`.trimEnd(),
     );
@@ -85,27 +85,42 @@ function statusOf(outcome: SyncOutcome): string {
   return outcome.status === null ? UNMEASURED : STATUS_LABEL[outcome.status.status];
 }
 
-/** The outcome label followed by its detail. */
-function describe(outcome: SyncOutcome): string {
+/** The outcome label followed by its detail, as the text row prints it. */
+export function describeOutcome(outcome: SyncOutcome): string {
   const label = OUTCOME_LABEL[outcome.kind];
+  const detail = outcomeDetail(outcome);
   switch (outcome.kind) {
     case "refused":
-      return `${label}: ${outcome.message}`;
     case "failed":
-      return `${label}: ${
-        outcome.error._tag === "GitHubError"
-          ? renderFailure(outcome.error).replace(/^rulecheck: /, "")
-          : outcome.error.message
-      }`;
+      return `${label}: ${detail}`;
     case "nothing-to-do":
-      return `${label} (block at ${statusLocation(outcome.status)})`;
     case "up-to-date":
-      return `${label} (PR #${outcome.pullRequest.number} open, ${outcome.pullRequest.url})`;
+      return `${label} (${detail})`;
     case "planned":
-      return `${label} ${diffSummary(outcome.plan)}: ${outcome.plan.actions.join("; ")}`;
     case "opened":
     case "updated":
-      return `${label} PR #${outcome.pullRequest.number} (${outcome.pullRequest.url})`;
+      return `${label} ${detail}`;
+  }
+}
+
+/** The detail of an outcome without its label, for a surface that shows the label separately. */
+export function outcomeDetail(outcome: SyncOutcome): string {
+  switch (outcome.kind) {
+    case "refused":
+      return outcome.message;
+    case "failed":
+      return outcome.error._tag === "GitHubError"
+        ? renderFailure(outcome.error).replace(/^rulecheck: /, "")
+        : outcome.error.message;
+    case "nothing-to-do":
+      return `block at ${statusLocation(outcome.status)}`;
+    case "up-to-date":
+      return `PR #${outcome.pullRequest.number} open, ${outcome.pullRequest.url}`;
+    case "planned":
+      return `${diffSummary(outcome.plan)}: ${outcome.plan.actions.join("; ")}`;
+    case "opened":
+    case "updated":
+      return `PR #${outcome.pullRequest.number} (${outcome.pullRequest.url})`;
   }
 }
 
