@@ -892,6 +892,34 @@ another `.git` owns. `walk` already knew both facts and only lacked the rule tha
 boundary wins. Stopping at the inner `.git` is that rule, so the problem dissolves at the walk
 and nothing downstream needs to know a repository was nested.
 
+## 2026-09-16 D25: For the hosted App, the pack repository's files stay the source of truth; its database is a cache
+
+[app-design.md](app-design.md) designs the GitHub App MVP. Its one decision that changes what
+rulecheck writes: `subscriptions.json` and `packs/**` on the pack repository's default branch
+remain canonical for the App as they are for the CLI and the D23 workflow. The App's database
+holds a cache of those files keyed by commit sha, plus the history the App alone produces (status
+snapshots, runs, audit). Every cache row is reproducible from GitHub; dropping the database loses
+history, never configuration.
+
+Consequences: a subscription edit made in the App's UI is a pull request to the pack repository
+that changes `subscriptions.json`, on the tool-owned branch `rulecheck/subscriptions`, under the
+D10 ownership check (tip commit prefixed `chore(agent-rules):`), one open pull request carrying
+every pending change; the App never commits to a default branch. Subscribing a repository
+therefore takes two pull requests, one to the pack repository and one into the subscriber. The
+pack repository must be inside the App's installation so the App holds `Contents: write` on it.
+This is the second write path after `sync` (D10) and, like it, writes only through the `GitHub`
+service as a pull request; a pull-style CLI command that opens the same pull request from inside
+a repository is listed in the design as a candidate and needs its own entry before it is built.
+Nothing in the CLI changes with this entry.
+
+| Decision | Chosen | Alternatives considered | Settled in round |
+| --- | --- | --- | --- |
+| Source of truth for the App | Files in the pack repository; the database is a sha-keyed cache plus the App's own history | App database canonical with a generated file for the CLI (a second configuration store and an export the CLI must trust, roles to rebuild, branch protection lost); both writable with a merge rule (the conflict the D9 hash exists to detect, moved to configuration) | 2 |
+
+**Structural check.** The constraint is "one configuration, many readers" (CLI, workflow, App).
+It dissolves only if all three read one place, and the one place they already read is the pack
+repository; a database in front of it would be the second place, a cache behind it is not.
+
 ## Recording rule
 
 Add an entry here whenever a decision changes what rulecheck writes, what it reports, or which

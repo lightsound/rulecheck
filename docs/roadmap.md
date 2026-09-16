@@ -234,7 +234,7 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
   token's repository list, or its row reads `failed` and the run exits 1.
 - Later: a GitHub App replaces the PAT (installation token per run, writes attributed to the
   app) when the tool leaves the single-owner phase; it is the same App the dashboard's webhook
-  needs. Candidates not built now: a nightly `schedule` as a safety net, a `pull_request` dry
+  needs. Its MVP design is [app-design.md](app-design.md) (D25; nothing built yet). Candidates not built now: a nightly `schedule` as a safety net, a `pull_request` dry
   run on pack changes, the `--html` page as a run artifact.
 
 ## Deferred: Skills distribution (D18, 2026-09-16)
