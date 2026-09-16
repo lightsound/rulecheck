@@ -903,20 +903,21 @@ history, never configuration.
 
 Consequences: a subscription edit made in the App's UI changes `subscriptions.json` in the pack
 repository, never the database alone. How it lands is a per-installation setting,
-`subscriptionChanges`: `pull-request` (the default) opens a pull request on the tool-owned
-branch `rulecheck/subscriptions`, under the D10 ownership check (tip commit prefixed
+`subscriptionChanges`: `pull-request` (the default) opens a pull request on the tool-owned branch
+`rulecheck/subscriptions`, under the D10 ownership check (tip commit prefixed
 `chore(agent-rules):`), one open pull request carrying every pending change, so subscribing a
 repository takes two pull requests, one to the pack repository and one into the subscriber;
 `direct-commit`, meant for solo accounts, writes one commit on the pack repository's default
-branch as a fast-forward-only update (no force; a branch that moved between read and write makes the write refuse, and branch protection still applies), so the block's pull request follows at once. Under
-either value a subscriber repository is written only through the D10 pull request. The pack
-repository must be inside the App's installation (confirmed by the owner): the installation
-token reads and writes it, and a source outside would need a second credential. The writer is
-rulecheck code, `src/sync/subscribe.ts`, so `src/sync/` stays the only write path and the
-`fake-github.ts` rule applies; it writes only through the `GitHub` service, and it gets its own
-entry when it is built (M2). A pull-style CLI command that makes the same change from inside a
-repository is listed in the design as a candidate calling the same function. Nothing in the
-CLI changes with this entry.
+branch as a fast-forward-only update (no force; when the branch moved between read and write the
+writer measures and plans again from the new head once, and a second rejection is `refused`;
+branch protection still applies), so the block's pull request follows at once. Under either value
+a subscriber repository is written only through the D10 pull request. The pack repository must be
+inside the App's installation (confirmed by the owner): the installation token reads and writes
+it, and a source outside would need a second credential. The writer is rulecheck code,
+`src/sync/subscribe.ts`, so `src/sync/` stays the only write path and the `fake-github.ts` rule
+applies; it writes only through the `GitHub` service, and it gets its own entry when it is built
+(M2). A pull-style CLI command that makes the same change from inside a repository is listed in
+the design as a candidate calling the same function. Nothing in the CLI changes with this entry.
 
 | Decision | Chosen | Alternatives considered | Settled in round |
 | --- | --- | --- | --- |
