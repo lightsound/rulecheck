@@ -147,6 +147,16 @@ const QUIET = repo({
 
 const EMPTY = repo({ name: "acme/empty", shape: "none", normalization: "create" });
 
+/** Subscribed to no pack: its distribution row is dimmed. */
+const OTHER = repo({
+  name: "acme/other",
+  files: [file({ relativePath: "AGENTS.md" })],
+  budget: { cursor: 34, claudeCode: 0 },
+  blockIssues: [
+    { kind: "malformed-marker", file: "AGENTS.md", line: 2, message: "unpaired `agent-rules:end`" },
+  ],
+});
+
 const STATUSES: ReadonlyArray<PackStatus> = [
   "current",
   "outdated",
@@ -160,7 +170,7 @@ const REPORT: ScanReport = {
   schemaVersion: 1,
   root: "/tree",
   scannedAt: "2026-09-16T00:00:00.000Z",
-  repos: [HOSTILE, QUIET, EMPTY],
+  repos: [HOSTILE, QUIET, EMPTY, OTHER],
   duplicates: [
     {
       contentHash: "d",
@@ -239,8 +249,24 @@ const REPORT: ScanReport = {
         line: null,
         message: null,
       },
+      {
+        repo: "acme/other",
+        pack: "base",
+        status: "not-subscribed",
+        file: null,
+        line: null,
+        message: null,
+      },
+      {
+        repo: "acme/other",
+        pack: "frontend",
+        status: "not-subscribed",
+        file: null,
+        line: null,
+        message: null,
+      },
     ],
-    counts: { current: 1, outdated: 1, modified: 1, eligible: 1, blocked: 1, "not-subscribed": 1 },
+    counts: { current: 1, outdated: 1, modified: 1, eligible: 1, blocked: 1, "not-subscribed": 3 },
     personalCopies: [
       {
         pack: "base",
@@ -253,9 +279,9 @@ const REPORT: ScanReport = {
     warnings: ["subscriptions.json: <bad> entry"],
   },
   totals: {
-    repos: 3,
-    reposWithInstructions: 2,
-    files: 5,
+    repos: 4,
+    reposWithInstructions: 3,
+    files: 6,
     tokens: 1400,
     findings: 1,
     shapes: {
@@ -305,12 +331,12 @@ describe("renderHtml", () => {
 
   test("headline carries the totals and the per-tool token sums", () => {
     expect(html).toContain(
-      '<div class="label">Repositories</div><div class="value">3</div><div class="sub">2 with instruction files</div>',
+      '<div class="label">Repositories</div><div class="value">4</div><div class="sub">3 with instruction files</div>',
     );
     expect(html).toContain(
-      '<div class="label">Instruction files</div><div class="value">5</div><div class="sub">~1,400 tokens in total</div>',
+      '<div class="label">Instruction files</div><div class="value">6</div><div class="sub">~1,400 tokens in total</div>',
     );
-    expect(html).toContain("Cursor ~1,334<br>Claude Code ~74");
+    expect(html).toContain("Cursor ~1,368<br>Claude Code ~74");
     expect(html).toContain('<div class="label">Findings</div><div class="value">1</div>');
     expect(html).toContain(
       "1 managed blocks (1 modified, 1 malformed markers), 1 skills (1 issues)",
@@ -338,7 +364,8 @@ describe("renderHtml", () => {
       '<span class="mono">AGENTS.md:1</span> body no longer matches its hash=',
     );
     expect(html).toContain("create AGENTS.md with the block and a CLAUDE.md wrapper");
-    // The row of the repository that is not subscribed to any pack is dimmed; others are not.
+    // A repository subscribed to no pack gets a dimmed row; one with any other status does not.
+    expect(html).toContain('<tr class="quiet"><td class="mono">acme/other</td>');
     expect(html).not.toContain('<tr class="quiet"><td class="mono">acme/empty</td>');
     expect(html).toContain('<li class="warn">subscriptions.json: &lt;bad&gt; entry</li>');
     expect(html).toContain(
@@ -370,7 +397,10 @@ describe("renderHtml", () => {
     expect(html).toContain(
       '<td class="mono">.agents/skills/review</td><td class="num">2</td><td>lock hash differs</td><td>.claude</td>',
     );
-    expect(html).toContain('<span class="tag tag-attention">2 findings</span>');
+    // The badge counts findings, malformed markers, and skill issues; the shape note is advice.
+    expect(html).toContain('<span class="tag tag-attention">3 findings</span>');
+    expect(html).toContain('<span class="mono">AGENTS.md:2</span> unpaired `agent-rules:end`');
+    expect(html).toContain('<span class="tag tag-attention">1 finding</span>');
     // Repositories without instruction files are hidden unless asked for, as in the text report.
     expect(html).not.toContain('<span class="mono name">acme/empty</span>');
     expect(html).toContain("1 without instruction files hidden");
@@ -460,17 +490,18 @@ describe("renderSyncAllHtml", () => {
     generatedAt: "2026-09-16T00:00:00.000Z",
   });
 
-  test("one row per target with the measured status, the outcome label, and its detail", () => {
+  test("one row per target with the measured status, the outcome label once, and its detail", () => {
+    expect(page).not.toMatch(/<\/span> (nothing to do|refused:|failed:)/);
     expect(page).toContain("<title>rulecheck sync (dry run): 3 targets</title>");
     expect(page).toContain(
-      '<td class="mono">acme/current</td><td class="mono">base</td><td><span class="chip status-current">current</span></td><td><span class="chip outcome-nothing-to-do">nothing to do</span> nothing to do (block at AGENTS.md:3)</td>',
+      '<td class="mono">acme/current</td><td class="mono">base</td><td><span class="chip status-current">current</span></td><td><span class="chip outcome-nothing-to-do">nothing to do</span> block at AGENTS.md:3</td>',
     );
     expect(page).toContain('<td class="mono">acme/&lt;modified&gt;</td>');
     expect(page).toContain(
-      '<span class="chip outcome-refused">refused</span> refused: block `base` is modified (AGENTS.md:3); &lt;edit&gt; by a human',
+      '<span class="chip outcome-refused">refused</span> block `base` is modified (AGENTS.md:3); &lt;edit&gt; by a human',
     );
     expect(page).toContain(
-      '<td><span class="muted">-</span></td><td><span class="chip outcome-failed">failed</span> failed: GitHub getRepository failed (HTTP 404): Not Found</td>',
+      '<td><span class="muted">-</span></td><td><span class="chip outcome-failed">failed</span> GitHub getRepository failed (HTTP 404): Not Found</td>',
     );
     for (const kind of ["nothing-to-do", "refused", "failed"] as const) {
       expect(page).toContain(`<span class="chip outcome-${kind}">1 ${OUTCOME_LABEL[kind]}</span>`);

@@ -1,7 +1,7 @@
 import { Console, Effect, FileSystem, Option } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import pkg from "../package.json" with { type: "json" };
-import { reportFailure, reportIncomplete } from "./report/failure.ts";
+import { reportFailure, reportIncomplete, reportUnwritable } from "./report/failure.ts";
 import { renderHtml, renderSyncAllHtml } from "./report/html.ts";
 import { renderText } from "./report/render.ts";
 import { renderSync, renderSyncAll } from "./report/sync.ts";
@@ -53,12 +53,16 @@ const html = Flag.File("html").pipe(
   Flag.optional,
 );
 
-/** The HTML report is output the user asked for, like stdout; it is the only file `scan` writes. */
+/**
+ * The HTML report is output the user asked for, like stdout; it is the only file `scan` writes.
+ * Written after the stdout report, so a bad path loses nothing already measured or opened, and it
+ * fails as every expected failure does: one stderr line, exit 1.
+ */
 const writeHtml = (path: string, content: string) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     yield* fs.writeFileString(path, content);
-  });
+  }).pipe(Effect.catchTag("PlatformError", (error) => reportUnwritable(path, error)));
 
 const scanCommand = Command.make(
   "scan",
@@ -72,15 +76,12 @@ const scanCommand = Command.make(
         home,
         packs: spec === null ? null : yield* resolvePacks(spec),
       });
+      if (config.json) yield* Console.log(JSON.stringify(report, null, 2));
+      else yield* Console.log(renderText(report, { all: config.all }));
       const htmlPath = Option.getOrNull(config.html);
       if (htmlPath !== null) {
         yield* writeHtml(htmlPath, renderHtml(report, { version: pkg.version, all: config.all }));
       }
-      if (config.json) {
-        yield* Console.log(JSON.stringify(report, null, 2));
-        return;
-      }
-      yield* Console.log(renderText(report, { all: config.all }));
     }).pipe(Effect.catchTags({ PackSourceError: reportFailure, GitHubError: reportFailure })),
 ).pipe(
   Command.withDescription(
@@ -138,6 +139,7 @@ const syncCommand = Command.make(
           });
         }
         const result = yield* syncAll({ packs: config.packs, pack: packId, dryRun: config.dryRun });
+        yield* Console.log(renderSyncAll(result));
         const htmlPath = Option.getOrNull(config.html);
         if (htmlPath !== null) {
           yield* writeHtml(
@@ -148,7 +150,6 @@ const syncCommand = Command.make(
             }),
           );
         }
-        yield* Console.log(renderSyncAll(result));
         if (result.failed > 0) {
           return yield* reportIncomplete(
             `${result.failed} of ${result.rows.length} targets failed; see the rows marked failed`,
