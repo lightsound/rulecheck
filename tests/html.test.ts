@@ -336,9 +336,11 @@ describe("renderHtml", () => {
     expect(cards).toContain(
       '<div class="stat"><div class="label">Repositories</div><div class="value">4</div><div class="sub">3 with instruction files</div></div>',
     );
-    // Action needed counts repositories (one repository can be behind on two packs); the breakdown counts entries.
+    // Action needed counts repositories, and so does its breakdown: <hostile> is `modified` on
+    // `base` and `blocked` on `frontend` but is one repository, counted once under the worse
+    // status; the breakdown sums to the headline number.
     expect(cards).toContain(
-      '<div class="stat danger"><div class="label">Action needed</div><div class="value">3</div><div class="sub">repositories · 1 modified · 1 outdated · 1 blocked · 1 eligible</div></div>',
+      '<div class="stat danger"><div class="label">Action needed</div><div class="value">3</div><div class="sub">repositories by worst status · 1 modified · 1 outdated · 1 eligible</div></div>',
     );
     // The denominator is every measured pair: a block decides before the subscription list does,
     // so a non-subscriber carrying a block counts (the `frontend` pack line says `0 subscribed`).
@@ -368,7 +370,7 @@ describe("renderHtml", () => {
       '<tr><td><span class="chip status-modified">modified</span></td><td class="mono"><a href="#repo-acme%2F%3Chostile%3E">acme/&lt;hostile&gt;</a></td><td class="mono">base</td><td><b>Review by hand</b><div class="detail">body no longer matches its hash= · <span class="mono">AGENTS.md:1</span></div></td></tr>',
       '<tr><td><span class="chip status-outdated">outdated</span></td><td class="mono"><a href="#repo-acme%2Fquiet">acme/quiet</a></td><td class="mono">frontend</td><td><b>Run sync to update the block</b><div class="detail"><span class="mono">AGENTS.md:3</span></div></td></tr>',
       '<tr><td><span class="chip status-blocked">blocked</span></td><td class="mono"><a href="#repo-acme%2F%3Chostile%3E">acme/&lt;hostile&gt;</a></td><td class="mono">frontend</td><td><b>Fix by hand, then sync</b><div class="detail">&lt;!-- marker --&gt; in the way · <span class="mono">AGENTS.md:9</span></div></td></tr>',
-      '<tr><td><span class="chip status-eligible">eligible</span></td><td class="mono">acme/empty</td><td class="mono">base</td><td><b>Run sync</b><div class="detail">create AGENTS.md with the block and a CLAUDE.md wrapper</div></td></tr>',
+      '<tr><td><span class="chip status-eligible">eligible</span></td><td class="mono"><a href="#repo-acme%2Fempty">acme/empty</a></td><td class="mono">base</td><td><b>Run sync</b><div class="detail">create AGENTS.md with the block and a CLAUDE.md wrapper</div></td></tr>',
     ];
     const positions = rows.map((row) => section.indexOf(row));
     expect(positions.every((p) => p >= 0)).toBe(true);
@@ -415,7 +417,7 @@ describe("renderHtml", () => {
     }
     // The shape breakdown sits in the Repositories section, as plain text, not chips.
     const shapes = html.indexOf(
-      '<p class="meta">Shapes, all 4 repositories: 1 AGENTS.md canonical · 1 both have content · 1 none</p>',
+      '<p class="meta">Shapes: 1 AGENTS.md canonical · 1 both have content · 1 none</p>',
     );
     expect(shapes).toBeGreaterThan(html.indexOf("<h2>Repositories</h2>"));
     expect(html).not.toMatch(/class="chip shape-/);
@@ -437,9 +439,9 @@ describe("renderHtml", () => {
     expect(html).toContain(
       '<tr class="owner"><th colspan="3"><span class="mono">acme</span> <span class="meta">3 repositories</span></th></tr>',
     );
-    // Rows: modified (<hostile>) before outdated (quiet) before eligible (empty); the ones with a
-    // card link to it, the hidden one does not. Cells carry the status and file:line only; the
-    // message is in Next actions.
+    // Rows: modified (<hostile>) before outdated (quiet) before eligible (empty); every name links
+    // to the repository's row, including one without instruction files. Cells carry the status
+    // and file:line only; the message is in Next actions.
     const hostile = html.indexOf(
       '<tr><td class="mono"><a href="#repo-acme%2F%3Chostile%3E">acme/&lt;hostile&gt;</a></td><td><span class="chip status-modified">modified</span> <span class="where mono">AGENTS.md:1</span></td><td><span class="chip status-blocked">blocked</span> <span class="where mono">AGENTS.md:9</span></td></tr>',
     );
@@ -447,7 +449,7 @@ describe("renderHtml", () => {
       '<tr><td class="mono"><a href="#repo-acme%2Fquiet">acme/quiet</a></td><td><span class="chip status-current">current</span> <span class="where mono">AGENTS.md:3</span></td>',
     );
     const empty = html.indexOf(
-      '<tr><td class="mono">acme/empty</td><td><span class="chip status-eligible">eligible</span></td><td><span class="chip status-not-subscribed">not subscribed</span></td></tr>',
+      '<tr><td class="mono"><a href="#repo-acme%2Fempty">acme/empty</a></td><td><span class="chip status-eligible">eligible</span></td><td><span class="chip status-not-subscribed">not subscribed</span></td></tr>',
     );
     expect(hostile).toBeGreaterThan(0);
     expect(quiet).toBeGreaterThan(hostile);
@@ -494,7 +496,7 @@ describe("renderHtml", () => {
     );
     expect(withCandidate).toContain("<summary><b>Not subscribed to any pack (2)</b>");
     expect(withCandidate).toContain(
-      '<tr><td class="mono">zeta/fresh</td><td class="muted">none</td><td><span class="chip status-eligible">eligible</span> <span class="detail">create AGENTS.md with the block and a CLAUDE.md wrapper</span></td></tr>',
+      '<tr><td class="mono"><a href="#repo-zeta%2Ffresh">zeta/fresh</a></td><td class="muted">none</td><td><span class="chip status-eligible">eligible</span> <span class="detail">create AGENTS.md with the block and a CLAUDE.md wrapper</span></td></tr>',
     );
     // Grouped by owner, larger owners first.
     const candidates = withCandidate.slice(withCandidate.indexOf('<table class="candidates">'));
@@ -507,16 +509,18 @@ describe("renderHtml", () => {
 
   test("repository rows are grouped by owner under a sticky header that carries the column labels, most issues first", () => {
     expect(html).toContain(
-      '<h3 class="owner"><span class="who"><span class="mono">acme</span> <span class="meta">3 repositories · 4 issues</span></span><span class="col shape">Shape</span><span class="col num">Cursor</span><span class="col num">Claude Code</span></h3>',
+      '<h3 class="owner"><span class="who"><span class="mono">acme</span> <span class="meta">4 repositories · 4 issues</span></span><span class="col shape">Shape</span><span class="col num">Cursor</span><span class="col num">Claude Code</span></h3>',
     );
     expect(html).toContain("h3.owner { position: sticky;");
     // A repository with an issue starts open, one without starts closed.
     const hostile = html.indexOf('<details class="repo" id="repo-acme%2F%3Chostile%3E" open>');
     const other = html.indexOf('<details class="repo" id="repo-acme%2Fother" open>');
+    const empty = html.indexOf('<details class="repo" id="repo-acme%2Fempty">');
     const quiet = html.indexOf('<details class="repo" id="repo-acme%2Fquiet">');
     expect(hostile).toBeGreaterThan(0);
     expect(other).toBeGreaterThan(hostile);
-    expect(quiet).toBeGreaterThan(other);
+    expect(empty).toBeGreaterThan(other);
+    expect(quiet).toBeGreaterThan(empty);
   });
 
   test("repository rows carry name, issue badge, shape, and the two budgets as right-aligned numbers", () => {
@@ -557,12 +561,21 @@ describe("renderHtml", () => {
     // The badge counts findings, malformed markers, and skill issues ("issues", since the glossary
     // keeps `Finding` and `BlockIssue` apart); the shape note is advice and does not count.
     expect(html).toContain('<span class="tag tag-attention">1 issue</span>');
-    // Repositories without instruction files are hidden unless asked for, as in the text report.
-    expect(html).not.toContain('<span class="mono name">acme/empty</span>');
-    expect(html).toContain("1 without instruction files hidden");
-    expect(renderHtml(REPORT, { version: "0.0.1", all: true })).toContain(
-      '<span class="mono name">acme/empty</span>',
+  });
+
+  test("every repository has a row, so every repository name on the page links to one", () => {
+    // Unlike the text report (`--all`), a repository without instruction files is not hidden: it
+    // is the target of the links in Next actions, the matrix, and the candidate list.
+    expect(html).toContain(
+      '<span class="who"><span class="mono name">acme/empty</span></span>\n    <span class="col shape muted">none</span>\n    <span class="col num">~0</span>\n    <span class="col num">~0</span>',
     );
+    expect(html).toContain('<p class="empty">No instruction files.</p>');
+    expect(html).toContain("4 repositories, 1 without instruction files. Most issues first;");
+    const ids = new Set([...html.matchAll(/<details class="repo" id="([^"]+)"/g)].map((m) => m[1]));
+    const hrefs = [...html.matchAll(/href="#(repo-[^"]+)"/g)].map((m) => m[1]);
+    expect(hrefs.length).toBeGreaterThan(0);
+    for (const href of hrefs) expect(ids.has(href)).toBe(true);
+    expect(ids.size).toBe(REPORT.repos.length);
   });
 
   test("personal layer and footer", () => {

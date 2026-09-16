@@ -38,33 +38,28 @@ import { outcomeDetail } from "./sync.ts";
  * pack and a repo × pack matrix of the subscribed repositories, grouped by owner; repositories
  * subscribed to no pack sit in a closed candidate list. Repositories: what each one loads and
  * where its issues are, grouped by owner under sticky headers, one collapsed row per repository
- * that opens only when it has an issue. Design tokens follow GitHub Primer (D21). Print gets
- * what is open.
+ * that opens only when it has an issue. Every repository of the report has a row, including
+ * those without instruction files (a closed one-line row costs nothing), so every repository
+ * name printed anywhere on the page links to one place (D22). Design tokens follow GitHub Primer
+ * (D21). Print gets what is open.
  */
 
 export interface HtmlOptions {
   /** rulecheck's own version, printed in the footer. */
   readonly version: string;
-  /** Include repositories that have no instruction files (as `--all` does for the text report). */
-  readonly all?: boolean;
 }
 
 export const GLOSSARY_URL =
   "https://github.com/lightsound/rulecheck/blob/main/docs/status-model.md";
 
 export function renderHtml(report: ScanReport, options: HtmlOptions): string {
-  const repos = options.all
-    ? report.repos
-    : report.repos.filter((r) => r.files.length > 0 || r.skills.skills.length > 0);
-
-  const shown = new Set(repos.map((r) => r.name));
   const sections: string[] = [];
   sections.push(overview(report));
-  sections.push(nextActions(report, shown));
+  sections.push(nextActions(report));
   if (report.distribution) {
-    sections.push(distribution(report.distribution, report.repos, shown));
+    sections.push(distribution(report.distribution, report.repos));
   }
-  sections.push(repoCards(repos, report.repos.length, report.totals.shapes));
+  sections.push(repoCards(report.repos, report.totals.shapes));
   if (report.duplicates.length > 0) sections.push(duplicates(report));
   if (report.personal) sections.push(personalLayer(report.personal));
 
@@ -178,8 +173,15 @@ function overview(report: ScanReport): string {
   ];
   if (dist) {
     const todo = actionable(dist);
-    const repos = new Set(todo.map((e) => e.repo)).size;
-    const breakdown = statusCounts(todo)
+    // The card counts repositories, so the breakdown does too: each repository once, under its
+    // most urgent status against any pack (`actionable` is worst first, so the first entry wins).
+    const worst = new Map<string, PackStatus>();
+    for (const e of todo) if (!worst.has(e.repo)) worst.set(e.repo, e.status);
+    const repos = worst.size;
+    const breakdown = STATUS_ORDER.map(
+      (status) => [status, [...worst.values()].filter((s) => s === status).length] as const,
+    )
+      .filter(([, count]) => count > 0)
       .map(([status, count]) => `${fmt(count)} ${STATUS_LABEL[status]}`)
       .join(" · ");
     // Every entry that is not `not-subscribed`: the repository carries the pack's block or is
@@ -190,7 +192,7 @@ function overview(report: ScanReport): string {
         "Action needed",
         fmt(repos),
         repos > 0
-          ? `${plural(repos, "repository", "repositories")} · ${breakdown}`
+          ? `${plural(repos, "repository", "repositories")} by worst status · ${breakdown}`
           : "every block is current",
         repos > 0 ? "danger" : "success",
       ),
@@ -249,7 +251,7 @@ function weight(repo: RepoReport): number {
  * most urgent first (`STATUS_ORDER`), with the file the status refers to and the action
  * (`STATUS_ACTION` completed by the status message); then one row per repository with issues.
  */
-function nextActions(report: ScanReport, shown: ReadonlySet<string>): string {
+function nextActions(report: ScanReport): string {
   const dist = report.distribution;
   const todo = dist ? actionable(dist) : [];
   const withIssues = [...report.repos]
@@ -261,7 +263,7 @@ function nextActions(report: ScanReport, shown: ReadonlySet<string>): string {
     const rows = todo
       .map(
         (e) =>
-          `<tr><td>${statusChip(e.status)}</td><td class="mono">${repoName(e.repo, shown)}</td><td class="mono">${esc(e.pack)}</td><td>${action(e)}</td></tr>`,
+          `<tr><td>${statusChip(e.status)}</td><td class="mono">${repoName(e.repo)}</td><td class="mono">${esc(e.pack)}</td><td>${action(e)}</td></tr>`,
       )
       .join("\n");
     parts.push(`<table class="actions">
@@ -275,7 +277,7 @@ ${rows}
     const rows = withIssues
       .map((r) => {
         const n = issueCount(r);
-        return `<tr><td><span class="mono">${repoName(r.name, shown)}</span><div class="detail">${fmt(n)} ${plural(n, "issue", "issues")}</div></td><td class="lines">${issueLines(r).join("<br>")}</td></tr>`;
+        return `<tr><td><span class="mono">${repoName(r.name)}</span><div class="detail">${fmt(n)} ${plural(n, "issue", "issues")}</div></td><td class="lines">${issueLines(r).join("<br>")}</td></tr>`;
       })
       .join("\n");
     parts.push(`<h3>Issues to fix</h3>
@@ -379,13 +381,9 @@ function groupByOwner<T>(
  * status and `file:line` per cell. Owners and repositories are ordered by the most urgent status
  * against any pack. Repositories subscribed to no pack are listed under the matrix in a closed
  * `<details>`, grouped by owner, each with its shape and what a sync would do if it were
- * subscribed. Names of repositories that have a card link to it.
+ * subscribed. Every repository name links to its row in Repositories.
  */
-function distribution(
-  dist: PackDistribution,
-  allRepos: ReadonlyArray<RepoReport>,
-  shown: ReadonlySet<string>,
-): string {
+function distribution(dist: PackDistribution, allRepos: ReadonlyArray<RepoReport>): string {
   const packLines = dist.packs
     .map((pack) => {
       const entries = dist.entries.filter((e) => e.pack === pack.id);
@@ -438,7 +436,7 @@ function distribution(
       const rows = group.members
         .map(
           (name) =>
-            `<tr><td class="mono">${repoName(name, shown)}</td>${dist.packs.map((pack) => cell(name, pack.id)).join("")}</tr>`,
+            `<tr><td class="mono">${repoName(name)}</td>${dist.packs.map((pack) => cell(name, pack.id)).join("")}</tr>`,
         )
         .join("\n");
       return `<tbody class="owner">
@@ -472,7 +470,7 @@ ${bodies}
   ${packLines}
   </div>
   ${table}
-  ${candidates(quiet, dist, allRepos, shown)}
+  ${candidates(quiet, dist, allRepos)}
 </section>`;
 }
 
@@ -485,7 +483,6 @@ function candidates(
   quiet: ReadonlyArray<string>,
   dist: PackDistribution,
   allRepos: ReadonlyArray<RepoReport>,
-  shown: ReadonlySet<string>,
 ): string {
   if (quiet.length === 0) return "";
   // One pack is enough: a repository `not-subscribed` to every pack carries no block (the block
@@ -519,7 +516,7 @@ function candidates(
           const would_ = entry
             ? `${statusChip(entry.status)} <span class="detail">${esc(entry.message ?? "")}</span>`
             : "";
-          return `<tr><td class="mono">${repoName(name, shown)}</td><td class="muted">${shape}</td><td>${would_}</td></tr>`;
+          return `<tr><td class="mono">${repoName(name)}</td><td class="muted">${shape}</td><td>${would_}</td></tr>`;
         })
         .join("\n");
       return `<tbody class="owner">
@@ -537,9 +534,9 @@ ${bodies}
   </details>`;
 }
 
-/** The repository name, linked to its card when the page has one. */
-function repoName(name: string, shown: ReadonlySet<string>): string {
-  return shown.has(name) ? `<a href="#${cardId(name)}">${esc(name)}</a>` : esc(name);
+/** The repository name, linked to its row in Repositories (every repository has one). */
+function repoName(name: string): string {
+  return `<a href="#${cardId(name)}">${esc(name)}</a>`;
 }
 
 function cardId(name: string): string {
@@ -581,13 +578,11 @@ function issueLines(repo: RepoReport): string[] {
   return lines;
 }
 
-/** Cards grouped by owner; owners and repositories with the most issues first. */
+/** One row per repository, grouped by owner; owners and repositories with the most issues first. */
 function repoCards(
   repos: ReadonlyArray<RepoReport>,
-  total: number,
   shapes: Readonly<Record<CanonicalShape, number>>,
 ): string {
-  const hidden = total - repos.length;
   const sorted = [...repos].sort(
     (a, b) => issueCount(b) - issueCount(a) || a.name.localeCompare(b.name),
   );
@@ -602,6 +597,7 @@ function repoCards(
     .filter((shape) => shapes[shape] > 0)
     .map((shape) => `${fmt(shapes[shape])} ${esc(SHAPE_LABEL[shape])}`)
     .join(" · ");
+  const empty = repos.filter((r) => r.files.length === 0 && r.skills.skills.length === 0).length;
   const cards = groups
     .map((group) => {
       const issues = issuesIn(group);
@@ -612,8 +608,8 @@ ${group.members.map(repoCard).join("\n")}`;
   return `
 <section id="repositories">
   <h2>Repositories</h2>
-  <p class="note">${fmt(repos.length)} shown${hidden > 0 ? `, ${fmt(hidden)} without instruction files hidden (<code>--all</code> includes them)` : ""}. Most issues first; a repository with an issue starts open, the rest closed. Click a row to open it.</p>
-  <p class="meta">Shapes, all ${fmt(total)} repositories: ${shapeLine}</p>
+  <p class="note">${fmt(repos.length)} ${plural(repos.length, "repository", "repositories")}${empty > 0 ? `, ${fmt(empty)} without instruction files` : ""}. Most issues first; a repository with an issue starts open, the rest closed. Click a row to open it.</p>
+  <p class="meta">Shapes: ${shapeLine}</p>
   ${cards}
 </section>`;
 }
