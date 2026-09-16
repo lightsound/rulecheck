@@ -20,7 +20,10 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
   distribution report (D14); `scan --packs` reflects local checkouts only. The words of that
   model (shape, normalization, pack status, sync outcome) are fixed in one glossary,
   [status-model.md](status-model.md), which code, labels, and `scan --json` (`schemaVersion: 1`)
-  follow (D17); a dashboard builds on it. Skills distribution is deferred (D18): `scan` keeps
+  follow (D17); a dashboard builds on it, and its first read-only slice exists: `scan --html
+  <file>` and `sync --all --html <file>` render the same reports as one self-contained HTML page
+  (headline numbers, repo × pack matrix, per-repository cards; a rendering, not a write path,
+  D19). Skills distribution is deferred (D18): `scan` keeps
   the per-repository skills inventory and lock state, `npx skills` stays the installer, and no
   skill directory is written by `sync`.
 - `lightsound/agent-rules/packs/base/AGENTS.md`: the portable pack `base` (D7 naming),
