@@ -16,6 +16,25 @@ describe("parseGitmodulesPaths", () => {
     expect(parseGitmodulesPaths(content)).toEqual(["vendor/lib", "docs/site"]);
   });
 
+  test("unquotes git-config values and cuts trailing comments", () => {
+    const content = [
+      '[submodule "spaced"]',
+      '\tpath = "external/my lib"',
+      '[submodule "hash"]',
+      '\tpath = "external/a#b" ; the quotes keep the hash',
+      '[submodule "commented"]',
+      "\tpath = external/plain # vendored",
+      '[submodule "escaped"]',
+      '\tpath = "external/q\\"uote"',
+    ].join("\n");
+    expect(parseGitmodulesPaths(content)).toEqual([
+      "external/my lib",
+      "external/a#b",
+      "external/plain",
+      'external/q"uote',
+    ]);
+  });
+
   test("an empty or keyless file lists nothing", () => {
     expect(parseGitmodulesPaths("")).toEqual([]);
     expect(parseGitmodulesPaths("path = loose\n")).toEqual([]);

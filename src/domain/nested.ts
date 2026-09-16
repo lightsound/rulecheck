@@ -18,11 +18,13 @@ export function classifyNestedRepo(
 }
 
 const SECTION = /^\s*\[/;
-const PATH_LINE = /^\s*path\s*=\s*(.+?)\s*$/;
+const PATH_LINE = /^\s*path\s*=\s*(.*)$/;
 
 /**
- * The `path = <dir>` values of a `.gitmodules` file, as written (relative to the repository
- * root, `/` separators). Only `path` keys are read; `url`, `branch`, and unknown keys are skipped.
+ * The `path = <dir>` values of a `.gitmodules` file (relative to the repository root, `/`
+ * separators). Only `path` keys are read; `url`, `branch`, and unknown keys are skipped. Values
+ * follow git-config syntax: a `#` or `;` starts a comment, and a value that holds spaces or
+ * special characters is written in double quotes with `\` escapes.
  */
 export function parseGitmodulesPaths(content: string): ReadonlyArray<string> {
   const paths: string[] = [];
@@ -34,7 +36,31 @@ export function parseGitmodulesPaths(content: string): ReadonlyArray<string> {
     }
     if (!inSection) continue;
     const match = PATH_LINE.exec(line);
-    if (match?.[1]) paths.push(match[1].replace(/^\.\//, "").replace(/\/+$/, ""));
+    if (!match) continue;
+    const value = configValue(match[1] ?? "")
+      .replace(/^\.\//, "")
+      .replace(/\/+$/, "");
+    if (value.length > 0) paths.push(value);
   }
   return paths;
+}
+
+/** A git-config value: quotes removed, `\` escapes resolved, a trailing comment cut. */
+function configValue(raw: string): string {
+  let out = "";
+  let quoted = false;
+  for (let i = 0; i < raw.length; i++) {
+    const char = raw[i] as string;
+    if (char === "\\" && i + 1 < raw.length) {
+      out += raw[++i];
+      continue;
+    }
+    if (char === '"') {
+      quoted = !quoted;
+      continue;
+    }
+    if (!quoted && (char === "#" || char === ";")) break;
+    out += char;
+  }
+  return out.trim();
 }
