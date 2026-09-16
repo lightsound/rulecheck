@@ -7,6 +7,11 @@ document being accepted. The CLI stays open source and is the self-host path and
 the App is the hosted product for teams (D23 named it the business-phase replacement of the
 Actions + PAT setup).
 
+Naming, decided after this document merged: the product is **RuleFleet**, its private repository
+is `lightsound/rulefleet` (not `lightsound/rulecheck-app` as answer 1 in section 10 says), and
+the bot account is `rulefleet[bot]`. The M1 handoff, [m1-kickoff.md](m1-kickoff.md), records the
+override; the design itself is unchanged.
+
 Every judgment call is in the decisions table at the end, with the search round in which no
 better option appeared. Words in `code` that name a status, shape, or outcome are the ones
 [status-model.md](status-model.md) defines.

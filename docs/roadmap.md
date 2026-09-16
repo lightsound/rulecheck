@@ -239,6 +239,20 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
   not built now: a nightly `schedule` as a safety net, a `pull_request` dry run on pack
   changes, the `--html` page as a run artifact.
 
+## Step 7: P0 for RuleFleet, the `src/github` transport split — specified 2026-09-16, not started
+
+- The hosted App (product name RuleFleet, private repository `lightsound/rulefleet`) is built
+  from [m1-kickoff.md](m1-kickoff.md), which hands the M1 plan to the agents working there. The
+  one M1 task on this repository is **P0**: split `makeGh` into a shared response mapping plus a
+  `Transport` interface, keep `ghTransport` for the CLI, add `fetchTransport` with an
+  installation token provider and rate-limit handling, give `setRef` a `force` option, and add
+  the `package.json` `exports` map the App imports through (app-design §4 "What must change in
+  `src/github`"; the subpath list is in the kickoff, §3).
+- Done when: the kickoff's P0 done check passes (`bun run check` green, `fetchTransport` and
+  the JWT signer covered in `tests/github.test.ts`, the CLI's `sync --all --dry-run` output
+  unchanged through `ghTransport`, `bun add github:lightsound/rulecheck#<sha>` type-checks from a
+  scratch project). The App's T4 pins that sha.
+
 ## Deferred: Skills distribution (D18, 2026-09-16)
 
 - Not built: writing skill directories (a pack's D8 `file` entries) into subscribers through
