@@ -455,10 +455,10 @@ now; an organization only if one is ever needed). Private because HeroUI Pro's l
 redistribution in open source, so the component code cannot sit in a public repository; the CLI
 in this repository stays open source and framework-free. The **marketing site and the
 documentation** may live in the same private repository on the same stack (decided for now;
-revisit if a static site turns out cheaper to run apart). Documentation tooling is not decided:
-the candidates are **Fumadocs** (MDX docs inside the TanStack Start app, same deploy, same
-design tokens) and **Mintlify** (hosted, MDX in the repository, nothing to run, a second
-domain and a subscription).
+revisit if a static site turns out cheaper to run apart). Documentation tooling is **Fumadocs**:
+MDX docs inside the TanStack Start app, same deploy, same design tokens. Not chosen: Mintlify
+(hosted, nothing to run, but a second domain and a subscription for pages the App already
+serves).
 
 The framework comparison that led to the pick, kept for the record:
 
@@ -548,7 +548,7 @@ document does not have to be diffed to find them.
 
 | # | Question | Answer |
 | --- | --- | --- |
-| 1 | Where does the App code live? | A **private repository** (`lightsound/rulecheck-app` on the owner's personal GitHub account; see 10), depending on `rulecheck` at a commit sha (D23's pinning; `effect` is exact-pinned) with an `exports` map added to rulecheck in M1. Private because the dashboard uses HeroUI Pro, whose license forbids redistribution in open source. The CLI stays open source here. The marketing site and the docs may live in the same repository on the same stack (decided for now; docs tooling open between Fumadocs and Mintlify) |
+| 1 | Where does the App code live? | A **private repository** (`lightsound/rulecheck-app` on the owner's personal GitHub account; see 10), depending on `rulecheck` at a commit sha (D23's pinning; `effect` is exact-pinned) with an `exports` map added to rulecheck in M1. Private because the dashboard uses HeroUI Pro, whose license forbids redistribution in open source. The CLI stays open source here. The marketing site and the docs may live in the same repository on the same stack (decided for now); docs tooling **Fumadocs** |
 | 2 | Front end | **React + TanStack Start** on Workers, UI on **HeroUI Pro** |
 | 3 | Must the pack source be inside the installation? | **Yes.** The installation token can read and write it and nothing else is needed; a source outside would need a second credential to issue, store, and rotate |
 | 4 | May a subscription change go straight to the default branch? | **A per-installation setting**, `subscriptionChanges: "pull-request" \| "direct-commit"`, default `pull-request`; `direct-commit` is meant for solo accounts. Subscriber repositories are never written directly under either value (D25 updated) |
@@ -559,8 +559,7 @@ document does not have to be diffed to find them.
 | 9 | Product name | **Decided before M3** (the custom domain follows it) |
 | 10 | Accounts | A **new, dedicated Cloudflare account** for the product (its own billing, API tokens, and Alchemy state store, nothing shared with other projects); **GitHub stays on the personal account** (`lightsound`) for the App registration and the private repository, an organization later if ever |
 
-No question is open. The only choice deliberately left for later is the documentation tooling
-(Fumadocs or Mintlify, section 6), which nothing before M3 depends on.
+No question is open. Documentation tooling is Fumadocs (section 6); Mintlify was not chosen.
 
 ## Decisions
 
@@ -575,7 +574,7 @@ better option that produced nothing new.
 | Infrastructure as code | Alchemy: one Effect-based TypeScript stack for every Cloudflare resource and secret; stages `prod` / `dev_<user>` / `pr-<n>`; deployed from GitHub Actions with credentials provisioned as code (decided by the owner) | `wrangler.jsonc` + `wrangler deploy`; Terraform / Pulumi; SST | decided by owner, n/a |
 | Pricing | Deferred to after M2; the design fixes only the `plan` column, the repository gate, and the over-limit rule (decided by the owner) | a placeholder tier table now (removed: numbers before the first buyer conversation anchor the wrong thing) | decided by owner, n/a |
 | Technology decisions | Effect `HttpApi`; D1 + Drizzle; Workers Logs; GitHub Actions + Alchemy deploy; session storage at implementation; domain later; a dedicated Cloudflare account for the product, GitHub on the personal account (decided by the owner) | Hono; raw SQL; Sentry; laptop deploys | decided by owner, n/a |
-| Front end | React + TanStack Start on Workers, HeroUI Pro for the UI, in a private repository because HeroUI Pro cannot be redistributed in open source (decided by the owner); the marketing site and docs may share the repository and stack, docs tooling open between Fumadocs and Mintlify | React Router v7 (the safe second), Next.js on Workers via OpenNext (adapter layer, heaviest); SolidStart / Solid 2, Astro islands, HTMX-style fragments (each would sit next to a React component library or leave it unused) | decided by owner, n/a |
+| Front end | React + TanStack Start on Workers, HeroUI Pro for the UI, in a private repository because HeroUI Pro cannot be redistributed in open source (decided by the owner); the marketing site and docs may share the repository and stack, docs with Fumadocs (Mintlify not chosen: hosted pages next to an App that already serves pages) | React Router v7 (the safe second), Next.js on Workers via OpenNext (adapter layer, heaviest); SolidStart / Solid 2, Astro islands, HTMX-style fragments (each would sit next to a React component library or leave it unused) | decided by owner, n/a |
 | Guard for `direct-commit` | Fast-forward-only ref update (parent = the head that was read, `force: false`, one re-read and retry on `422`, then `refused`), since the D10 ownership check cannot apply to a default branch | force update as for the tool-owned branch (would overwrite a commit pushed between read and write); a lock in the App only (does not see pushes from outside the App); require branch protection with the App as the only allowed pusher (a setting the solo account this targets does not have) | 1 |
 | Scan schedule | Webhook table in section 2 plus a per-installation `fullRescan` setting (`daily` default, `weekly`, `off`) (decided by the owner) | fixed daily rescan; webhooks only | decided by owner, n/a |
 | Bootstrap without a pack repository | Read-only inventory until a source is registered; (a) a public GitHub template repository the user instantiates with `Use this template` via a prefilled `github.com/new` link, then adds to the installation; (b) an existing repository; (c) a derived starter pack, post-MVP | the App creating the repository through the installation or user token (`Administration: write` on every visible repository for one onboarding click); the App pushing starter files into an empty repository the user created (`Contents: write` suffices, but the user still creates the repository, so the template saves the same click with fewer bytes of ours in the flow) | 2 |
