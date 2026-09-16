@@ -597,7 +597,8 @@ function repoCards(
     .filter((shape) => shapes[shape] > 0)
     .map((shape) => `${fmt(shapes[shape])} ${esc(SHAPE_LABEL[shape])}`)
     .join(" · ");
-  const empty = repos.filter((r) => r.files.length === 0 && r.skills.skills.length === 0).length;
+  // The same predicate as `totals.reposWithInstructions`, so the two lines agree.
+  const empty = repos.filter((r) => r.files.length === 0).length;
   const cards = groups
     .map((group) => {
       const issues = issuesIn(group);
