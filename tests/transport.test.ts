@@ -127,6 +127,7 @@ describe("fetchTransport", () => {
       }),
     );
     expect(await flip(down.getRepository(repo))).toMatchObject({
+      operation: "getRepository",
       status: null,
       message: "could not reach https://api.github.com (ECONNREFUSED)",
     });

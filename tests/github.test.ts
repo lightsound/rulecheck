@@ -813,5 +813,6 @@ describe("makeGitHub over ghTransport", () => {
     );
     const failure = await Effect.runPromise(gh.getRepository(repo).pipe(Effect.flip));
     expect(failure.message).toContain("install the GitHub CLI");
+    expect(failure.operation).toBe("getRepository");
   });
 });

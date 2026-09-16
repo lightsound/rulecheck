@@ -93,6 +93,16 @@ export function makeGitHub(transport: Transport): GitHubService {
     body: unknown = null,
   ): Effect.Effect<unknown, GitHubError> =>
     transport.request({ method, path, body }).pipe(
+      // A transport names no operation; the CLI's failure line does (`GitHub getRef failed`).
+      Effect.mapError(
+        (error) =>
+          new GitHubError({
+            operation,
+            status: error.status,
+            message: error.message,
+            ...(error.retryAfter === undefined ? {} : { retryAfter: error.retryAfter }),
+          }),
+      ),
       Effect.flatMap((response) => {
         if (response.status >= 400) {
           const retryAfter = retryAfterOf(response.headers);
