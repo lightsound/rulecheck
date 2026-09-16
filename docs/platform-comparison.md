@@ -36,8 +36,10 @@ App design (section 4, jobs and rate limits) and the CLI as it runs today.
   GitHub; a full scan of 200 repositories is about 3,000 API calls spread over many messages.
   Triggers: webhooks, a button, and a daily schedule (full rescan and dry run per installation).
 - **One writer per installation.** Reads run in parallel; content-creating GitHub requests to
-  one installation pass through one lock (D14). The App design names two interfaces the job model
-  touches the platform through, `JobQueue` and `WriteLock`.
+  one installation pass through one lock. D14 serializes writes with one `Semaphore` per
+  `sync --all` run (`src/sync/all.ts`); the App design narrows that run-wide lock to one per
+  installation and names two interfaces the job model touches the platform through, `JobQueue`
+  and `WriteLock`.
 - **Data.** Small rows: installations, repositories, sha-keyed pack cache, `RepoReport` JSON per
   (repository, sha), one status row per measurement, runs, audit. Hundreds of repositories × a
   few packs × one row per measurement; 90-day report retention. Migrations with Drizzle are the
@@ -135,9 +137,9 @@ queue operations, rows) moves at this volume and it does not charge for time spe
 GitHub. Vercel's growth is Neon compute (a Postgres that never sleeps once webhooks arrive around
 the clock) and provisioned memory during I/O; its Workflows product is priced per event ($20 per
 million) and would be the largest single line at 500 installations, so the Vercel column assumes
-Queues (beta) and shows Workflows as the increment. Prisma's growth is the per-operation database meter, which a polling job
-runner feeds directly. Absolute differences are tens of dollars a month; none of the three is
-chosen or rejected on price.
+Queues (beta) and shows Workflows as the increment. Prisma's growth is the per-operation database
+meter, which a polling job runner feeds directly. Absolute differences are tens of dollars a
+month; none of the three is chosen or rejected on price.
 
 ## 5. Recommendation
 
