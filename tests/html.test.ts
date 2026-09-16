@@ -338,14 +338,16 @@ describe("renderHtml", () => {
     );
     // Action needed counts repositories (one repository can be behind on two packs); the breakdown counts entries.
     expect(cards).toContain(
-      '<div class="stat attention"><div class="label">Action needed</div><div class="value">3</div><div class="sub">repositories · 1 modified · 1 outdated · 1 blocked · 1 eligible</div></div>',
+      '<div class="stat danger"><div class="label">Action needed</div><div class="value">3</div><div class="sub">repositories · 1 modified · 1 outdated · 1 blocked · 1 eligible</div></div>',
     );
+    // The denominator is every measured pair: a block decides before the subscription list does,
+    // so a non-subscriber carrying a block counts (the `frontend` pack line says `0 subscribed`).
     expect(cards).toContain(
-      '<div class="stat"><div class="label">Current</div><div class="value">1</div><div class="sub">of 5 subscriptions carry the latest block</div></div>',
+      '<div class="stat"><div class="label">Current</div><div class="value">1</div><div class="sub">of 5 with a block or a subscription</div></div>',
     );
     // Issues = findings + malformed markers + skill issues, the same sum the card badges show.
     expect(cards).toContain(
-      '<div class="stat attention"><div class="label">Issues</div><div class="value">3</div><div class="sub">1 finding · 1 malformed marker · 1 skill issue</div></div>',
+      '<div class="stat danger"><div class="label">Issues</div><div class="value">3</div><div class="sub">1 finding · 1 malformed marker · 1 skill issue</div></div>',
     );
     expect(cards).toContain(
       '<div class="stat"><div class="label">Instruction files</div><div class="value">6</div><div class="sub">~1,400 tokens in total</div></div>',
@@ -400,10 +402,10 @@ describe("renderHtml", () => {
       { version: "0.0.1" },
     );
     expect(clean).toContain(
-      '<p class="empty">Nothing to do: every subscription is current and no repository has an issue.</p>',
+      '<p class="empty">Nothing to do: every block is current and no repository has an issue.</p>',
     );
     expect(clean).toContain(
-      '<div class="stat success"><div class="label">Action needed</div><div class="value">0</div><div class="sub">every subscription is current</div></div>',
+      '<div class="stat success"><div class="label">Action needed</div><div class="value">0</div><div class="sub">every block is current</div></div>',
     );
   });
 

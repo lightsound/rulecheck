@@ -182,20 +182,22 @@ function overview(report: ScanReport): string {
     const breakdown = statusCounts(todo)
       .map(([status, count]) => `${fmt(count)} ${STATUS_LABEL[status]}`)
       .join(" · ");
-    const subscribed = dist.entries.filter((e) => e.status !== "not-subscribed").length;
+    // Every entry that is not `not-subscribed`: the repository carries the pack's block or is
+    // subscribed (`classifyPackStatus` decides by the block first, then by the subscription).
+    const measured = dist.entries.filter((e) => e.status !== "not-subscribed").length;
     cards.push(
       stat(
         "Action needed",
         fmt(repos),
         repos > 0
           ? `${plural(repos, "repository", "repositories")} · ${breakdown}`
-          : "every subscription is current",
-        repos > 0 ? "attention" : "success",
+          : "every block is current",
+        repos > 0 ? "danger" : "success",
       ),
       stat(
         "Current",
         fmt(dist.counts.current),
-        `of ${fmt(subscribed)} ${plural(subscribed, "subscription", "subscriptions")} carry the latest block`,
+        `of ${fmt(measured)} with a block or a subscription`,
       ),
     );
   }
@@ -204,7 +206,7 @@ function overview(report: ScanReport): string {
       "Issues",
       fmt(issues),
       `${fmt(t.findings)} ${plural(t.findings, "finding", "findings")} · ${fmt(t.malformedMarkers)} malformed ${plural(t.malformedMarkers, "marker", "markers")} · ${fmt(t.skillIssues)} skill ${plural(t.skillIssues, "issue", "issues")}`,
-      issues > 0 ? "attention" : "",
+      issues > 0 ? "danger" : "",
     ),
     stat("Instruction files", fmt(t.files), `~${fmt(t.tokens)} tokens in total`),
   );
@@ -287,7 +289,7 @@ ${rows}
 
   const note =
     parts.length === 0
-      ? `<p class="empty">Nothing to do${dist ? ": every subscription is current and no repository has an issue" : ": no repository has an issue (distribution status not measured, no <code>--packs</code> given)"}.</p>`
+      ? `<p class="empty">Nothing to do${dist ? ": every block is current and no repository has an issue" : ": no repository has an issue (distribution status not measured, no <code>--packs</code> given)"}.</p>`
       : `<p class="note">Most urgent first. A <em>sync</em> action is what <code>rulecheck sync</code> does as a pull request; a <em>by hand</em> action needs a human before any sync.${dist ? "" : " Distribution status not measured (no <code>--packs</code> given), so only issues are listed."}</p>`;
 
   return `
@@ -875,7 +877,7 @@ b { font-weight: 600; }
 .stat .label { font-size: 12px; color: var(--muted); }
 .stat .value { font-size: 28px; font-weight: 600; line-height: 1.25; margin: 4px 0; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
 .stat .sub { font-size: 12px; line-height: 1.4; }
-.stat.attention .value { color: var(--danger); }
+.stat.attention .value { color: var(--attention); }
 .stat.danger .value { color: var(--danger); }
 .stat.success .value { color: var(--success); }
 .chip { display: inline-block; padding: 0 7px; border-radius: 2em; border: 1px solid var(--c, var(--line)); color: var(--c, var(--fg)); font-size: 12px; font-weight: 500; line-height: 18px; white-space: nowrap; }
