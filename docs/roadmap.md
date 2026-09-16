@@ -23,7 +23,7 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
   follow (D17); a dashboard builds on it, and its first read-only slice exists: `scan --html
   <file>` and `sync --all --html <file>` render the same reports as one self-contained HTML page
   (overview cards, a next-actions list, the repo × pack matrix, per-owner repository rows, on
-  GitHub Primer's tokens; a rendering, not a write path, D19–D21). Skills distribution is deferred (D18): `scan` keeps
+  GitHub Primer's tokens; a rendering, not a write path, D19–D22). Skills distribution is deferred (D18): `scan` keeps
   the per-repository skills inventory and lock state, `npx skills` stays the installer, and no
   skill directory is written by `sync`.
 - `lightsound/agent-rules/packs/base/AGENTS.md`: the portable pack `base` (D7 naming),
@@ -200,7 +200,7 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
   removes the second phase at the cost of the one-pack-one-branch invariant in D10; needs a
   decision entry before it is built.
 - Later: GitHub App + webhook so status updates without a local tree; the web/desktop UI on top.
-  The `--html` page (D19–D21) is the static preview of that view: the same numbers, next
+  The `--html` page (D19–D22) is the static preview of that view: the same numbers, next
   actions, matrix, and rows from one scan, for judging whether the live version is worth building.
 
 ## Deferred: Skills distribution (D18, 2026-09-16)

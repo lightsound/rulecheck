@@ -738,6 +738,39 @@ counts line follow the same tokens).
 | Matrix cells | Status chip and `file:line`; the message lives in `Next actions` | chip, `file:line`, and message per cell (D20; the widest cells decided the row height for every row) | 1 |
 | Verification method | Render a synthesized 80-repository report through headless Chromium at 1280 px in light and dark, critique against the brief, fix, repeat; three rounds; the harness lives outside the repository and Playwright is not a dependency | commit the harness and Playwright as a visual test (a browser download in CI for a page whose structure `tests/html.test.ts` already pins) | 1 |
 
+## 2026-09-16 D22: the `Action needed` breakdown counts repositories, and every repository has a row
+
+Two readings of a real `scan --packs --html` report, 6 repositories behind on two packs. The
+`Action needed` card said `6` over `2 blocked · 10 eligible`: the number counted repositories
+(D21) while the small text counted repo × pack entries, and the reader tried to add 2 and 10 to 6.
+In `Next actions`, two repositories that were subscribed but had no instruction files locally
+(`eligible`, "create AGENTS.md ...") were printed as plain text where every other name was a
+link: the page hid repositories without instruction files unless `--all` was given, as the text
+report does, so they had no row to link to.
+
+**Breakdown in the card's unit.** The small text counts repositories too, each once under its
+most urgent status against any pack (`STATUS_ORDER`), and says so: `6 repositories by worst
+status · 1 blocked · 5 eligible`. The parts sum to the number above them. The per-entry counts
+stay where entries are the unit: one line per pack under its bar.
+
+**One row per repository, always.** The Repositories section lists every repository of the
+report, including those without instruction files, as the same closed one-line row (shape
+`none`, two budgets of 0, `No instruction files.` when opened). Every repository name printed
+anywhere on the page (`Next actions`, the matrix, the candidate list, the issues table) therefore
+links to one and the same kind of place, and `renderHtml` no longer takes an `all` option. `--all`
+keeps its meaning for the text summary, where an empty repository costs a paragraph; on the page
+it costs one collapsed row, and a repository that a pack asks a sync to write to is not empty in
+the sense that matters.
+
+**What did not change.** `scan --json`, the text report and its `--all`, every glossary label,
+the order and content of the other sections.
+
+| Decision | Chosen | Alternatives considered | Settled in round |
+| --- | --- | --- | --- |
+| Unit of the `Action needed` breakdown | Repositories, each counted once under its worst status, worded `N repositories by worst status · 1 blocked · 5 eligible` so the parts visibly sum to the headline | keep entry counts and change the headline to entries (D21 chose repositories: one repository behind on two packs is one thing to open); count a repository under every status it has (parts exceed the headline again); drop the breakdown (the one place the card says which statuses are behind) | 2 |
+| Where a name without a row should link | Nowhere special: give every repository a row so the question does not arise; `repoName` always links | link to the repository's matrix row when it has no card (two kinds of link target for the same kind of name; a candidate-list row would link to itself); render a row only for repositories that some pack entry or issue refers to (a third visibility rule beside the text report's `--all` and "has files", and a candidate-list name would still not resolve) | 2 |
+| `--all` and the page | The page always lists every repository; `--all` stays a text-report flag and its help says so | keep `all` on `renderHtml` (a flag whose absence breaks links); make `--all` the text report's default too (a separate decision about the text report, not needed here) | 1 |
+
 ## Recording rule
 
 Add an entry here whenever a decision changes what rulecheck writes, what it reports, or which

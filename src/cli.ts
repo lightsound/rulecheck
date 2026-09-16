@@ -22,7 +22,9 @@ const json = Flag.Boolean("json").pipe(
 
 const all = Flag.Boolean("all").pipe(
   Flag.withAlias("a"),
-  Flag.withDescription("Include repositories that have no instruction files."),
+  Flag.withDescription(
+    "Include repositories that have no instruction files in the text summary (the HTML page always lists them).",
+  ),
   Flag.withDefault(false),
 );
 
@@ -80,7 +82,7 @@ const scanCommand = Command.make(
       else yield* Console.log(renderText(report, { all: config.all }));
       const htmlPath = Option.getOrNull(config.html);
       if (htmlPath !== null) {
-        yield* writeHtml(htmlPath, renderHtml(report, { version: pkg.version, all: config.all }));
+        yield* writeHtml(htmlPath, renderHtml(report, { version: pkg.version }));
       }
     }).pipe(Effect.catchTags({ PackSourceError: reportFailure, GitHubError: reportFailure })),
 ).pipe(
