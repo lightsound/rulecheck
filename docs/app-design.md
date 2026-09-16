@@ -35,7 +35,8 @@ better option appeared. Words in `code` that name a status, shape, or outcome ar
   default, not implemented) merge them.
 - MCP / Hooks governance, Skills distribution (D18), Subagents. The inventory `scan` already
   prints (skills, lock state) is shown; nothing more.
-- Billing and pricing (section 8: deferred to after M2; only the `plan` column and a repository-count gate exist in the schema).
+- Billing and pricing (section 8: deferred to after M2; only the `plan` column and a
+  repository-count gate exist in the schema).
 - GitHub Enterprise Server, GitLab, Bitbucket. GitHub.com only.
 - Any write to a repository other than the D10 pull request into a subscriber and the D25
   `subscriptions.json` change in the pack repository (a pull request, or a direct commit when
@@ -107,9 +108,12 @@ chosen by the per-installation setting `subscriptionChanges`:
   default branch, so its place is taken by a **fast-forward-only update**: the writer reads the
   branch head, builds the commit on that head's tree with that head as its parent, and updates
   the ref without `force`, which GitHub rejects (`422`) when anything else has moved the branch
-  in between; the writer then re-reads and retries once, and a second rejection is a `refused`
-  row. Nothing rulecheck did not read can be overwritten. (`setRef` gains a `force` option for
-  this; today it always forces, which is right for the tool-owned branch and wrong here.)
+  in between; the writer then starts over once from the new head (measure `subscriptions.json`
+  again, plan the edit against that content, commit, fast-forward), so the retry applies the
+  intended change on top of the concurrent one rather than reverting it; a second rejection is
+  a `refused` row. Nothing rulecheck did not read can be overwritten, at the ref or in the
+  file. (`setRef` gains a `force` option for this; today it always forces, which is right for
+  the tool-owned branch and wrong here.)
   GitHub's branch protection still applies (a protected default branch makes the update fail
   with that reason, and the page says to switch the setting back). Either way the subscriber
   repository is never written directly: the block always arrives as the D10 pull request.
@@ -250,8 +254,9 @@ request URL. The App's user-facing pages state this in the same words.
 **Where the D25 writer lives.** In rulecheck, not in the App: `src/sync/subscribe.ts`
 (measure the pack repository's `subscriptions.json` at the default-branch HEAD, plan the edit as
 a pure function in `src/domain`, write the branch and pull request under the D10 ownership
-check, or one commit on the default branch when the installation's `subscriptionChanges`
-setting says `direct-commit`), tested against `tests/fake-github.ts` like `sync`. The App calls it from the checkbox
+check, or one fast-forward commit on the default branch when the installation's
+`subscriptionChanges` setting says `direct-commit`), tested against `tests/fake-github.ts` like
+`sync`. The App calls it from the checkbox
 job; the candidate `rulecheck subscribe` command (section 2) calls the same function from a
 checkout. One implementation, so the CLI and the App cannot disagree on what a subscription
 pull request contains, and `AGENTS.md`'s rule that `src/sync/` is the only write path keeps
