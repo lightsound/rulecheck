@@ -112,7 +112,8 @@ describe("syncAll", () => {
     expect(html).toContain(
       '<td class="mono">acme/eligible</td><td class="mono">base</td><td><span class="chip status-eligible">eligible</span></td><td><span class="chip outcome-planned">planned</span> +5 -0: insert block `base` into AGENTS.md',
     );
-    expect(html).toContain('<span class="chip outcome-planned">3 planned</span>');
+    expect(html).toContain('<span class="dot outcome-planned"></span> 3 planned');
+    expect(html).toContain('<div class="label">Planned</div><div class="value">3</div>');
     expect(html).toContain('<td><span class="muted">-</span></td>');
   });
 
