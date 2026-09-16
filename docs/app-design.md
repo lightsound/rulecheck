@@ -103,10 +103,16 @@ chosen by the per-installation setting `subscriptionChanges`:
   subscriber.
 - `direct-commit`: one commit on the pack repository's default branch, for solo accounts where
   a review of one's own subscription list is a formality; the `push` webhook that follows is
-  the same, so the row becomes `eligible` at once. GitHub's branch protection still applies (a
-  protected default branch makes the commit fail with that reason, and the page says to switch
-  the setting back). Either way the subscriber repository is never written directly: the block
-  always arrives as the D10 pull request.
+  the same, so the row becomes `eligible` at once. The D10 ownership check cannot apply to a
+  default branch, so its place is taken by a **fast-forward-only update**: the writer reads the
+  branch head, builds the commit on that head's tree with that head as its parent, and updates
+  the ref without `force`, which GitHub rejects (`422`) when anything else has moved the branch
+  in between; the writer then re-reads and retries once, and a second rejection is a `refused`
+  row. Nothing rulecheck did not read can be overwritten. (`setRef` gains a `force` option for
+  this; today it always forces, which is right for the tool-owned branch and wrong here.)
+  GitHub's branch protection still applies (a protected default branch makes the update fail
+  with that reason, and the page says to switch the setting back). Either way the subscriber
+  repository is never written directly: the block always arrives as the D10 pull request.
 
 **Pull-style entry point (candidate CLI command, not implemented).** The dashboard is the
 push side: an admin subscribes repositories from the pack's point of view. The lightweight
@@ -137,8 +143,12 @@ holds: no check lives outside it):
   no webhook arrived (a missed delivery, a suspended installation).
 
 **What each webhook does.** Every delivery is verified, recorded by `delivery_id`, and turned
-into at most one job; the paths are matched against the push payload's `added` / `modified` /
-`removed` lists (when GitHub truncates those lists the push counts as touching everything):
+into at most one job; the paths are matched against the union of the push payload's per-commit
+`added` / `modified` / `removed` lists. The payload does not say when those lists are
+incomplete, so the router treats three observable cases as "touching everything": `commits` at
+GitHub's documented cap of 2,048 entries, `forced: true`, or a `before` sha that is not the
+previous head the App recorded for that branch (a gap in deliveries). Erring toward a scan is
+cheap (6–15 calls) and the job key dedupes it:
 
 | Event | Condition | Job |
 | --- | --- | --- |
@@ -314,7 +324,10 @@ What must change in `src/github` (small, and useful to the CLI too):
    (`openssl pkcs8 -topk8 -nocrypt`) before it is stored as the secret; the signer refuses a
    PKCS#1 header with a message that names the command.
 3. **Rate-limit handling** in `fetchTransport` as described above. `GitHubError` gains
-   `retryAfter: number | null`; nothing else in the interface changes.
+   `retryAfter: number | null`. The one other interface change is `setRef`'s options gaining
+   `force: boolean` (default `true`, today's behavior) so the D25 `direct-commit` writer can ask
+   for a fast-forward-only update; a `422` from GitHub then surfaces as a `GitHubError` with
+   that status, which the writer treats as "the branch moved".
 4. **Truncated trees.** `repositorySnapshot` refuses a tree the API truncates (about 100,000
    entries). The CLI never met one; a customer might. M2 adds a fallback that lists the root and
    the directories rulecheck reads (`.cursor/rules`, `.claude`, `.agents/skills`, …)
@@ -556,6 +569,7 @@ better option that produced nothing new.
 | Pricing | Deferred to after M2; the design fixes only the `plan` column, the repository gate, and the over-limit rule (decided by the owner) | a placeholder tier table now (removed: numbers before the first buyer conversation anchor the wrong thing) | decided by owner, n/a |
 | Technology decisions | Effect `HttpApi`; D1 + Drizzle; Workers Logs; GitHub Actions + Alchemy deploy; session storage at implementation; domain later (decided by the owner) | Hono; raw SQL; Sentry; laptop deploys | decided by owner, n/a |
 | Front end | React, in a private repository, because the owner's paid React component library cannot be redistributed in open source (decided by the owner); the meta-framework is the one question left open, with TanStack Start recommended over React Router v7 and Next-on-Workers | SolidStart / Solid 2, Astro islands, HTMX-style fragments (each would sit next to a React component library or leave it unused) | recommendation settled in round 2; pick by owner |
+| Guard for `direct-commit` | Fast-forward-only ref update (parent = the head that was read, `force: false`, one re-read and retry on `422`, then `refused`), since the D10 ownership check cannot apply to a default branch | force update as for the tool-owned branch (would overwrite a commit pushed between read and write); a lock in the App only (does not see pushes from outside the App); require branch protection with the App as the only allowed pusher (a setting the solo account this targets does not have) | 1 |
 | Scan schedule | Webhook table in section 2 plus a per-installation `fullRescan` setting (`daily` default, `weekly`, `off`) (decided by the owner) | fixed daily rescan; webhooks only | decided by owner, n/a |
 | Bootstrap without a pack repository | Read-only inventory until a source is registered; (a) a public GitHub template repository the user instantiates with `Use this template` via a prefilled `github.com/new` link, then adds to the installation; (b) an existing repository; (c) a derived starter pack, post-MVP | the App creating the repository through the installation or user token (`Administration: write` on every visible repository for one onboarding click); the App pushing starter files into an empty repository the user created (`Contents: write` suffices, but the user still creates the repository, so the template saves the same click with fewer bytes of ours in the flow) | 2 |
 | Database | D1, schema kept Postgres-portable | Neon Postgres (right when multi-region or large joins appear, not now); Durable Object SQLite storage per installation (no cross-installation query for the operator, no single backup) | 2 |
