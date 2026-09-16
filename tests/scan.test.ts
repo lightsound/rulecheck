@@ -196,7 +196,8 @@ const run = <A, E>(effect: Effect.Effect<A, E, BunServices.BunServices>) =>
 
 describe("walk", () => {
   test("finds repositories and their instruction files, skipping ignored trees", async () => {
-    const repos = await run(walk(root));
+    const { repos, excludedNested } = await run(walk(root));
+    expect(excludedNested).toEqual([]);
     const byName = new Map(
       repos.map((r) => [r.root.slice(root.length + 1), r.files.map((f) => f.relativePath)]),
     );
@@ -223,7 +224,7 @@ describe("walk", () => {
   });
 
   test("collects skill directories and the skills lock without treating SKILL.md as a rule", async () => {
-    const repos = await run(walk(root));
+    const { repos } = await run(walk(root));
     const blocked = repos.find((r) => r.root.endsWith("/acme/blocked"));
     expect(blocked?.files.map((f) => f.relativePath)).toEqual(["AGENTS.md", "CLAUDE.md"]);
     expect(blocked?.skills.map((s) => `${s.agentDir}:${s.name}`)).toEqual([
@@ -563,6 +564,145 @@ describe("scan: canonical by import (D16)", () => {
     } finally {
       await rm(tree, { recursive: true, force: true });
     }
+  });
+});
+
+describe("scan: nested repositories (D24)", () => {
+  let tree: string;
+  const PARENT = "github.com/acme/parent";
+
+  beforeAll(async () => {
+    tree = await mkdtemp(join(tmpdir(), "rulecheck-nested-"));
+    // acme/parent: canonical pair, a nested AGENTS.md in a plain directory, and three nested
+    // repositories: a submodule (`.git` file), a submodule checked out by an old git (`.git`
+    // directory, listed in `.gitmodules`), and a clone made inside the checkout.
+    await mkdir(join(tree, PARENT, ".git"), { recursive: true });
+    await put(`${PARENT}/AGENTS.md`, "# Parent\n\nline\nline\nline\nline\n", tree);
+    await put(`${PARENT}/CLAUDE.md`, "@AGENTS.md\n", tree);
+    await put(`${PARENT}/packages/x/AGENTS.md`, "# Package\n", tree);
+    await put(
+      `${PARENT}/.gitmodules`,
+      [
+        '[submodule "lib"]',
+        "\tpath = external/lib",
+        "\turl = https://github.com/acme/lib.git",
+        '[submodule "legacy"]',
+        "\tpath = tools/legacy",
+        "\turl = https://github.com/acme/legacy.git",
+        "",
+      ].join("\n"),
+      tree,
+    );
+    await put(`${PARENT}/external/lib/.git`, "gitdir: ../../.git/modules/lib\n", tree);
+    await put(`${PARENT}/external/lib/AGENTS.md`, "# Lib\n\nline\nline\nline\nline\n", tree);
+    await mkdir(join(tree, PARENT, "tools/legacy/.git"), { recursive: true });
+    await put(`${PARENT}/tools/legacy/CLAUDE.md`, "# Legacy\n", tree);
+    await mkdir(join(tree, PARENT, "parent/.git"), { recursive: true });
+    await put(`${PARENT}/parent/AGENTS.md`, "# Parent\n\nline\nline\nline\nline\n", tree);
+    await put(`${PARENT}/parent/CLAUDE.md`, "@AGENTS.md\n", tree);
+    // A sibling repository at the same level is not nested in anything.
+    await mkdir(join(tree, "github.com/acme/sibling/.git"), { recursive: true });
+    await put("github.com/acme/sibling/AGENTS.md", "# Sibling\n", tree);
+  });
+
+  afterAll(async () => {
+    await rm(tree, { recursive: true, force: true });
+  });
+
+  test("by default a repository inside another repository is neither a target nor part of the parent", async () => {
+    const report = await run(scan(tree));
+    expect(report.repos.map((r) => r.name)).toEqual(["acme/parent", "acme/sibling"]);
+    expect(report.totals.repos).toBe(2);
+    expect(report.totals.reposWithInstructions).toBe(2);
+    expect(report.totals.files).toBe(4);
+    // The plain directory is still walked; the nested repositories' files are not attributed.
+    const parent = report.repos.find((r) => r.name === "acme/parent");
+    expect(parent?.files.map((f) => f.relativePath)).toEqual([
+      "AGENTS.md",
+      "CLAUDE.md",
+      "packages/x/AGENTS.md",
+    ]);
+    expect(report.duplicates).toEqual([]);
+
+    expect(report.excludedNested).toEqual([
+      {
+        root: join(tree, PARENT, "external/lib"),
+        name: "acme/parent/external/lib",
+        parent: "acme/parent",
+        kind: "submodule",
+      },
+      {
+        root: join(tree, PARENT, "parent"),
+        name: "acme/parent/parent",
+        parent: "acme/parent",
+        kind: "nested-clone",
+      },
+      {
+        root: join(tree, PARENT, "tools/legacy"),
+        name: "acme/parent/tools/legacy",
+        parent: "acme/parent",
+        kind: "submodule",
+      },
+    ]);
+    expect(JSON.parse(JSON.stringify(report)).excludedNested).toHaveLength(3);
+
+    const text = renderText(report);
+    expect(text).toContain("2 repositories, 2 with instruction files, 4 files");
+    expect(text).toContain(
+      "3 nested repositories excluded (2 submodules, 1 nested clone): a repository inside another repository is a different project; --include-nested scans them as their own",
+    );
+    expect(text).toContain("acme/parent/external/lib");
+    expect(text).toContain(
+      "acme/parent/parent                           nested clone    in acme/parent",
+    );
+
+    const html = renderHtml(report, { version: "test" });
+    expect(html).toContain(
+      '<p class="footnote">3 nested repositories excluded (2 submodules, 1 nested clone)',
+    );
+    expect(html).toContain(
+      '<span class="mono">acme/parent/parent</span> (nested clone in <span class="mono">acme/parent</span>)',
+    );
+  });
+
+  test("--include-nested scans them as their own repositories, files attributed to the innermost", async () => {
+    const report = await run(scan(tree, { includeNested: true }));
+    expect(report.repos.map((r) => r.name)).toEqual([
+      "acme/parent",
+      "acme/parent/external/lib",
+      "acme/parent/parent",
+      "acme/parent/tools/legacy",
+      "acme/sibling",
+    ]);
+    expect(report.totals.repos).toBe(5);
+    expect(report.excludedNested).toEqual([]);
+    expect(
+      report.repos.find((r) => r.name === "acme/parent")?.files.map((f) => f.relativePath),
+    ).toEqual(["AGENTS.md", "CLAUDE.md", "packages/x/AGENTS.md"]);
+    expect(
+      report.repos
+        .find((r) => r.name === "acme/parent/external/lib")
+        ?.files.map((f) => f.relativePath),
+    ).toEqual(["AGENTS.md"]);
+    expect(report.repos.find((r) => r.name === "acme/parent/parent")?.shape).toBe(
+      "agents-canonical",
+    );
+    expect(renderText(report)).not.toContain("nested repositories excluded");
+    expect(renderHtml(report, { version: "test" })).not.toContain('class="footnote"');
+  });
+
+  test("--max-depth counts from the scan root as before; a shallow limit hides nested repositories too", async () => {
+    // Depth 3 reaches `github.com/acme/parent` (depth 3) and its direct files; `external/lib` sits
+    // at depth 5 and `packages/x/AGENTS.md` at depth 5, so neither is seen.
+    const report = await run(scan(tree, { maxDepth: 3 }));
+    expect(report.repos.map((r) => r.name)).toEqual(["acme/parent", "acme/sibling"]);
+    expect(
+      report.repos.find((r) => r.name === "acme/parent")?.files.map((f) => f.relativePath),
+    ).toEqual(["AGENTS.md", "CLAUDE.md"]);
+    expect(report.excludedNested).toEqual([]);
+    // One level more reaches the nested clone at depth 4 and the two directories that hold submodules.
+    const deeper = await run(scan(tree, { maxDepth: 4 }));
+    expect(deeper.excludedNested.map((n) => n.name)).toEqual(["acme/parent/parent"]);
   });
 });
 

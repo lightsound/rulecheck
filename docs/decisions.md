@@ -841,6 +841,57 @@ only if the sync is triggered by the merge, and the merge happens in agent-rules
 watches from elsewhere polls. A workflow in the pack repository is the smallest thing that is
 triggered by the merge, so the constraint dissolves at that place and nowhere else.
 
+## 2026-09-16 D24: a repository inside another discovered repository is not a scan target
+
+`scan ~/ghq` reported 77 repositories where the tree holds about 70. The seven extra were
+repositories inside repositories: submodules (a `.git` file pointing at `gitdir: …`), clones
+made inside a checkout (`lightsound/noican/noican`, `gamehint/gaitalys-web/gaitalys-web`), and
+vendored checkouts (`*/external/blackhole`). `walk` treated every directory holding `.git` as a
+repository, so each of them got a row, a shape (`none`, mostly), and with `--packs` a
+`not-subscribed` entry per pack, inflating the headline and the candidate list with projects
+nobody would subscribe from this tree.
+
+**Excluded from the walk, not folded into the parent.** A repository inside a repository is a
+different project: its `AGENTS.md` instructs agents working in *it*, its rules are not the
+parent's rules, and a sync into the parent must not read or write it. So by default `walk` stops
+at its directory: it is neither its own entry nor part of the enclosing repository, and nothing
+below it is read. Directories that are not repositories are descended into as before, and
+`--max-depth` keeps counting from the scan root. What was cut is reported, not hidden:
+`excludedNested` in `--json` (root, display name, enclosing repository, kind), a footer in the
+text report (`3 nested repositories excluded (2 submodules, 1 nested clone)` and one line each),
+and a footnote on the HTML page. `--include-nested` restores the old behavior for someone who
+does want a row per nested checkout: every nested repository becomes its own entry, files are
+attributed to the innermost repository, and `excludedNested` is empty.
+
+**Kind.** `submodule` when `.git` is a file (how git checks out a submodule) or when the
+enclosing repository's `.gitmodules` lists the path (submodules checked out by older git carry a
+`.git` directory); `nested-clone` otherwise. The kind names the situation for the reader; it
+changes nothing about the exclusion. `.gitmodules` is parsed for `path =` keys only, by a pure
+function in `src/domain/nested.ts`, and read once per enclosing repository. The kinds are words
+outside the status model (they are not a shape or a status) and are listed as such in
+`docs/status-model.md`.
+
+**What does not change.** `sync` reads GitHub trees, where a submodule is a `commit` entry that
+`src/github/fs.ts` never presented as a directory, so the remote measurement was already free of
+nested repositories. `schemaVersion` stays 1: `excludedNested` is a new field; `repos` keeps its
+meaning and shrinks to what it always claimed to count.
+
+| Decision | Chosen | Alternatives considered | Settled in round |
+| --- | --- | --- | --- |
+| What a nested repository is to the scan | Neither a target nor part of the parent: `walk` does not descend into it, and lists it in `excludedNested` | keep it as its own entry but drop it from the totals (the row is what inflates the candidate list); attribute its files to the parent (a different project's `AGENTS.md` would count toward the parent's budget and a sync could touch it); ignore it silently (a reader comparing to `ls` would find repositories missing) | 2 |
+| Where the cut happens | In `walk`, at discovery, before the directory is read | post-filter `RepoReport`s in `scan.ts` (the nested trees are still walked and analyzed, and their files were attributed somewhere); `isIgnoredDirectory` (decides by name, cannot see `.git`) | 1 |
+| How the kind is told | `.git` is a file → `submodule`; else `.gitmodules` of the nearest enclosing repository lists the path → `submodule`; else `nested-clone` | `.git` file only (misses submodules checked out by old git, which `.gitmodules` still lists); follow `gitdir:` into `.git/modules` (more I/O for the same answer); check every ancestor's `.gitmodules` (a submodule is registered in its direct superproject) | 2 |
+| Where the kinds live in the vocabulary | Words outside the model, listed in `docs/status-model.md` with labels of the `-` → space rule, `NESTED_KIND_LABEL` in `labels.ts`, enforced by `tests/status-model.test.ts` | a fifth vocabulary (they are not a state anything transitions through); no glossary entry (every printed word is supposed to be in the glossary) | 1 |
+| Report surface | `excludedNested: [...]` at the top of `--json`; a footer in the text report with the count, the kind breakdown, one line per excluded repository, and the flag; the same sentence as a footnote on the HTML page | a `totals.excludedNested` count next to `repos` (the list already carries the count, and a reader of the headline should not have to subtract); a section of their own (they are what the scan did not do, so they belong at the end); count only, no names (a reader comparing to `ls` needs the names) | 2 |
+| Opt-in | `--include-nested`, restoring the previous behavior exactly | `--nested <exclude\|own\|parent>` (nobody asked for `parent`, and it is the option the first row rejects); no flag (a vendored checkout with its own rules is sometimes what someone wants to audit) | 1 |
+
+**Structural check.** The constraint is "count repositories the way a person counts them". A
+person counts a checkout once and does not count the projects it vendors, because the boundary
+that matters is the one git draws: an enclosing `.git` owns everything below it except what
+another `.git` owns. `walk` already knew both facts and only lacked the rule that the outer
+boundary wins. Stopping at the inner `.git` is that rule, so the problem dissolves at the walk
+and nothing downstream needs to know a repository was nested.
+
 ## Recording rule
 
 Add an entry here whenever a decision changes what rulecheck writes, what it reports, or which
