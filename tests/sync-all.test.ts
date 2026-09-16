@@ -110,7 +110,7 @@ describe("syncAll", () => {
     // `--html` renders the same rows: measured status, outcome label, `+N -M` detail.
     const html = renderSyncAllHtml(result, { version: "test", generatedAt: "now" });
     expect(html).toContain(
-      '<td class="mono">acme/eligible</td><td class="mono">base</td><td><span class="chip status-eligible">eligible</span></td><td><span class="chip outcome-planned">planned</span> planned +5 -0: insert block `base` into AGENTS.md',
+      '<td class="mono">acme/eligible</td><td class="mono">base</td><td><span class="chip status-eligible">eligible</span></td><td><span class="chip outcome-planned">planned</span> +5 -0: insert block `base` into AGENTS.md',
     );
     expect(html).toContain('<span class="chip outcome-planned">3 planned</span>');
     expect(html).toContain('<td><span class="muted">-</span></td>');

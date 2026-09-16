@@ -18,7 +18,7 @@ import {
   UNMEASURED,
 } from "./labels.ts";
 import { describePersonalCopy, describeScope, SHAPE_NOTE } from "./render.ts";
-import { describeOutcome } from "./sync.ts";
+import { outcomeDetail } from "./sync.ts";
 
 /**
  * A single self-contained HTML file of the same `ScanReport` (or `SyncAllResult`) the text
@@ -77,7 +77,7 @@ export function renderSyncAllHtml(
       const status = row.outcome.status;
       const statusCell =
         status === null ? `<span class="muted">${UNMEASURED}</span>` : statusChip(status.status);
-      const [first, ...rest] = describeOutcome(row.outcome).split("\n");
+      const [first, ...rest] = outcomeDetail(row.outcome).split("\n");
       const detail = rest.length > 0 ? `<div class="detail">${esc(rest.join("\n"))}</div>` : "";
       return `<tr><td class="mono">${esc(row.target.repo)}</td><td class="mono">${esc(row.target.pack)}</td><td>${statusCell}</td><td>${outcomeChip(row.outcome.kind)} ${esc(first ?? "")}${detail}</td></tr>`;
     })
@@ -320,7 +320,10 @@ function repoCard(repo: RepoReport): string {
     </table>`
       : "";
 
-  const count = repo.findings.length + repo.skills.issues.length;
+  const count =
+    repo.findings.length +
+    repo.blockIssues.filter((issue) => issue.kind === "malformed-marker").length +
+    repo.skills.issues.length;
   return `
 <details class="repo" open>
   <summary>
