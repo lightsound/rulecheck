@@ -95,6 +95,13 @@ row carries `file:line` where it applies.
 A sync does not change the status by itself: opening a pull request leaves the default branch,
 and therefore the status, as it was until the pull request merges.
 
+One surface shows `eligible` and `blocked` for repositories whose measured status is
+`not-subscribed`: the `Not subscribed (N)` candidate list of the `scan --html` page (D20). That
+is a projection, not a measurement: `classifyIfSubscribed` (`src/domain/pack.ts`) runs
+`classifyPackStatus` with the repository assumed subscribed, so the chip and message are what
+the repository would read the moment it is added to `subscriptions.json`. It appears nowhere in
+the text report or in `scan --json`, and the status counts do not include it.
+
 ## Sync outcome
 
 What one sync run ended in for one target (one repository, one pack). Identifiers are the `kind`
