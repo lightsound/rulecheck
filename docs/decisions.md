@@ -687,6 +687,56 @@ rest were settled by the search-rounds rule.
 | Root-budget footnote | Names the heaviest repository by `max(cursor, claudeCode)` root budget | an average per repository (hides the outlier a lead wants to see) | 1 |
 | Print | What is open prints: cards yes, the skill folds and the candidate list only if the reader opened them | a print stylesheet that forces folds open (not possible for a closed `<details>` without script) | 1 |
 
+## 2026-09-16 D21: the `--html` page adopts GitHub Primer's tokens and opens with a next-actions list
+
+The D20 page was reviewed again on a synthesized tree of 80 repositories across four owners
+(7 subscribed to 2 packs, 2 blocked, 7 issues) and read as "still hard to read": the words
+"Pack distribution" appeared twice with the same six-status legend repeated three times (bars,
+pack captions, owner rows), the reader had to derive what to do from a matrix, 72 open cards
+made a 19,000 px page in which every repository looked equally important, shapes were
+seven-colored chips next to six-colored status chips, and the four headline cards mixed a
+two-row value with single numbers. Same data, same labels; a different hierarchy and a design
+system instead of ad hoc styling.
+
+**Design system.** GitHub Primer's tokens, not a system of rulecheck's own: type scale 12 / 14 /
+16 / 20 / 28, spacing on a 4 px grid (4 / 8 / 16 / 24), Primer's neutral grays and semantic
+colors (`success`, `attention`, `danger`, `done`, `accent`) in light and dark, one accent
+(blue) for links and `eligible`, content width 1100 px. Color is used only where a status is the
+content: status chips in the next-actions list and the matrix, the stacked bar, the
+`Action needed` / `Issues` numbers. Everything else is gray text. Labels are printed as written
+(no all-caps). Tables are zebra-free with a 1 px separator, text left, numbers right, tabular
+numerals. No script; `<details>` for every fold; print keeps what is open.
+
+**Sections, one question each, in reading order.** Overview: how big is the estate and how
+healthy (at most five cards, one number each; `Action needed` counts repositories that are
+`modified`, `outdated`, `blocked`, or `eligible` against any pack, and is the one red number).
+Next actions: what must a human or a sync do, most urgent first, one row per repository × pack
+with the verb from `STATUS_ACTION` (glossary, "Next action per status"), the status message,
+and `file:line`; then one row per repository with issues. Pack distribution: where each pack
+stands (one line per pack with rev, subscribers, a stacked bar, and counts), then the repo ×
+pack matrix of the subscribed repositories grouped by owner, cells reduced to status and
+`file:line`; the `not-subscribed` candidate list stays closed. Repositories: what each one loads
+and where its issues are; owner groups under sticky headers that double as column headers
+(Shape, Cursor, Claude Code), one collapsed row per repository, open only when it has an issue,
+budgets as two right-aligned numeric columns. Duplicates and Personal layer unchanged.
+
+**What did not change.** `scan --json`, the text report, every glossary label, the one extra
+classification of D20 (`classifyIfSubscribed`), the sync `--all` page's table (its cards and
+counts line follow the same tokens).
+
+| Decision | Chosen | Alternatives considered | Settled in round |
+| --- | --- | --- | --- |
+| Design system | GitHub Primer tokens, hand-written as CSS variables (light and dark), no external asset | Tailwind-like utility CSS inline (hundreds of classes in a generated string, no gain for a static page); Material (denser type ramp, elevation shadows the page does not need); a system of rulecheck's own (the thing the review said not to do) | 2 |
+| First section after the cards | `Next actions`: pack statuses that ask for an action, then repositories with issues, both as tables with `file:line` | actions folded into the matrix cells (D20; the reader had to scan 2 × N cells and read the message to know what to do); one merged list of statuses and issues (two different units, repo × pack against repo) | 2 |
+| Where the action verb lives | `STATUS_ACTION` in `labels.ts`, one verb per status, documented in the glossary and enforced by `tests/status-model.test.ts` | prose in `html.ts` (a sentence table that drifts from the glossary); a new `PackStatusEntry` field (a `--json` addition for one rendering) | 1 |
+| The one red number | `Action needed`, counting repositories (one repository behind on two packs is one thing to open), with the per-status entry counts in the small text | counting entries (7 for 6 repositories; the reader reconciles two numbers); `Issues` red too (kept red: it is the second thing to act on, and the review asked for semantic color only where status is content, which an issue count is) | 2 |
+| Cards | Five: Repositories, Action needed, Current, Issues, Instruction files; per-tool token sums move to one footnote line under the cards | keep the two-row token card (the one card whose value was not one number); a `Heaviest repository` card (a name, not a number) | 1 |
+| Shapes | Plain text everywhere (the shapes line, the repository row, the candidate list); `SHAPE_LABEL` unchanged | keep shape chips (seven more colors next to the six status colors, on rows where shape is a property, not the content) | 1 |
+| Repository rows | One `<details>` row per repository with name, issue badge, shape, Cursor, Claude Code as aligned columns; open only when `issueCount > 0`; the sticky owner header carries the column labels | all open (D19; 19,000 px); all closed (issues invisible without a click); a plain table with a detail row (no `<details>` without script) | 2 |
+| Status legend | Once per pack, as `● N label` text under the bar; owner rows show a repository count only | chips with bold counts in three places (D20) | 1 |
+| Matrix cells | Status chip and `file:line`; the message lives in `Next actions` | chip, `file:line`, and message per cell (D20; the widest cells decided the row height for every row) | 1 |
+| Verification method | Render a synthesized 80-repository report through headless Chromium at 1280 px in light and dark, critique against the brief, fix, repeat; three rounds; the harness lives outside the repository and Playwright is not a dependency | commit the harness and Playwright as a visual test (a browser download in CI for a page whose structure `tests/html.test.ts` already pins) | 1 |
+
 ## Recording rule
 
 Add an entry here whenever a decision changes what rulecheck writes, what it reports, or which
