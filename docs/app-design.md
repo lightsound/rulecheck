@@ -35,7 +35,7 @@ better option appeared. Words in `code` that name a status, shape, or outcome ar
   default, not implemented) merge them.
 - MCP / Hooks governance, Skills distribution (D18), Subagents. The inventory `scan` already
   prints (skills, lock state) is shown; nothing more.
-- Billing beyond a placeholder plan table (section 8) and a repository-count gate.
+- Billing and pricing (section 8: deferred to after M2; only the `plan` column and a repository-count gate exist in the schema).
 - GitHub Enterprise Server, GitLab, Bitbucket. GitHub.com only.
 - Any write to a repository other than the D10 pull request into a subscriber and the D25 pull
   request into the pack repository.
@@ -57,13 +57,13 @@ unchanged, stores the packs and subscriptions as a cache keyed by the commit sha
 and re-runs the installation scan with `packs` set so every repository × pack gets a status.
 One pack source per installation in the MVP.
 
-**Subscriptions.** The Pack source screen lists every pack with its subscribers and every
+**Subscriptions.** The Pack & subscriptions page lists every pack with its subscribers and every
 installed repository with its `not-subscribed` projection (`classifyIfSubscribed`, D20: what a
 sync would do the moment it is subscribed). Ticking a repository under a pack does not write the
 database: it opens a pull request against the pack repository that edits `subscriptions.json`
-(D25). The pending change is shown on the screen as "subscription PR #n open" until it merges;
+(D25). The pending change is shown on the page as "subscription PR #n open" until it merges;
 the merge's `push` webhook reloads the cache and the row becomes `eligible`. Consequence stated
-plainly on the screen: subscribing takes two pull requests, one to the pack repository and one
+plainly on the page: subscribing takes two pull requests, one to the pack repository and one
 into the subscriber.
 
 **Pull-style entry point (candidate CLI command, not implemented).** The dashboard is the
@@ -282,24 +282,25 @@ own history):
 Sizes are small: hundreds of repositories × a few packs × one row per measurement. Reports are
 kept for 90 days, snapshots and runs for 12 months, audit for 12 months (open question 7).
 
-## 5. Screens
+## 5. Dashboard pages
 
-Three screens, all rendered server-side to the D21 design system (Primer tokens, no script
-beyond progressive enhancement, `<details>` folds, print keeps what is open). Labels come from
-`src/report/labels.ts`; nothing on a screen is a word the glossary does not have.
+The dashboard has three pages (HTML pages the App serves, not images or mockups), all rendered
+server-side to the D21 design system (Primer tokens, no script beyond progressive enhancement,
+`<details>` folds, print keeps what is open). Labels come from `src/report/labels.ts`; nothing
+on a page is a word the glossary does not have.
 
-1. **Overview** (`/i/<installation>`): the D19–D22 page as `renderHtml` produces it, with an App
-   header (installation switcher, `Rescan`, `Pack source`, sign out) and a run banner when a
-   run is in flight. In M1 the page is served byte for byte from a `ScanReport` assembled from
-   `repo_reports` and `status_snapshots`; in M2 `html.ts` exports its sections so the header
-   and the matrix links can point at the screens below instead of anchors.
-2. **Repository detail** (`/i/<installation>/r/<owner>/<repo>`): the repository row opened, plus
+1. **Overview page** (`/i/<installation>`): the D19–D22 page as `renderHtml` produces it, with
+   an App header (installation switcher, `Rescan`, `Pack source`, sign out) and a run banner
+   when a run is in flight. In M1 the page is served byte for byte from a `ScanReport` assembled
+   from `repo_reports` and `status_snapshots`; in M2 `html.ts` exports its sections so the header
+   and the matrix links can point at the pages below instead of anchors.
+2. **Repository page** (`/i/<installation>/r/<owner>/<repo>`): the repository row opened, plus
    what the page could not hold: the files it loads with budgets per tool, findings with
    `file:line` linking to the GitHub blob at the measured sha, managed blocks with `source`,
    `rev`, `hash`, status per pack with the next-action verb, the skills inventory with lock
    state, and the history of this repository's rows in past runs (status over time, pull
    requests opened for it).
-3. **Pack source / subscriptions** (`/i/<installation>/packs`): the registered source with
+3. **Pack & subscriptions page** (`/i/<installation>/packs`): the registered source with
    `head_sha` and `loadPacks` warnings; one card per pack (id, hash, rev, subscribers, the
    stacked status bar); the subscriptions matrix (every installed repository × every pack, a
    checkbox per cell; checked cells that are not yet in `subscriptions.json` show
@@ -315,11 +316,11 @@ babysit.
 
 | Concern | Cloudflare Workers + Queues + Durable Objects (chosen) | Fly.io, one Bun container | Vercel functions |
 | --- | --- | --- | --- |
-| Reuse of `src/*` | Everything except `Bun.spawn`, via the transport split; `@effect/platform-bun` is not loaded. Risk: Effect v4 RC on workerd is unproven; M1 starts with a spike that runs `scan` over a snapshot in `wrangler dev` | Everything as is, including `all.ts` and the `Semaphore`; the only change is the fetch transport | As Workers, but no queue or lock primitive of its own |
+| Reuse of `src/*` | Everything except `Bun.spawn`, via the transport split; `@effect/platform-bun` is not loaded. Effect v4 on workerd is a known-good stack: the owner runs it in other projects, and Alchemy (below) is itself an Effect program | Everything as is, including `all.ts` and the `Semaphore`; the only change is the fetch transport | As Workers, but no queue or lock primitive of its own |
 | Job model | Queues (at-least-once, retries, `delaySeconds`), Durable Object per installation as the write lock and run coordinator, Cron Triggers for the daily runs. 15 min wall clock per consumer invocation, CPU up to 5 min (configured); one `sync-target` is seconds of CPU | An in-process Effect queue, or pg-boss on the database; a restart mid-run loses in-flight work unless persisted | Needs a third service (Inngest, Upstash QStash) for queues and retries |
 | Cold path latency | Webhook to first API call under 50 ms; a full scan of 200 repositories is bounded by GitHub, not compute | Same order; always-on | Same, cold starts on the function |
-| Runtime risk | workerd is not Bun: no `Bun.*`, `node:` via `nodejs_compat`, 128 MB memory per isolate (`js-tiktoken` ranks fit) | None: Bun is the runtime rulecheck is developed with | Node runtime; Bun runtime experimental |
-| Ops | No server; deploy with `wrangler`; logs and traces built in | A VM to patch, deploy, and watch; `fly deploy` per change | No server; logs built in |
+| Runtime | workerd is not Bun: no `Bun.*`, `node:` via `nodejs_compat`, 128 MB memory per isolate (`js-tiktoken` ranks fit); tests keep running under `bun test` | Bun, the runtime rulecheck is developed with | Node runtime; Bun runtime experimental |
+| Ops | No server; infrastructure defined and deployed with Alchemy (below); logs and traces built in | A VM to patch, deploy, and watch; `fly deploy` per change | No server; logs built in |
 | Cost at MVP scale | Workers Paid $5/month covers the queue and Durable Object usage at this volume | $5–15/month always-on, plus the database | $20/month Pro plus the queue service |
 | Exit | Queue and lock semantics are Cloudflare's; the job functions are plain Effect programs and move | Portable container | Vendor functions |
 
@@ -332,19 +333,35 @@ babysit.
 
 | Concern | Choice | Alternatives |
 | --- | --- | --- |
+| Infrastructure as code | [Alchemy](https://alchemy.run): the Workers, Queues, Durable Objects, D1, Cron Triggers, and secrets are one TypeScript stack (`alchemy.run.ts`, an Effect program, so it is the same language and library as the App and reviewable in the same pull request), with `alchemy plan` / `deploy` / `destroy` and state in the account's Cloudflare-hosted state store (`Cloudflare.state()`, encrypted at rest). Environments are Alchemy stages: `prod` is the stage the webhook URL and domain point at; `dev_<user>` is each developer's own copy (the default stage), and a pull request in the App repository deploys stage `pr-<n>` from GitHub Actions, gets its URL as a comment, and is destroyed when the pull request closes. State and resource names are namespaced by stage, so no environment can touch another's D1 or queue. Secrets (App private key, webhook secret, session key) are set per stage; the GitHub App registration is per stage too (a `prod` App and a `dev` App with different webhook URLs), because one registration has one webhook URL | `wrangler.jsonc` plus `wrangler deploy` (the resources exist as configuration, not as code; per-environment copies are hand-named and secrets are set by hand per environment); Terraform / Pulumi (a second language or a heavier toolchain for six resource types); SST (AWS-first; its Cloudflare support is thinner and it is not Effect) |
 | Auth | GitHub OAuth through the App's user authorization (one registration, one login button, tokens 8 h); session in a signed cookie holding the user id and the token encrypted with a Worker secret; access recomputed from `GET /user/installations` at sign-in | A separate OAuth App (a second registration to keep in step); email/password (nothing to gain, a password database to protect) |
-| Observability | Workers Logs and Traces (Workers Observability), the `runs` table as the domain-level trace, an alert on `failed` rows above zero in a run and on webhook signature failures | Sentry (add when errors need grouping across installations); OpenTelemetry export (later, same data) |
-| Front end | Server-rendered HTML from the same string builders as `html.ts`, forms with `POST` and redirects; no framework | A React app (a build pipeline and a second design system for three screens) |
 
-**Recommendation.** Workers + Queues + Durable Objects + D1, Effect programs as the job bodies,
-`fetchTransport` for GitHub. If the M1 spike shows Effect v4 on workerd broken in a way a
-polyfill does not fix, fall back to the Fly.io column with Neon; nothing in sections 3–5 or in
-the job model changes, only the queue and lock implementations, which is why they are the two
-interfaces the App defines for itself (`JobQueue`, `WriteLock`).
+**Recommendation.** Workers + Queues + Durable Objects + D1 defined and deployed with Alchemy,
+Effect programs as the job bodies, `fetchTransport` for GitHub. The Fly.io and Vercel columns
+are the comparison, not a fallback: Effect v4 on Workers is a stack the owner already runs.
+The queue and the lock are still the two interfaces the App defines for itself (`JobQueue`,
+`WriteLock`), because they are the only places the job model touches the platform.
+
+### Technology decisions still open
+
+Small choices that do not change sections 3–5 and are made when the code that needs them is
+written (M1 for most). Each with its default.
+
+| Choice | Default | Alternative |
+| --- | --- | --- |
+| Front-end rendering | Server-rendered HTML from the same string builders as `html.ts`, forms with `POST` and redirects, no client framework; the D21 page is already that | A small framework (Hono JSX, or React server-rendered) once forms outgrow string building |
+| Web framework on Workers | Effect `HttpApi` (`effect/unstable/http`): routes, schema-validated inputs, and the `GitHub` / queue services in one Effect layer, matching the CLI's `effect/unstable/cli` | Hono (smaller, more examples on Workers, but a second request model next to Effect) |
+| D1 access and migrations | Raw SQL through the D1 binding with hand-written, numbered migration files applied by Alchemy on deploy; the schema is small and the queries are few | Drizzle (typed queries and `drizzle-kit` migrations; adopt when the schema passes a dozen tables) |
+| Session storage | Encrypted, signed cookie only (user id, login, token, expiry), no server-side session table | KV or D1 session rows (needed for server-side revocation before token expiry) |
+| Webhook verification | Hand-written HMAC-SHA256 over the raw body with `crypto.subtle`, constant-time compare; twenty lines, no dependency | `@octokit/webhooks` (verification plus typed payloads; the payload types are the argument for it) |
+| Observability | Workers Logs and Traces plus the `runs` table; alert on `failed` rows and signature failures | Sentry (when errors need grouping across installations) |
+| CI/CD | GitHub Actions in the App repository: `bun run check`, then `alchemy deploy --stage pr-<n>` on pull requests and `--stage prod` on `main`; credentials provisioned as code by an Alchemy `github` stack (a scoped Cloudflare API token written as Actions secrets) | Deploy from a laptop (no preview, one machine that can deploy) |
+| Domain | A subdomain of a domain the owner already holds on Cloudflare (`app.<domain>`), managed as a custom domain in the same stack; `workers.dev` for `dev_*` and `pr-*` stages | A new product domain (decide with the name, after M2) |
 
 ## 7. Security
 
-- **App private key**: a Worker secret (`wrangler secret put`), read only by the JWT signer,
+- **App private key**: a Worker secret (set per Alchemy stage, never in the stack file or the
+  repository), read only by the JWT signer,
   never logged, rotated from the GitHub App settings page with a redeploy. **Installation
   tokens**: minted per job, held in memory for the job (at most one hour by construction), never
   written to D1 or logs. **User tokens**: 8 h expiry, encrypted (AES-GCM, key in a Worker
@@ -367,27 +384,20 @@ interfaces the App defines for itself (`JobQueue`, `WriteLock`).
   action taken by a person (sign-in, pack source registered or removed, `Sync now`, `Rescan`,
   subscription change requested) and by GitHub (install, repositories added or removed,
   uninstall, suspend, authorization revoked), with actor, installation, target, run id, time.
-  Shown on the Pack source screen; kept 12 months; exportable as JSON.
+  Shown on the Pack & subscriptions page; kept 12 months; exportable as JSON.
 - **Uninstall**: the `installation` `deleted` event marks the installation, stops its jobs, and
   deletes its rows after 30 days (the grace period lets a reinstall keep history).
 
-## 8. Pricing placeholder
+## 8. Pricing: deferred, decided after M2
 
-Per installation account (organization or user), monthly, gated by the number of repositories
-the installation covers. Placeholder numbers, to be replaced after the first five conversations:
-
-| Plan | Repositories | Price | Includes |
-| --- | --- | --- | --- |
-| Free | ≤ 5 | ¥0 | everything; one pack source |
-| Team | ≤ 50 | ¥4,900 / month | daily dry run, 12 months of history |
-| Business | ≤ 300 | ¥19,800 / month | audit export, priority support |
-
-Open: per-repository versus per-seat (repositories are what the App measures and what GitHub
-scales the rate limit by; seats are what buyers compare); JPY only or USD too (Stripe supports
-both; invoicing in Japan wants JPY); annual discount; whether the personal-account free tier
-counts toward the revenue goal (it does not; it is the top of the funnel). Over the free limit
-the App keeps scanning and stops syncing (writes are the paid feature), with the banner saying
-so.
+No plan or price is proposed here. Pricing is decided after M2, when the App has run a real
+sync for at least one organization other than the owner's and the first conversations have
+shown what buyers compare (repositories, seats, or packs) and in which currency they want to
+be invoiced. What the design fixes now is only what M3 needs to exist: a `plan` column on
+`installations`, a repository-count gate that can be turned on, and the rule that an
+installation over its limit keeps being scanned and stops being synced, with the page saying
+so. Everything else (tiers, a free tier and its size, JPY or USD, annual terms) is open until
+then.
 
 ## 9. Milestones
 
@@ -396,13 +406,13 @@ the unit is a week because the milestones gate on each other, not because any on
 
 | Milestone | Done when | Weeks |
 | --- | --- | --- |
-| M0: design accepted | This document merged with the open questions answered or defaulted; D25 recorded; the App registered on GitHub (name, permissions, webhook URL to a stub) | 0.5 |
-| M1: install and read-only dashboard | The transport split and `fetchTransport` land in rulecheck (with `fake-github.ts` coverage); the App repository exists and depends on rulecheck at a sha; install → `scan-installation` → Overview served from `repo_reports`; `push` rescans one repository; daily rescan; the Effect-on-workerd spike passed or the fallback chosen. Dogfood on `lightsound` | 3 |
-| M2: sync and subscriptions | Pack source registration; `sync-target` on pack push, `Sync now`, dry run; runs and audit; `src/sync/subscribe.ts` in rulecheck with `fake-github.ts` coverage and its decision entry; Pack source screen with the subscriptions matrix writing D25 pull requests through it; Repository detail; `html.ts` sections exported; the D23 workflow in agent-rules switched off once the App has opened the next real pull requests | 3 |
-| M3: organizations and billing | Plan table and repository gate; Stripe checkout and portal; installation switcher for users in several organizations; uninstall lifecycle; the truncated-tree fallback; status page and the alerts in section 6 | 3 |
+| M0: design accepted | This document merged with the open questions answered or defaulted; D25 recorded; the App registered on GitHub (name, permissions, webhook URL to a stub), one registration per stage | 0.5 |
+| M1: install and read-only dashboard | The transport split and `fetchTransport` land in rulecheck (with `fake-github.ts` coverage); the App repository exists and depends on rulecheck at a sha; the Alchemy stack deploys `prod`, `dev_*`, and `pr-*` stages from GitHub Actions; install → `scan-installation` → Overview page served from `repo_reports`; `push` rescans one repository; daily rescan. Dogfood on `lightsound` | 3 |
+| M2: sync and subscriptions | Pack source registration; `sync-target` on pack push, `Sync now`, dry run; runs and audit; `src/sync/subscribe.ts` in rulecheck with `fake-github.ts` coverage and its decision entry; Pack & subscriptions page with the subscriptions matrix writing D25 pull requests through it; Repository page; `html.ts` sections exported; the D23 workflow in agent-rules switched off once the App has opened the next real pull requests | 3 |
+| M3: organizations and billing | Pricing decided (section 8), plan column and repository gate live; Stripe checkout and portal; installation switcher for users in several organizations; uninstall lifecycle; the truncated-tree fallback; status page and the alerts in section 6 | 3 |
 
-Total about ten weeks to a chargeable product. M1 is the milestone with the technical risk
-(runtime); M2 with the product risk (does a team accept two pull requests per subscription).
+Total about ten weeks to a chargeable product. M2 carries the product risk (does a team accept
+two pull requests per subscription); M3 the commercial one (pricing is decided there).
 
 ## 10. Open questions for the owner
 
@@ -438,7 +448,10 @@ better option that produced nothing new.
 | --- | --- | --- | --- |
 | Source of truth | Files in the pack repository (`subscriptions.json`, `packs/**`) on the default branch; the database is a cache keyed by sha plus the App's own history (D25) | App database canonical with a generated file for the CLI (a second configuration store, an export the CLI must trust, roles to rebuild); both writable with a merge rule (the conflict the D9 hash exists to detect, moved to configuration) | 2 |
 | How UI subscription edits reach the file | A pull request to the pack repository on the tool-owned branch `rulecheck/subscriptions`, D10 ownership check, one open pull request carrying every pending change | direct commit to the default branch (D6 forbids; open question 3); one branch per subscription change (N pull requests for one screen's worth of ticks); an issue asking a human to edit (a manual step the App exists to remove) | 1 |
-| Hosting | Cloudflare Workers + Queues + Durable Objects, Cron Triggers for the daily runs; Fly.io + Bun as the named fallback if the M1 spike fails | Fly.io Bun container (full reuse, a server to run); Vercel functions plus a queue service (two vendors for one job model); Deno Deploy (Deno, a third runtime; no queue with retries) | 2 |
+| Hosting | Cloudflare Workers + Queues + Durable Objects, Cron Triggers for the daily runs; Effect v4 on Workers is a stack the owner already runs, so no fallback is planned | Fly.io Bun container (full reuse, a server to run); Vercel functions plus a queue service (two vendors for one job model); Deno Deploy (Deno, a third runtime; no queue with retries) | 2 |
+| Infrastructure as code | Alchemy: one Effect-based TypeScript stack for every Cloudflare resource and secret; stages `prod` / `dev_<user>` / `pr-<n>`; deployed from GitHub Actions with credentials provisioned as code (decided by the owner) | `wrangler.jsonc` + `wrangler deploy`; Terraform / Pulumi; SST | decided by owner, n/a |
+| Pricing | Deferred to after M2; the design fixes only the `plan` column, the repository gate, and the over-limit rule (decided by the owner) | a placeholder tier table now (removed: numbers before the first buyer conversation anchor the wrong thing) | decided by owner, n/a |
+| Open technology choices | Listed under "Technology decisions still open" with a default each, decided when the code that needs them is written | decide all now (the design would fix choices no section depends on) | 1 |
 | Database | D1, schema kept Postgres-portable | Neon Postgres (right when multi-region or large joins appear, not now); Durable Object SQLite storage per installation (no cross-installation query for the operator, no single backup) | 2 |
 | Job model | One queue message per unit of work (`scan-installation`, `scan-repository`, `sync-target`), idempotent by key; a run groups messages; a Durable Object per installation is the D14 write lock | `syncAll` as one message (a 200-target run inside one 15-minute invocation, no partial progress); a Durable Object per installation running the whole sync (single-threaded, so no read parallelism); Workflows (durable steps, but a step per target is the queue with more ceremony) | 2 |
 | Scan unit | Full scan mounts every repository of the installation into one snapshot and runs `scan` once (duplicates and counts come out unchanged); a push rescans one repository and duplicates are recomputed from stored hashes | one `scan` per repository always (cross-repository duplicates need a second implementation); full rescan on every push (3,000 calls per push at 200 repositories) | 2 |
@@ -450,10 +463,9 @@ better option that produced nothing new.
 | Per-repository failure in a full scan | Snapshots are built per repository; a failure becomes a `scan_error` on that repository's row (a row-level failure, not a shape or a pack status; glossary-listed as a word outside the four vocabularies when built) and the rest scan normally | one snapshot, one failure aborts the run (the CLI's behavior for one target; unacceptable over 200 repositories); a synthetic `RepoReport` with shape `none` (lies about the repository) | 1 |
 | Where the D25 writer lives | rulecheck `src/sync/subscribe.ts`, pure plan in `src/domain`, `fake-github.ts` tests; called by the App and by the candidate CLI command | App-only code (two writers once the CLI command exists, and outside the `fake-github.ts` rule); the App calling the CLI as a process (no `Bun.spawn` on Workers) | 1 |
 | Pack source scope | One source per installation, inside the installation | several sources (a merge order between sources nobody asked for); a source outside the installation (open question 2) | 1 |
-| Overview in M1 | `renderHtml` output served as is under an App header | rebuilding the page as components first (three screens' worth of work before anything is live) | 1 |
+| Overview in M1 | `renderHtml` output served as is under an App header | rebuilding the page as components first (three pages' worth of work before anything is live) | 1 |
 | Manual sync control | `Dry run` is the default state of the button; a live run is a second, confirmed action | one `Sync` button (a live write one click away); no manual trigger (a missed webhook then waits for the daily run) | 1 |
 | Report storage | The `RepoReport` JSON as `scan --json` produces it, `schemaVersion` recorded, block bodies kept | strip block bodies (the pack text is the customer's own distributed text, and the detail screen shows it); store instruction file contents for a diff view (content the security section promises not to keep) | 1 |
-| Pricing unit | Per installation account by repository count, three tiers, Free ≤ 5 | per seat (the App has no notion of a seat); per pack (penalizes the behavior the App wants) | 1 |
 | Milestone unit | Weeks for one person with agents, four milestones | story points (nothing to calibrate against); no estimate (the owner asked for one) | 1 |
 
 **Structural check.** The constraint behind most rows is "one configuration, many readers": the
