@@ -26,6 +26,8 @@ export interface SyncAllOptions {
   /** Restrict the run to one pack; every loaded pack when null. */
   readonly pack: string | null;
   readonly dryRun: boolean;
+  /** `--run-url`: the automated run issuing the writes, linked from every pull request body (D23). */
+  readonly runUrl?: string | null;
 }
 
 export interface SyncTargetRef {
@@ -82,9 +84,11 @@ export const syncAll = (
     const rows = yield* Effect.forEach(
       targetsOf(packs),
       ({ repo, pack }) =>
-        runTarget({ repo, dryRun: options.dryRun, writeLock }, loaded, pack).pipe(
-          Effect.map((outcome) => ({ target: { repo, pack: pack.id }, outcome })),
-        ),
+        runTarget(
+          { repo, dryRun: options.dryRun, runUrl: options.runUrl ?? null, writeLock },
+          loaded,
+          pack,
+        ).pipe(Effect.map((outcome) => ({ target: { repo, pack: pack.id }, outcome }))),
       { concurrency: CONCURRENCY },
     );
     return {

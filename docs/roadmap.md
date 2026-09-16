@@ -25,7 +25,11 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
   (overview cards, a next-actions list, the repo × pack matrix, per-owner repository rows, on
   GitHub Primer's tokens; a rendering, not a write path, D19–D22). Skills distribution is deferred (D18): `scan` keeps
   the per-repository skills inventory and lock state, `npx skills` stays the installer, and no
-  skill directory is written by `sync`.
+  skill directory is written by `sync`. Distribution is automated (D23): a workflow in
+  agent-rules runs `sync --all` on every push to `main` that touches `packs/**` or
+  `subscriptions.json`, and on demand with a dry-run input; `sync --run-url <url>` links each
+  pull request to the run that wrote it. The workflow is live once the secret `RULECHECK_TOKEN`
+  is set in agent-rules (Step 6).
 - `lightsound/agent-rules/packs/base/AGENTS.md`: the portable pack `base` (D7 naming),
   environment-neutral only (Step 1, [agent-rules#1](https://github.com/lightsound/agent-rules/pull/1)).
   The repository's root `AGENTS.md` instructs agents working in agent-rules itself and is not
@@ -202,6 +206,36 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
 - Later: GitHub App + webhook so status updates without a local tree; the web/desktop UI on top.
   The `--html` page (D19–D22) is the static preview of that view: the same numbers, next
   actions, matrix, and rows from one scan, for judging whether the live version is worth building.
+
+## Step 6: Automatic sync from the pack repository — workflow landed 2026-09-16, secret pending
+
+- Stop running `sync --all` by hand after every pack merge. The trigger is the merge itself, so
+  the pack repository runs the sync: `.github/workflows/sync.yml` in `lightsound/agent-rules`
+  (D23) runs `rulecheck sync --all --packs "$GITHUB_WORKSPACE" --run-url <run>` on every push
+  to `main` under `packs/**` or `subscriptions.json`, and on `workflow_dispatch` with `dry_run`
+  (the D14 distribution report, no write) and `pack` inputs. One run at a time
+  (`concurrency`, no cancel); exit 1 fails the run; the table is repeated in the job summary;
+  nothing is merged.
+- rulecheck: `sync --run-url <url>` appends `Written by [this run](<url>)` to every pull
+  request body the run writes; the `gh` layer already honors `GH_TOKEN`, so the workflow passes
+  the secret `RULECHECK_TOKEN` as `GH_TOKEN` and the client is unchanged.
+- rulecheck is checked out into the job at a commit sha (`RULECHECK_REF`, Renovate `git-refs`
+  comment) and installed with `bun install --frozen-lockfile`; Bun is `oven-sh/setup-bun` pinned
+  to a sha with `BUN_VERSION` under a Renovate comment. No npm publish.
+- Done when: the secret exists (a fine-grained PAT with Contents and Pull requests read/write on
+  every repository in `subscriptions.json`; exact settings in D23 and in agent-rules
+  `AGENTS.md`), a `workflow_dispatch` dry run prints the same table as a local
+  `sync --all --dry-run`, and the next pack merge opens its pull requests without a local run.
+  State on 2026-09-16: the workflow and `--run-url` are merged; `RULECHECK_TOKEN` is not yet
+  set, so the workflow fails at its first step with a named error and `sync --all` is still run
+  by hand until it is. The run step's shell was exercised locally with the dry-run input against
+  the real subscribers (14 targets, all `current`).
+- Operational rule that follows: a repository added to `subscriptions.json` is also added to the
+  token's repository list, or its row reads `failed` and the run exits 1.
+- Later: a GitHub App replaces the PAT (installation token per run, writes attributed to the
+  app) when the tool leaves the single-owner phase; it is the same App the dashboard's webhook
+  needs. Candidates not built now: a nightly `schedule` as a safety net, a `pull_request` dry
+  run on pack changes, the `--html` page as a run artifact.
 
 ## Deferred: Skills distribution (D18, 2026-09-16)
 

@@ -124,14 +124,22 @@ const dryRun = Flag.Boolean("dry-run").pipe(
   Flag.withDefault(false),
 );
 
+const runUrl = Flag.String("run-url").pipe(
+  Flag.withDescription(
+    "URL of the automated run (a GitHub Actions run) issuing this sync; linked from every pull request body it writes.",
+  ),
+  Flag.optional,
+);
+
 const syncCommand = Command.make(
   "sync",
-  { repo: target, pack, packs: syncPacks, all: syncAllFlag, base, dryRun, html },
+  { repo: target, pack, packs: syncPacks, all: syncAllFlag, base, dryRun, html, runUrl },
   (config) =>
     Effect.gen(function* () {
       const repo = Option.getOrNull(config.repo);
       const packId = Option.getOrNull(config.pack);
       const baseBranch = Option.getOrNull(config.base);
+      const run = Option.getOrNull(config.runUrl);
       if (config.all) {
         if (repo !== null || baseBranch !== null) {
           return yield* new SyncRefused({
@@ -140,7 +148,12 @@ const syncCommand = Command.make(
             status: null,
           });
         }
-        const result = yield* syncAll({ packs: config.packs, pack: packId, dryRun: config.dryRun });
+        const result = yield* syncAll({
+          packs: config.packs,
+          pack: packId,
+          dryRun: config.dryRun,
+          runUrl: run,
+        });
         yield* Console.log(renderSyncAll(result));
         const htmlPath = Option.getOrNull(config.html);
         if (htmlPath !== null) {
@@ -177,6 +190,7 @@ const syncCommand = Command.make(
         packs: config.packs,
         base: baseBranch,
         dryRun: config.dryRun,
+        runUrl: run,
       });
       yield* Console.log(renderSync(result));
     }).pipe(

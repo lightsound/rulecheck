@@ -119,7 +119,8 @@ describe("syncAll", () => {
 
   test("real run: one pull request per target, refusals and the failure isolated; a rerun is idempotent; merged targets read current", async () => {
     const { github, runAll } = world();
-    const first = await runAll();
+    const runUrl = "https://github.com/acme/agent-rules/actions/runs/7";
+    const first = await runAll({ runUrl });
     expect(rows(first)).toEqual([
       "base acme/eligible opened",
       "base acme/outdated opened",
@@ -135,6 +136,10 @@ describe("syncAll", () => {
       "acme:agent-rules/frontend",
     ]);
     expect(github.pulls("acme/outdated")).toHaveLength(1);
+    // `--run-url` reaches every written body through the fan-out (D23).
+    for (const pull of [...github.pulls("acme/eligible"), ...github.pulls("acme/outdated")]) {
+      expect(pull.body).toEndWith(`Written by [this run](${runUrl}).`);
+    }
     expect(github.pulls("acme/modified")).toHaveLength(0);
     expect(github.pulls("acme/foreign")).toHaveLength(0);
     expect(github.calls.filter((c) => c.startsWith("createPullRequest"))).toHaveLength(3);

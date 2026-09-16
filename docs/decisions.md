@@ -771,6 +771,76 @@ the order and content of the other sections.
 | Where a name without a row should link | Nowhere special: give every repository a row so the question does not arise; `repoName` always links | link to the repository's matrix row when it has no card (two kinds of link target for the same kind of name; a candidate-list row would link to itself); render a row only for repositories that some pack entry or issue refers to (a third visibility rule beside the text report's `--all` and "has files", and a candidate-list name would still not resolve) | 2 |
 | `--all` and the page | The page always lists every repository; `--all` stays a text-report flag and its help says so | keep `all` on `renderHtml` (a flag whose absence breaks links); make `--all` the text report's default too (a separate decision about the text report, not needed here) | 1 |
 
+## 2026-09-16 D23: The pack repository syncs itself: a GitHub Actions workflow in agent-rules runs `sync --all`
+
+Every distribution so far was a human running `sync --all` from a checkout of rulecheck after
+merging a pack change; the roadmap's multi-pack rollout note shows what that costs (merge, run,
+merge, run). The trigger is known in advance: the packs are outdated exactly when `packs/**` or
+`subscriptions.json` changes on `main` of `lightsound/agent-rules`. So the pack repository runs
+the sync itself. `.github/workflows/sync.yml` in agent-rules runs
+`rulecheck sync --all --packs <checkout> --run-url <run>` on every such push, and on
+`workflow_dispatch` with two inputs: `dry_run` (the D14 remote distribution report, no write)
+and `pack` (restrict to one pack id). rulecheck itself gains one flag, `--run-url <url>`, whose
+value is appended to every pull request body the run writes (`Written by [this run](…)`), so a
+reviewer of a subscriber's pull request can open the log of the run that produced it.
+
+**What does not change.** The workflow is a scheduler for the one write path, not a second one:
+it calls the same `sync --all`, every check of D10 and D14 runs unchanged, refusals are rows and
+exit 0, an unknown outcome exits 1 and fails the run. No pull request is merged by the workflow
+or by rulecheck; auto-merge stays the per-repository opt-in D6 left off. `--dry-run` from the
+workflow is the same flag as from a shell: every measurement, no write call.
+
+**How the workflow obtains rulecheck.** `actions/checkout` of `lightsound/rulecheck` as a
+second checkout in the job, at a commit sha held in one workflow variable (`RULECHECK_REF`)
+under a Renovate `git-refs` comment, followed by `bun install --frozen-lockfile` and
+`bun run src/main.ts`. The sha, not a branch, so a rulecheck change cannot alter what runs in
+agent-rules until someone bumps it (or Renovate proposes the bump); the frozen lockfile, so the
+run resolves the exact dependency tree rulecheck tests against, which no git-URL install can
+promise (`bun add github:…` resolves the package's dependencies afresh and ignores its
+`bun.lock`). Publishing to npm is not done: there is one consumer, and a version number would be
+a second thing to bump for no reader.
+
+**Authentication.** `GITHUB_TOKEN` is scoped to the repository that runs the workflow, so it
+cannot write to a subscriber. The workflow passes a **fine-grained personal access token** stored
+as the repository secret `RULECHECK_TOKEN` to `gh` through `GH_TOKEN`, which the GitHub CLI
+honors ahead of any `gh auth login` state; rulecheck's `gh` layer spawns `gh` with the process
+environment and needed no change (verified in `src/github/gh.ts`; the "could not run gh"
+message now names `GH_TOKEN` next to `gh auth login`). Token settings, exactly: resource owner
+`lightsound`; repository access **Only select repositories**, listing every repository in
+`subscriptions.json` (today `lightsound/rulecheck`, `lightsound/tanstack-convex`,
+`lightsound/heroui-stack`, `lightsound/rererepo`, `lightsound/cobracket`,
+`lightsound/solid2-agent-kit`, `lightsound/noican`); repository permissions **Contents: Read and
+write**, **Pull requests: Read and write**, **Metadata: Read** (added automatically); no account
+permissions. The pack source is the workflow's own checkout of agent-rules, so the token needs
+no access to agent-rules itself. A repository added to `subscriptions.json` must also be added to
+the token's repository list, or its row reads `failed` (404) and the run exits 1; that failure
+is loud by design (D14). A GitHub App (installation token minted per run, no expiry to rotate,
+writes attributed to the app) is the replacement when the tool leaves the single-owner phase; the
+webhook the roadmap's dashboard needs is the same App, so the two arrive together.
+
+**Decisions, with the search rounds behind each:**
+
+| Decision | Chosen | Alternatives considered | Settled in round |
+| --- | --- | --- | --- |
+| Where automation lives | A GitHub Actions workflow in the pack repository (`lightsound/agent-rules`), triggered by the change it distributes | a workflow in rulecheck polling agent-rules (the trigger is a push to agent-rules; polling adds latency and a second repository to configure); a job per subscriber pulling from the pack (inverts the model, N configurations, the D14 report disappears); a GitHub App with a webhook (the roadmap's "Later"; a hosted process for one owner today) | 2 |
+| How the workflow obtains rulecheck | `actions/checkout` of `lightsound/rulecheck` at `RULECHECK_REF` (a commit sha) into `rulecheck/`, `bun install --frozen-lockfile`, `bun run src/main.ts` | `bunx github:lightsound/rulecheck#<sha>` or `bun add` from the git URL (dependencies resolved afresh, `bun.lock` ignored, the `bin` is a `.ts` file); publish to npm (one consumer, a second version to bump); a container image (a registry and a build for a script) | 2 |
+| Pin form | A full commit sha of rulecheck `main` in one `env` variable with a `# renovate: datasource=git-refs … currentValue=main` comment, so Renovate can propose the bump once it is enabled | a branch (`main`; a rulecheck merge would change what runs in agent-rules without a review there); a tag (rulecheck has none and would need a release step) | 1 |
+| Pack source for the run | The job's own checkout of agent-rules (`--packs "$GITHUB_WORKSPACE"`, HEAD is the pushed commit, so `rev=` is the sha that triggered the run) | `--packs lightsound/agent-rules@${{ github.sha }}` read through the API (the same tree fetched again, and the token would need read access to the private pack repository, one more way to misconfigure it) | 2 |
+| Authentication | Fine-grained PAT in secret `RULECHECK_TOKEN`, passed as `GH_TOKEN`; Contents and Pull requests read/write on the listed subscribers only | `GITHUB_TOKEN` (cannot write to other repositories); a classic PAT (`repo` on every repository of the account); a deploy key per subscriber (git only, no pull request API); a GitHub App now (the right end state, an app registration and a private key for one owner today; recorded as the business-phase replacement) | 2 |
+| rulecheck's `gh` client | Unchanged: `gh` reads `GH_TOKEN` from the inherited environment | pass a token flag into rulecheck (it would then hold a credential, against D10); call `gh auth login --with-token` in the workflow (an extra step for what the environment variable already does) | 1 |
+| Triggers | `push` to `main` filtered to `packs/**` and `subscriptions.json`; `workflow_dispatch` with `dry_run` (boolean) and `pack` (string) | every push to `main` (root `AGENTS.md` and `machine/` edits would run a sync that finds nothing); a nightly `schedule` as a safety net (idempotent and cheap, but nothing is known to drift without a push; add if a run is ever missed); `pull_request` dry runs on pack changes (a useful review aid; a second job, later) | 2 |
+| Link from the pull request to the run | A `--run-url <url>` flag on `sync`, appended to the body by `pullRequestText` as its last line, absent without the flag | reading `GITHUB_RUN_ID` and friends inside rulecheck (implicit input the tests cannot see; a shell run under `act` would link nowhere); no link (the body already says "managed by rulecheck", but not which run) | 2 |
+| Concurrency | `concurrency: sync-packs`, `cancel-in-progress: false`: one run at a time, a run that arrives while one is in flight waits (GitHub keeps the newest pending one) | cancel the in-flight run (it may be mid-write; the D14 semaphore serializes writes within a run, not across runs); no group (two runs racing on the same tool-owned branches) | 1 |
+| Failure | Exit 1 fails the run, no retry step; the rows name what failed and a rerun of the workflow is the retry, cheap because delivered targets read `current` or `up to date` (D14) | a retry loop in the workflow (D14 keeps retries out until a real run shows them necessary) | 1 |
+| Output | stdout to the log and the same table inside a code fence in the job summary; the workflow writes no `--html` file | upload the `--html` page as an artifact (a second place to look for the same rows; add when someone wants the page) | 1 |
+| Bun | `oven-sh/setup-bun` pinned to a commit sha, `bun-version` from one `BUN_VERSION` variable with a Renovate `github-releases` comment (today `1.4.2`, the version rulecheck is developed with) | `latest` (a Bun release could change a run without a change in either repository); `bun-version-file` (rulecheck declares no `.bun-version` or `packageManager`; adding one is a rulecheck decision, not a workflow one) | 1 |
+| Merging | Never automatic: the workflow opens or updates pull requests; humans or per-repository auto-merge (D6, off by default) merge them | enable auto-merge from the workflow for solo repositories (D6 reserves that for a per-repository opt-in that does not exist yet) | 1 |
+
+**Structural check.** The constraint is "a human runs a command after every merge". It dissolves
+only if the sync is triggered by the merge, and the merge happens in agent-rules; anything that
+watches from elsewhere polls. A workflow in the pack repository is the smallest thing that is
+triggered by the merge, so the constraint dissolves at that place and nowhere else.
+
 ## Recording rule
 
 Add an entry here whenever a decision changes what rulecheck writes, what it reports, or which
