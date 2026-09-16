@@ -606,6 +606,45 @@ Considered and rejected: removing the `file` pack kind and the D8 generalization
 benefit; the inventory code is used); building the copy now behind a flag (a second write path
 without a consumer, contrary to the rule that every write path is a decision entry).
 
+## 2026-09-16 D19: `--html` is a rendering of the report, not a write path; the first read-only slice of the status view
+
+D6 said `rulecheck scan` is the backend of a status view; D14 made `sync --all --dry-run` the
+remote distribution report; D17 fixed the words both print. Before a dashboard is built, someone
+who does not run the CLI has to be able to read those reports and judge whether a dashboard is
+worth paying for. `scan --html <file>` and `sync --all --html <file>` write the same
+`ScanReport` / `SyncAllResult` the text report prints as one self-contained HTML page: inline
+CSS, no script, no external asset, readable in light and dark, printable.
+
+**What it is.** A second renderer next to the text one (`src/report/html.ts`), fed from the same
+data, using the same label tables (`src/report/labels.ts`) and the same sentences (the shape
+notes, `describeScope`, `describePersonalCopy`, the outcome detail are exported from the text
+renderer, not duplicated). It detects and computes nothing the report does not already carry.
+The page is a standalone report format today and the read-only first slice of the status view:
+the headline numbers, the repo × pack matrix, and the per-repository cards are the views a
+dashboard would show, rendered once from a scan instead of served live. A dashboard proper (a
+GitHub App plus webhook so the status updates without a local tree, the web or desktop UI on
+top) remains future work on the roadmap and is not started by this entry.
+
+**What it is not.** Not a write path in the D10 sense. The file goes to the path the user names,
+like stdout redirected; nothing is written into a scanned repository, a local checkout, `~/`, or
+GitHub. It is the only file `scan` writes. It is written after the stdout report, so an
+unwritable path loses nothing already measured or, on a live `sync --all`, already opened, and
+it fails as every expected failure does: one stderr line, exit 1. `AGENTS.md` records the same
+distinction under Rules so the "one write path" rule keeps its meaning.
+
+**Decisions, with the search rounds behind each:**
+
+| Decision | Chosen | Alternatives considered | Settled in round |
+| --- | --- | --- | --- |
+| Where `--html` lives | A flag on `scan` and on `sync --all` (refused with a single target: the table is what it renders), so one command produces both outputs of one measurement | a `report` subcommand reading `scan --json` (a second step, and a second parser of the JSON shape); `--format html` to stdout (the page is meant to be opened, and `--json` already owns stdout) | 2 |
+| Relation to stdout | Additive: text or `--json` still print, the file is written afterwards | replace stdout when `--html` is given (drops the shell-visible result, and the file failure would leave nothing) | 1 |
+| Distribution counts in the headline | All six statuses, `not subscribed` included, in glossary order | only `current` / `outdated` / `eligible` / `blocked` (hides `modified`, the one state that needs a human) | 1 |
+| Distribution table shape | Repo × pack matrix, packs as columns with rev, subscribers, and per-status counts in the header; rows subscribed to no pack dimmed | one table per pack as the text report prints (does not show a repository's whole subscription at a glance) | 1 |
+| Collapsing | `<details open>` per repository, no script; print gets every card expanded because they start open | a script to open all before print; collapsed by default (unprintable without a script) | 1 |
+| Duplicates section | Included between the cards and the personal layer when the report has any | omit (the spec order did not name it; leaving out data the text report prints would make the page the lesser report) | 1 |
+| Card badge | Counts findings, malformed `agent-rules` markers, and skill issues; shape notes and the prose-wrapper note are advice, not findings | findings only (a repository whose only problem is a malformed marker showed the marker with no badge) | 2 |
+| Version and glossary link | `version` from `package.json` passed in by the CLI; the glossary URL a constant in `html.ts` | a `repository` field in `package.json` (nothing else needs it) | 1 |
+
 ## Recording rule
 
 Add an entry here whenever a decision changes what rulecheck writes, what it reports, or which

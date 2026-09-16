@@ -6,11 +6,11 @@ import type {
   PersonalPackCopy,
   RepoReport,
   ScanReport,
-  SkillLockState,
 } from "../domain/types.ts";
-import { SHAPE_LABEL, STATUS_LABEL } from "./labels.ts";
+import { LOCK_STATE_LABEL, SHAPE_LABEL, STATUS_LABEL } from "./labels.ts";
 
-const SHAPE_NOTE: Record<CanonicalShape, string | null> = {
+/** Advice printed under a repository whose shape is not the convention; null where nothing is to do. */
+export const SHAPE_NOTE: Record<CanonicalShape, string | null> = {
   "agents-canonical": null,
   "agents-imported":
     "CLAUDE.md imports AGENTS.md and carries content of its own; not the strict one-line wrapper (Claude Code loads both), a sync leaves it untouched",
@@ -116,7 +116,7 @@ function renderDistribution(distribution: PackDistribution): string[] {
  * D13: the personal layer still carries the pack. Name where, and how many repositories now load
  * it twice, so the interim wiring is removed once the block covers the daily repositories.
  */
-function describePersonalCopy(copy: PersonalPackCopy): string {
+export function describePersonalCopy(copy: PersonalPackCopy): string {
   const state =
     copy.state === "current"
       ? "equals the pack body"
@@ -191,13 +191,6 @@ function renderRepo(repo: RepoReport): string[] {
   return lines;
 }
 
-const LOCK_STATE_LABEL: Record<SkillLockState, string> = {
-  unlocked: "no lock entry",
-  match: "matches lock",
-  differs: "lock hash differs",
-  locked: "locked",
-};
-
 function renderFile(file: RepoReport["files"][number]): string {
   const marker = file.wrapperTarget
     ? ` -> ${file.wrapperTarget}${file.wrapperUsesImport ? "" : " (prose)"}`
@@ -226,7 +219,7 @@ function renderPersonal(personal: PersonalLayer): string[] {
   return lines;
 }
 
-function describeScope(file: RepoReport["files"][number]): string {
+export function describeScope(file: RepoReport["files"][number]): string {
   if (file.kind === "cursor-rule" && file.frontmatter) {
     if (file.frontmatter.alwaysApply === true) return "  [always]";
     if (file.frontmatter.globs.length > 0) return `  [globs: ${file.frontmatter.globs.join(", ")}]`;
