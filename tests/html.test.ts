@@ -364,7 +364,7 @@ describe("renderHtml", () => {
       expect(html).toContain(`<span class="chip status-${status}">${STATUS_LABEL[status]}</span>`);
     }
     // The shape breakdown sits in the Repositories section, not in the headline.
-    const shapes = html.indexOf('<dt>Shapes</dt><dd class="chips">');
+    const shapes = html.indexOf('<dt>Shapes, all 4 repositories</dt><dd class="chips">');
     expect(shapes).toBeGreaterThan(html.indexOf("<h2>Repositories</h2>"));
     for (const shape of ["agents-canonical", "both-full", "none"] as const) {
       expect(html).toContain(`<span class="chip shape-${shape}">${SHAPE_LABEL[shape]}</span>`);

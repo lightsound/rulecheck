@@ -368,6 +368,10 @@ function candidates(
   shown: ReadonlySet<string>,
 ): string {
   if (quiet.length === 0) return "";
+  // One pack is enough: a repository `not-subscribed` to every pack carries no block (the block
+  // check precedes the subscription check in `classifyPackStatus`), and every branch after the
+  // subscription check reads the repository alone. `tests/pack.test.ts` pins that the answer is
+  // the same for a second pack.
   const pack = dist.packs[0];
   const repoByName = new Map(allRepos.map((r) => [r.name, r] as const));
   const would = new Map<string, PackStatusEntry | null>();
@@ -462,7 +466,7 @@ ${group.members.map(repoCard).join("\n")}`;
   <h2>Repositories</h2>
   <p class="note">${repos.length} shown${hidden > 0 ? `, ${hidden} without instruction files hidden (<code>--all</code> includes them)` : ""}. Most issues first. Click a header to collapse a card.</p>
   <dl class="kv">
-    <dt>Shapes</dt><dd class="chips">${shapeChips}</dd>
+    <dt>Shapes, all ${fmt(total)} repositories</dt><dd class="chips">${shapeChips}</dd>
   </dl>
   ${cards}
 </section>`;

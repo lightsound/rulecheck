@@ -496,6 +496,21 @@ describe("classifyIfSubscribed", () => {
     const carrier = repo("acme/stranger", "agents-canonical", { blocks: [block("base", BODY)] });
     expect(classifyIfSubscribed(carrier, base).status).toBe("current");
   });
+
+  test("without a block the answer does not depend on the pack", () => {
+    const other = packFromFiles("other", null, [{ path: "AGENTS.md", content: "x\n" }], []);
+    for (const candidate of [
+      repo("acme/stranger", "none"),
+      repo("acme/obstructed", "claude-only", {
+        files: [file("CLAUDE.md")],
+        foreignRegions: [{ ...REGION, file: "CLAUDE.md" }],
+      }),
+    ]) {
+      const { pack: _a, ...forBase } = classifyIfSubscribed(candidate, base);
+      const { pack: _b, ...forOther } = classifyIfSubscribed(candidate, other);
+      expect(forOther).toEqual(forBase);
+    }
+  });
 });
 
 describe("distribute", () => {
