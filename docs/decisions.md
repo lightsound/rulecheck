@@ -645,6 +645,46 @@ distinction under Rules so the "one write path" rule keeps its meaning.
 | Card badge | Counts findings, malformed `agent-rules` markers, and skill issues; shape notes and the prose-wrapper note are advice, not findings | findings only (a repository whose only problem is a malformed marker showed the marker with no badge) | 2 |
 | Version and glossary link | `version` from `package.json` passed in by the CLI; the glossary URL a constant in `html.ts` | a `repository` field in `package.json` (nothing else needs it) | 1 |
 
+## 2026-09-16 D20: the `--html` page reads worst first, grouped by owner; `not-subscribed` becomes a candidate list
+
+The first D19 page was reviewed as the artifact a tech lead would open to judge whether a
+dashboard is worth paying for, against a real tree of 77 repositories and 2 packs. The numbers
+were right (every figure matched the text report) but the page did not read: the matrix listed
+77 alphabetical rows of which 70 were `not subscribed` twice, the interesting seven were
+scattered among them, the repository cards were alphabetical too, one card carried 68 skill
+rows, the `Findings 3` card disagreed with the card badges that summed to 7, and "Tokens loaded
+per tool ~99,888" read as a per-session figure when it is a sum over every repository. The
+headline was a chip soup and the token card wrapped at 1400px. Same data, same labels, a
+different order and grouping.
+
+**What changed.** `src/report/html.ts` only, plus one domain helper. The page orders worst
+first throughout: the matrix by the most urgent status a repository has against any pack, the
+cards by issue count. Both are grouped by owner (the first path segment), owners with the worst
+or most first, with per-owner counts in the group header. Repositories subscribed to no pack
+leave the matrix for a closed `Not subscribed (N)` list, grouped by owner, one line per
+repository with its shape and what a sync would do if it were subscribed. That last sentence is
+the one classification the page adds: `classifyIfSubscribed` in `src/domain/pack.ts`, which is
+`classifyPackStatus` with the subscription assumed, so `eligible` and `blocked` there mean what
+the glossary says and nothing is decided twice. `scan --json` is unchanged.
+
+**Decisions.** Five were decided by the user on the screenshots and are recorded as such; the
+rest were settled by the search-rounds rule.
+
+| Decision | Chosen | Alternatives considered | Settled in round |
+| --- | --- | --- | --- |
+| Token card | Two compact rows, `Cursor` / `Claude Code`, smaller numerals, no wrap at 1400px; the "sum of every root budget; personal layer adds …" note becomes a footnote line under the cards | — | decided by user, n/a |
+| Matrix column headers | Pack name and short rev only; per-pack status counts as one caption line per pack above the table, nonzero statuses only | — | decided by user, n/a |
+| Headline content | Repositories, files/tokens, tokens per tool, issues, and one distribution summary per pack as a horizontal stacked bar with a legend (nonzero only, worst first); the Shapes breakdown moves into the Repositories section header | — | decided by user, n/a |
+| Owner grouping | Owner group rows in the matrix and owner headers over the cards, with per-owner counts; owners sorted worst / most subscribed first, repositories within an owner worst first (`STATUS_ORDER`) | — | decided by user, n/a |
+| `not-subscribed` rows | Out of the matrix; a closed `<details>` "Not subscribed (N)" after it, grouped by owner, one line per repository: name, shape chip, and the `eligible` normalization or `blocked: reason` it would read once subscribed; `--json` unchanged | — | decided by user, n/a |
+| Where "if subscribed" is computed | `classifyIfSubscribed(repo, pack)` in the domain: the same classifier with `subscribers` replaced by the repository; computed once per repository with the first pack, since without a block the answer does not depend on the pack | a second decision table in `html.ts` (would drift from the classifier); a new `PackStatusEntry.ifSubscribed` field in `--json` (a schema addition for one rendering) | 2 |
+| Headline `Issues` card | `findings + malformed markers + skill issues`, the sum the card badges already show, with the breakdown in the small text | keep `Findings` and add a second card (two red numbers to reconcile) | 1 |
+| Card order | Issue count descending, then name; owners by total issues, then repository count | shape severity first (a `both-full` repository with no finding is advice, not work) | 1 |
+| Skill inventory | A closed `<details>` per card whose summary carries the count per lock state; printed only when opened | open when at most N rows (a threshold to explain); always open (68 rows on one card) | 2 |
+| Matrix rows link to cards | Repository names in the matrix and the candidate list link to `#repo-<encoded name>` when the page has that card; `:target` highlights it | no links (the reader searches the page) | 1 |
+| Root-budget footnote | Names the heaviest repository by `max(cursor, claudeCode)` root budget | an average per repository (hides the outlier a lead wants to see) | 1 |
+| Print | What is open prints: cards yes, the skill folds and the candidate list only if the reader opened them | a print stylesheet that forces folds open (not possible for a closed `<details>` without script) | 1 |
+
 ## Recording rule
 
 Add an entry here whenever a decision changes what rulecheck writes, what it reports, or which
