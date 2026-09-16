@@ -317,7 +317,8 @@ describe("renderHtml", () => {
 
   test("sections appear in the required order", () => {
     const order = [
-      "<h2>Headline</h2>",
+      "<h2>Overview</h2>",
+      "<h2>Next actions</h2>",
       "<h2>Pack distribution</h2>",
       "<h2>Repositories</h2>",
       "<h2>Duplicates</h2>",
@@ -329,80 +330,128 @@ describe("renderHtml", () => {
     expect([...positions].sort((a, b) => a - b)).toEqual(positions);
   });
 
-  test("headline carries the totals, the per-tool token sums in two rows, and the issue count", () => {
-    expect(html).toContain(
-      '<div class="label">Repositories</div><div class="value">4</div><div class="sub">3 with instruction files</div>',
+  test("overview is at most five cards with one number each; token sums are a footnote", () => {
+    const cards = html.slice(html.indexOf('<div class="cards">'), html.indexOf("</section>"));
+    expect(cards.match(/<div class="stat/g)?.length).toBe(5);
+    expect(cards).toContain(
+      '<div class="stat"><div class="label">Repositories</div><div class="value">4</div><div class="sub">3 with instruction files</div></div>',
     );
-    expect(html).toContain(
-      '<div class="label">Instruction files</div><div class="value">6</div><div class="sub">~1,400 tokens in total</div>',
+    // Action needed counts repositories (one repository can be behind on two packs); the breakdown counts entries.
+    expect(cards).toContain(
+      '<div class="stat danger"><div class="label">Action needed</div><div class="value">3</div><div class="sub">repositories · 1 modified · 1 outdated · 1 blocked · 1 eligible</div></div>',
     );
-    expect(html).toContain(
-      '<span class="row"><span class="k">Cursor</span> <span class="n">~1,368</span></span><span class="row"><span class="k">Claude Code</span> <span class="n">~74</span></span>',
-    );
-    expect(html).toContain("root budgets, all repositories summed¹");
-    expect(html).toContain(
-      '<p class="footnote">¹ No single session loads this much: it is the sum of every repository\'s root budget. Heaviest repository <span class="mono">acme/&lt;hostile&gt;</span> at Cursor ~1,300 · Claude Code ~40. The personal layer adds ~0 / ~18 to every session.</p>',
+    // The denominator is every measured pair: a block decides before the subscription list does,
+    // so a non-subscriber carrying a block counts (the `frontend` pack line says `0 subscribed`).
+    expect(cards).toContain(
+      '<div class="stat"><div class="label">Current</div><div class="value">1</div><div class="sub">of 5 with a block or a subscription</div></div>',
     );
     // Issues = findings + malformed markers + skill issues, the same sum the card badges show.
-    expect(html).toContain('<div class="label">Issues</div><div class="value">3</div>');
+    expect(cards).toContain(
+      '<div class="stat danger"><div class="label">Issues</div><div class="value">3</div><div class="sub">1 finding · 1 malformed marker · 1 skill issue</div></div>',
+    );
+    expect(cards).toContain(
+      '<div class="stat"><div class="label">Instruction files</div><div class="value">6</div><div class="sub">~1,400 tokens in total</div></div>',
+    );
     expect(html).toContain(
-      "1 findings, 1 malformed markers, 1 skill issues · 1 managed blocks (1 modified), 1 skills",
+      '<p class="meta">Root budgets summed over every repository: Cursor ~1,368 · Claude Code ~74 tokens (no single session loads this much). Heaviest repository <span class="mono">acme/&lt;hostile&gt;</span>: Cursor ~1,300 · Claude Code ~40. The personal layer adds ~0 / ~18 to every session.</p>',
+    );
+    // No all-caps labels: the card label is printed as written.
+    expect(html).not.toContain("text-transform: uppercase");
+  });
+
+  test("next actions list every actionable repo × pack, most urgent first, with the verb and the file", () => {
+    const section = html.slice(
+      html.indexOf('<section id="next">'),
+      html.indexOf('<section id="distribution">'),
+    );
+    const rows = [
+      '<tr><td><span class="chip status-modified">modified</span></td><td class="mono"><a href="#repo-acme%2F%3Chostile%3E">acme/&lt;hostile&gt;</a></td><td class="mono">base</td><td><b>Review by hand</b><div class="detail">body no longer matches its hash= · <span class="mono">AGENTS.md:1</span></div></td></tr>',
+      '<tr><td><span class="chip status-outdated">outdated</span></td><td class="mono"><a href="#repo-acme%2Fquiet">acme/quiet</a></td><td class="mono">frontend</td><td><b>Run sync to update the block</b><div class="detail"><span class="mono">AGENTS.md:3</span></div></td></tr>',
+      '<tr><td><span class="chip status-blocked">blocked</span></td><td class="mono"><a href="#repo-acme%2F%3Chostile%3E">acme/&lt;hostile&gt;</a></td><td class="mono">frontend</td><td><b>Fix by hand, then sync</b><div class="detail">&lt;!-- marker --&gt; in the way · <span class="mono">AGENTS.md:9</span></div></td></tr>',
+      '<tr><td><span class="chip status-eligible">eligible</span></td><td class="mono">acme/empty</td><td class="mono">base</td><td><b>Run sync</b><div class="detail">create AGENTS.md with the block and a CLAUDE.md wrapper</div></td></tr>',
+    ];
+    const positions = rows.map((row) => section.indexOf(row));
+    expect(positions.every((p) => p >= 0)).toBe(true);
+    expect([...positions].sort((a, b) => a - b)).toEqual(positions);
+    // `current` and `not subscribed` ask for nothing and are not listed.
+    expect(section).not.toContain("status-current");
+    expect(section).not.toContain("status-not-subscribed");
+    // Then the repositories with issues, most first, each issue with file:line.
+    expect(section).toContain("<h3>Issues to fix</h3>");
+    expect(section).toContain(
+      '<tr><td><span class="mono"><a href="#repo-acme%2F%3Chostile%3E">acme/&lt;hostile&gt;</a></span><div class="detail">3 issues</div></td><td class="lines"><span class="mono">AGENTS.md:7</span> path &quot;&lt;script&gt;alert(1)&lt;/script&gt;&quot; does not exist<br><span class="mono">AGENTS.md:9</span> `agent-rules:begin` is missing hash=<br><span class="mono">skills-lock.json:4</span> skills-lock.json lists `gone` but no skill directory exists</td></tr>',
+    );
+    expect(section).toContain(
+      '<tr><td><span class="mono"><a href="#repo-acme%2Fother">acme/other</a></span><div class="detail">1 issue</div></td><td class="lines"><span class="mono">AGENTS.md:2</span> unpaired `agent-rules:end`</td></tr>',
     );
   });
 
-  test("headline has one stacked bar per pack with a legend of the nonzero statuses, worst first", () => {
-    expect(html).toContain(
-      '<div class="dist-row"><span class="mono">base</span><span class="bar"><span class="seg status-modified" style="flex-grow:1" title="modified 1"></span><span class="seg status-eligible" style="flex-grow:1" title="eligible 1"></span><span class="seg status-current" style="flex-grow:1" title="current 1"></span><span class="seg status-not-subscribed" style="flex-grow:1" title="not subscribed 1"></span></span>',
+  test("next actions say so when there is nothing to do", () => {
+    const clean = renderHtml(
+      {
+        ...REPORT,
+        repos: [QUIET],
+        duplicates: [],
+        distribution: REPORT.distribution && {
+          ...REPORT.distribution,
+          entries: REPORT.distribution.entries.filter(
+            (e) => e.repo === "acme/quiet" && e.pack === "base",
+          ),
+        },
+      },
+      { version: "0.0.1" },
     );
-    expect(html).toContain(
-      '<div class="dist-row"><span class="mono">frontend</span><span class="bar"><span class="seg status-outdated" style="flex-grow:1" title="outdated 1"></span><span class="seg status-blocked" style="flex-grow:1" title="blocked 1"></span><span class="seg status-not-subscribed" style="flex-grow:2" title="not subscribed 2"></span></span><span class="chips"><span class="chip status-outdated">outdated</span> <b>1</b> <span class="chip status-blocked">blocked</span> <b>1</b> <span class="chip status-not-subscribed">not subscribed</span> <b>2</b></span></div>',
+    expect(clean).toContain(
+      '<p class="empty">Nothing to do: every block is current and no repository has an issue.</p>',
+    );
+    expect(clean).toContain(
+      '<div class="stat success"><div class="label">Action needed</div><div class="value">0</div><div class="sub">every block is current</div></div>',
     );
   });
 
-  test("prints every pack status and every used shape with its glossary label", () => {
+  test("prints every pack status with its glossary label as a chip, and every used shape as text", () => {
     for (const status of STATUSES) {
       expect(html).toContain(`<span class="chip status-${status}">${STATUS_LABEL[status]}</span>`);
     }
-    // The shape breakdown sits in the Repositories section, not in the headline.
-    const shapes = html.indexOf('<dt>Shapes, all 4 repositories</dt><dd class="chips">');
+    // The shape breakdown sits in the Repositories section, as plain text, not chips.
+    const shapes = html.indexOf(
+      '<p class="meta">Shapes, all 4 repositories: 1 AGENTS.md canonical · 1 both have content · 1 none</p>',
+    );
     expect(shapes).toBeGreaterThan(html.indexOf("<h2>Repositories</h2>"));
-    for (const shape of ["agents-canonical", "both-full", "none"] as const) {
-      expect(html).toContain(`<span class="chip shape-${shape}">${SHAPE_LABEL[shape]}</span>`);
-    }
+    expect(html).not.toMatch(/class="chip shape-/);
     expect(html).not.toContain(`>${SHAPE_LABEL["claude-only"]}<`);
   });
 
-  test("distribution is a repo × pack matrix, grouped by owner, most urgent first", () => {
-    // Pack headers carry name and short rev only; the counts are one caption line per pack.
+  test("distribution has one line per pack with a stacked bar and counts, then the repo × pack matrix grouped by owner, most urgent first", () => {
     expect(html).toContain(
-      '<thead><tr><th>repository</th><th><span class="mono">base</span> <span class="meta">rev 0123456</span></th><th><span class="mono">frontend</span> <span class="meta">rev unknown</span></th></tr></thead>',
+      '<div class="pack"><div class="pack-name"><span class="mono">base</span><span class="meta">rev 0123456 · 3 subscribed</span></div><span class="bar"><span class="seg status-modified" style="flex-grow:1" title="modified 1"></span><span class="seg status-eligible" style="flex-grow:1" title="eligible 1"></span><span class="seg status-current" style="flex-grow:1" title="current 1"></span><span class="seg status-not-subscribed" style="flex-grow:1" title="not subscribed 1"></span></span><div class="meta"><span class="dot status-modified"></span> 1 modified · <span class="dot status-eligible"></span> 1 eligible · <span class="dot status-current"></span> 1 current · <span class="dot status-not-subscribed"></span> 1 not subscribed</div></div>',
     );
     expect(html).toContain(
-      '<p class="pack-line"><span class="mono">base</span> <span class="muted">rev 0123456, 3 subscribed:</span> <span class="chips"><span class="chip status-modified">modified</span> <b>1</b> <span class="chip status-eligible">eligible</span> <b>1</b> <span class="chip status-current">current</span> <b>1</b> <span class="chip status-not-subscribed">not subscribed</span> <b>1</b></span></p>',
+      '<span class="meta">rev unknown · 0 subscribed · no AGENTS.md block</span></div><span class="bar"><span class="seg status-outdated" style="flex-grow:1" title="outdated 1"></span><span class="seg status-blocked" style="flex-grow:1" title="blocked 1"></span><span class="seg status-not-subscribed" style="flex-grow:2" title="not subscribed 2"></span></span>',
     );
+    // Pack headers carry name and short rev only.
     expect(html).toContain(
-      '<span class="muted">rev unknown, 0 subscribed, no AGENTS.md block:</span>',
+      '<thead><tr><th>Repository</th><th><span class="mono">base</span> <span class="meta">rev 0123456</span></th><th><span class="mono">frontend</span> <span class="meta">rev unknown</span></th></tr></thead>',
     );
-    // One owner group with its counts over the rows it holds (not-subscribed cells excluded).
+    // One owner group row; no chip soup in it, the counts live on the pack lines.
     expect(html).toContain(
-      '<tr class="owner"><th colspan="3"><span class="mono">acme</span> <span class="muted">3 repositories</span> <span class="chips"><span class="chip status-modified">modified</span> <b>1</b> <span class="chip status-outdated">outdated</span> <b>1</b> <span class="chip status-blocked">blocked</span> <b>1</b> <span class="chip status-eligible">eligible</span> <b>1</b> <span class="chip status-current">current</span> <b>1</b></span></th></tr>',
+      '<tr class="owner"><th colspan="3"><span class="mono">acme</span> <span class="meta">3 repositories</span></th></tr>',
     );
     // Rows: modified (<hostile>) before outdated (quiet) before eligible (empty); the ones with a
-    // card link to it, the hidden one does not.
+    // card link to it, the hidden one does not. Cells carry the status and file:line only; the
+    // message is in Next actions.
     const hostile = html.indexOf(
-      '<tr><td class="mono"><a href="#repo-acme%2F%3Chostile%3E">acme/&lt;hostile&gt;</a></td>',
+      '<tr><td class="mono"><a href="#repo-acme%2F%3Chostile%3E">acme/&lt;hostile&gt;</a></td><td><span class="chip status-modified">modified</span> <span class="where mono">AGENTS.md:1</span></td><td><span class="chip status-blocked">blocked</span> <span class="where mono">AGENTS.md:9</span></td></tr>',
     );
     const quiet = html.indexOf(
-      '<tr><td class="mono"><a href="#repo-acme%2Fquiet">acme/quiet</a></td>',
+      '<tr><td class="mono"><a href="#repo-acme%2Fquiet">acme/quiet</a></td><td><span class="chip status-current">current</span> <span class="where mono">AGENTS.md:3</span></td>',
     );
-    const empty = html.indexOf('<tr><td class="mono">acme/empty</td>');
+    const empty = html.indexOf(
+      '<tr><td class="mono">acme/empty</td><td><span class="chip status-eligible">eligible</span></td><td><span class="chip status-not-subscribed">not subscribed</span></td></tr>',
+    );
     expect(hostile).toBeGreaterThan(0);
     expect(quiet).toBeGreaterThan(hostile);
     expect(empty).toBeGreaterThan(quiet);
-    expect(html).toContain(
-      '<span class="mono">AGENTS.md:1</span> body no longer matches its hash=',
-    );
-    expect(html).toContain("create AGENTS.md with the block and a CLAUDE.md wrapper");
     expect(html).toContain('<li class="warn">subscriptions.json: &lt;bad&gt; entry</li>');
     expect(html).toContain(
       "personal layer ~/pack/&lt;copy&gt;.md equals the pack body; loads twice in 1 repository carrying the block (acme/quiet)",
@@ -410,13 +459,14 @@ describe("renderHtml", () => {
   });
 
   test("repositories subscribed to no pack leave the matrix for a closed candidate list", () => {
-    expect(html).not.toContain('<td class="mono"><a href="#repo-acme%2Fother">acme/other</a></td>');
-    expect(html).not.toContain('class="quiet"');
-    expect(html).toContain("<summary><b>Not subscribed (1)</b>");
+    expect(html).not.toContain(
+      '<td class="mono"><a href="#repo-acme%2Fother">acme/other</a></td><td><span class="chip',
+    );
+    expect(html).toContain("<summary><b>Not subscribed to any pack (1)</b>");
     // Shape, then what a sync would do if the repository were subscribed: here its malformed
     // marker blocks the write, with the same message the status model gives a subscriber.
     expect(html).toContain(
-      '<li><span class="mono"><a href="#repo-acme%2Fother">acme/other</a></span> <span class="chip shape-agents-canonical">AGENTS.md canonical</span> <span class="chip status-blocked">blocked</span> <span class="detail">unpaired `agent-rules:end`</span></li>',
+      '<tr><td class="mono"><a href="#repo-acme%2Fother">acme/other</a></td><td class="muted">AGENTS.md canonical</td><td><span class="chip status-blocked">blocked</span> <span class="detail">unpaired `agent-rules:end`</span></td></tr>',
     );
     const withCandidate = renderHtml(
       {
@@ -442,31 +492,43 @@ describe("renderHtml", () => {
       },
       { version: "0.0.1" },
     );
-    expect(withCandidate).toContain("<summary><b>Not subscribed (2)</b>");
+    expect(withCandidate).toContain("<summary><b>Not subscribed to any pack (2)</b>");
     expect(withCandidate).toContain(
-      '<li><span class="mono">zeta/fresh</span> <span class="chip shape-none">none</span> <span class="chip status-eligible">eligible</span> <span class="detail">create AGENTS.md with the block and a CLAUDE.md wrapper</span></li>',
+      '<tr><td class="mono">zeta/fresh</td><td class="muted">none</td><td><span class="chip status-eligible">eligible</span> <span class="detail">create AGENTS.md with the block and a CLAUDE.md wrapper</span></td></tr>',
     );
     // Grouped by owner, larger owners first.
-    expect(withCandidate.indexOf('<h4><span class="mono">acme</span>')).toBeLessThan(
-      withCandidate.indexOf('<h4><span class="mono">zeta</span>'),
+    const candidates = withCandidate.slice(withCandidate.indexOf('<table class="candidates">'));
+    expect(
+      candidates.indexOf('<tr class="owner"><th colspan="3"><span class="mono">acme</span>'),
+    ).toBeLessThan(
+      candidates.indexOf('<tr class="owner"><th colspan="3"><span class="mono">zeta</span>'),
     );
   });
 
-  test("repository cards are grouped by owner with the most issues first", () => {
+  test("repository rows are grouped by owner under a sticky header that carries the column labels, most issues first", () => {
     expect(html).toContain(
-      '<h3 class="owner"><span class="mono">acme</span> <span class="muted">3 repositories · 4 issues</span></h3>',
+      '<h3 class="owner"><span class="who"><span class="mono">acme</span> <span class="meta">3 repositories · 4 issues</span></span><span class="col shape">Shape</span><span class="col num">Cursor</span><span class="col num">Claude Code</span></h3>',
     );
+    expect(html).toContain("h3.owner { position: sticky;");
+    // A repository with an issue starts open, one without starts closed.
     const hostile = html.indexOf('<details class="repo" id="repo-acme%2F%3Chostile%3E" open>');
     const other = html.indexOf('<details class="repo" id="repo-acme%2Fother" open>');
-    const quiet = html.indexOf('<details class="repo" id="repo-acme%2Fquiet" open>');
+    const quiet = html.indexOf('<details class="repo" id="repo-acme%2Fquiet">');
     expect(hostile).toBeGreaterThan(0);
     expect(other).toBeGreaterThan(hostile);
     expect(quiet).toBeGreaterThan(other);
   });
 
-  test("repository cards carry shape, files with counts, findings with file:line, blocks, regions, and skills", () => {
-    expect(html).toContain('<span class="mono name">acme/&lt;hostile&gt;</span>');
-    expect(html).toContain("Cursor ~1,300 · Claude Code ~40");
+  test("repository rows carry name, issue badge, shape, and the two budgets as right-aligned numbers", () => {
+    expect(html).toContain(
+      '<span class="who"><span class="mono name">acme/&lt;hostile&gt;</span> <span class="tag tag-attention">3 issues</span></span>\n    <span class="col shape muted">both have content</span>\n    <span class="col num">~1,300</span>\n    <span class="col num">~40</span>',
+    );
+    expect(html).toContain(
+      '<span class="who"><span class="mono name">acme/quiet</span></span>\n    <span class="col shape muted">AGENTS.md canonical</span>\n    <span class="col num">~34</span>\n    <span class="col num">~34</span>',
+    );
+  });
+
+  test("repository cards carry files with counts, findings with file:line, blocks, regions, and skills", () => {
     expect(html).toContain(
       '<td class="mono">AGENTS.md</td><td class="muted"></td><td class="num">3</td><td class="num">1,234</td>',
     );
@@ -475,14 +537,14 @@ describe("renderHtml", () => {
     );
     expect(html).toContain("→ AGENTS.md (prose)");
     expect(html).toContain(
-      '<span class="mono">AGENTS.md:7</span> path &quot;&lt;script&gt;alert(1)&lt;/script&gt;&quot; does not exist',
+      '<li class="warn"><span class="mono">AGENTS.md:7</span> path &quot;&lt;script&gt;alert(1)&lt;/script&gt;&quot; does not exist</li>',
     );
     expect(html).toContain(
-      '<span class="mono">AGENTS.md:9</span> `agent-rules:begin` is missing hash=',
+      '<li class="warn"><span class="mono">AGENTS.md:9</span> `agent-rules:begin` is missing hash=</li>',
     );
-    expect(html).toContain('<span class="mono">skills-lock.json:4</span>');
+    expect(html).toContain('<li class="warn"><span class="mono">skills-lock.json:4</span>');
     expect(html).toContain(
-      'block <code>base</code> rev 0123456 <span class="tag tag-modified">MODIFIED</span>',
+      'block <code>base</code> rev 0123456 <span class="tag tag-modified">modified</span>',
     );
     expect(html).toContain("region <code>gen&lt;x&gt;</code> (another tool; left untouched)");
     // Skills sit in a closed fold whose summary carries the count per lock state.
@@ -494,8 +556,6 @@ describe("renderHtml", () => {
     );
     // The badge counts findings, malformed markers, and skill issues ("issues", since the glossary
     // keeps `Finding` and `BlockIssue` apart); the shape note is advice and does not count.
-    expect(html).toContain('<span class="tag tag-attention">3 issues</span>');
-    expect(html).toContain('<span class="mono">AGENTS.md:2</span> unpaired `agent-rules:end`');
     expect(html).toContain('<span class="tag tag-attention">1 issue</span>');
     // Repositories without instruction files are hidden unless asked for, as in the text report.
     expect(html).not.toContain('<span class="mono name">acme/empty</span>');
@@ -530,8 +590,17 @@ describe("renderHtml", () => {
     expect(bare).not.toContain("<h2>Pack distribution</h2>");
     expect(bare).not.toContain("<h2>Personal layer</h2>");
     expect(bare).not.toContain("<h2>Duplicates</h2>");
-    expect(bare).toContain("distribution status not measured");
+    expect(bare).toContain(
+      "No pack repository given (<code>--packs</code>): distribution status not measured.",
+    );
     expect(bare).toContain("The personal layer was not scanned.");
+    // Next actions still lists the issues, and says why nothing else is there.
+    expect(bare).toContain("<h2>Next actions</h2>");
+    expect(bare).toContain("<h3>Issues to fix</h3>");
+    expect(bare).toContain("so only issues are listed.");
+    expect(
+      bare.slice(bare.indexOf('<div class="cards">'), bare.indexOf("</section>")),
+    ).not.toContain("Action needed");
   });
 });
 
@@ -588,7 +657,10 @@ describe("renderSyncAllHtml", () => {
 
   test("one row per target with the measured status, the outcome label once, and its detail", () => {
     expect(page).not.toMatch(/<\/span> (nothing to do|refused:|failed:)/);
-    expect(page).toContain("<title>rulecheck sync (dry run): 3 targets</title>");
+    expect(page).toContain("<title>rulecheck sync (dry run)</title>");
+    expect(page).toContain(
+      '<p class="subtitle">3 targets · packs from <code>acme/agent-rules@0123456</code> · nothing written</p>',
+    );
     expect(page).toContain(
       '<td class="mono">acme/current</td><td class="mono">base</td><td><span class="chip status-current">current</span></td><td><span class="chip outcome-nothing-to-do">nothing to do</span> block at AGENTS.md:3</td>',
     );
@@ -600,9 +672,20 @@ describe("renderSyncAllHtml", () => {
       '<td><span class="muted">-</span></td><td><span class="chip outcome-failed">failed</span> GitHub getRepository failed (HTTP 404): Not Found</td>',
     );
     for (const kind of ["nothing-to-do", "refused", "failed"] as const) {
-      expect(page).toContain(`<span class="chip outcome-${kind}">1 ${OUTCOME_LABEL[kind]}</span>`);
+      expect(page).toContain(`<span class="dot outcome-${kind}"></span> 1 ${OUTCOME_LABEL[kind]}`);
     }
-    expect(page).toContain('<div class="label">Failed</div><div class="value">1</div>');
+    expect(page).toContain(
+      '<div class="stat"><div class="label">Planned</div><div class="value">0</div><div class="sub">pull requests a live run would open or update</div></div>',
+    );
+    expect(page).toContain(
+      '<div class="stat attention"><div class="label">Refused</div><div class="value">1</div><div class="sub">a human must look first</div></div>',
+    );
+    expect(page).toContain(
+      '<div class="stat danger"><div class="label">Failed</div><div class="value">1</div><div class="sub">GitHub could not answer</div></div>',
+    );
+    expect(page).toContain(
+      '<div class="stat"><div class="label">Quiet</div><div class="value">1</div><div class="sub">nothing to do or up to date</div></div>',
+    );
     expect(page).toContain(`<a href="${GLOSSARY_URL}">status-model glossary</a>`);
     expect(page).not.toContain("<edit>");
   });

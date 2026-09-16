@@ -393,8 +393,11 @@ describe("scan", () => {
     const html = renderHtml(report, { version: "test" });
     expect(html).toContain("<h2>Pack distribution</h2>");
     expect(html).toContain('<span class="chip status-blocked">blocked</span>');
-    expect(html).toContain("AGENTS.md:1</span> another tool marks the whole file");
-    expect(html).toContain('<span class="tag tag-modified">MODIFIED</span>');
+    // The blocked row is a next action: the obstacle, then the file it sits in.
+    expect(html).toContain(
+      '<b>Fix by hand, then sync</b><div class="detail">another tool marks the whole file (no closing marker): &lt;!-- managed by ruler',
+    );
+    expect(html).toContain('<span class="tag tag-modified">modified</span>');
     expect(html).toContain('<td class="mono">.agents/skills/review</td>');
     expect(html).not.toContain("<!-- managed by ruler");
   });

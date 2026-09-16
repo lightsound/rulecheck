@@ -27,6 +27,20 @@ export const STATUS_LABEL: Record<PackStatus, string> = {
   "not-subscribed": "not subscribed",
 };
 
+/**
+ * What a human does next about a pack status, as the `Next actions` list of the `--html` page
+ * spells it (D21). Null for the statuses that ask for nothing (`current`, `not-subscribed`). The
+ * sentence is completed by the status message: `Run sync: insert block into AGENTS.md`.
+ */
+export const STATUS_ACTION: Record<PackStatus, string | null> = {
+  modified: "Review by hand",
+  outdated: "Run sync to update the block",
+  blocked: "Fix by hand, then sync",
+  eligible: "Run sync",
+  current: null,
+  "not-subscribed": null,
+};
+
 export type SyncOutcomeKind = SyncOutcome["kind"];
 
 /** In the order the `sync --all` summary lists them: quiet outcomes first, then writes, then the rest. */

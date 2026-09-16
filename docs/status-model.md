@@ -102,6 +102,21 @@ is a projection, not a measurement: `classifyIfSubscribed` (`src/domain/pack.ts`
 the repository would read the moment it is added to `subscriptions.json`. It appears nowhere in
 the text report or in `scan --json`, and the status counts do not include it.
 
+### Next action per status
+
+The `Next actions` list of the `scan --html` page (D21) prints one row per repository × pack
+whose status asks someone to act, most urgent first, with a verb the status decides
+(`STATUS_ACTION` in `src/report/labels.ts`) completed by the status message and `file:line`. The
+verb adds no state: it names who moves the box in the lifecycle below, a human or a sync.
+
+| Identifier | Verb | Completed by |
+| --- | --- | --- |
+| `modified` | `Review by hand` | the message (`body no longer matches its hash=`) and the block's `file:line` |
+| `outdated` | `Run sync to update the block` | the rev change and the block's `file:line` |
+| `blocked` | `Fix by hand, then sync` | the obstacle and its `file:line` |
+| `eligible` | `Run sync` | the normalization sentence |
+| `current`, `not-subscribed` | — | not listed: nothing to do |
+
 ## Sync outcome
 
 What one sync run ended in for one target (one repository, one pack). Identifiers are the `kind`

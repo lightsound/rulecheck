@@ -2,7 +2,13 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { describeNormalization } from "../src/domain/pack.ts";
 import type { Normalization } from "../src/domain/types.ts";
-import { OUTCOME_LABEL, OUTCOME_ORDER, SHAPE_LABEL, STATUS_LABEL } from "../src/report/labels.ts";
+import {
+  OUTCOME_LABEL,
+  OUTCOME_ORDER,
+  SHAPE_LABEL,
+  STATUS_ACTION,
+  STATUS_LABEL,
+} from "../src/report/labels.ts";
 
 /**
  * `docs/status-model.md` is the authoritative glossary (D17): every identifier and label in the
@@ -35,6 +41,15 @@ describe("docs/status-model.md", () => {
       expectInGlossary(id, `\`${label}\``);
       expect(label).toBe(id.replaceAll("-", " "));
     }
+  });
+
+  test("names the next-action verb of every pack status that has one", () => {
+    for (const [id, verb] of Object.entries(STATUS_ACTION)) {
+      if (verb === null) continue;
+      expectInGlossary(id, `\`${verb}\``);
+    }
+    expect(STATUS_ACTION.current).toBeNull();
+    expect(STATUS_ACTION["not-subscribed"]).toBeNull();
   });
 
   test("names every sync outcome identifier and label, in summary order", () => {
