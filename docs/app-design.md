@@ -541,7 +541,7 @@ Total about ten weeks to a chargeable product. M2 carries the product risk (does
 two pull requests per subscription, or does it switch to `direct-commit`); M3 the commercial
 one (name and pricing are decided there).
 
-## 10. Questions for the owner: answers and the one still open
+## 10. Questions for the owner: answers
 
 Answered 2026-09-16; the answers are folded into the sections above and recorded here so the
 document does not have to be diffed to find them.
