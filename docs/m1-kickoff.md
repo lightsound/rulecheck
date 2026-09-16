@@ -22,8 +22,8 @@ separate item outside this plan (not one of P0 or T1–T7; see §7).
   runner over the same code and the same files, never a second implementation.
 - Design: [app-design.md](app-design.md) (architecture, jobs, data model, security, milestones).
   Vocabulary: [status-model.md](status-model.md) (every status, shape, and outcome word the
-  pages may print). Decisions: [decisions.md](decisions.md) (D1–D25; D25 is the App's own entry,
-  the technology decisions are app-design §6).
+  pages may print). Decisions: [decisions.md](decisions.md) (D1–D26; D25 is the App's own entry,
+  D26 the transport split P0 delivered, the technology decisions are app-design §6).
 
 ## 2. M1 scope
 
@@ -49,7 +49,10 @@ own.
   calls a write operation.
 - Billing, the `plan` gate, Stripe, custom domain, product marketing site (M3). The name is
   decided (RuleFleet); the domain is not.
-- Truncated-tree fallback (M2); GitHub Enterprise Server, GitLab, Bitbucket (never in MVP).
+- GitHub Enterprise Server, GitLab, Bitbucket (never in MVP). (The truncated-tree fallback was
+  listed here for M2; P0 delivered it in `repositorySnapshot`, D26, so a truncated repository is
+  measured like any other and only one that needs more than `MAX_TREE_LISTINGS` calls is a
+  `scan_error` row.)
 - Renaming `lightsound/rulecheck`; the pack template repository `lightsound/agent-rules-template`
   (M0 item, owner's task).
 
@@ -100,13 +103,15 @@ the pinned sha; the others follow the same ranges rulecheck uses.
 | `repositorySnapshot`, `snapshotFileSystem`, `withChanges`, `mountPath` | `src/github/fs.ts` | `./github/fs` |
 | `Transport` interface, `makeGitHub(transport)` (the shared response mapping), `fetchTransport({ baseUrl, token })`, `installationToken(appId, privateKey, installationId)` | `src/github/transport.ts`, `src/github/fetch.ts`, `src/github/installation-token.ts` (new in P0) | `./github/transport`, `./github/fetch`, `./github/installation-token` |
 
-- Is a rulecheck pull request required first? **Yes, before T4, not before T1.** Today rulecheck
-  has no `exports` map and no fetch transport: `makeGh(run)` builds the service around a function
-  that spawns `gh`, so nothing in `src/github` runs on workerd. Deep imports
-  (`rulecheck/src/domain/types.ts`) would resolve without an `exports` map, but the transport does
-  not exist, and app-design §10 answer 1 fixes the `exports` map as an M1 deliverable. That
-  pull request is **P0** below, on `lightsound/rulecheck`. T1–T3 do not import rulecheck and
-  proceed in parallel with P0; T4 pins the sha of P0's merge commit.
+- Is a rulecheck pull request required first? **Yes, before T4, not before T1.** When this
+  document was written rulecheck had no `exports` map and no fetch transport: `makeGh(run)`
+  built the service around a function that spawned `gh`, so nothing in `src/github` ran on
+  workerd. That pull request is **P0** below, on `lightsound/rulecheck`; it is **done** (D26,
+  roadmap Step 7): `makeGitHub(transport)`, `ghTransport`, `fetchTransport`,
+  `installationToken` / `installationTokenTransport`, the `exports` map above, and the
+  truncated-tree fallback. T1–T3 do not import rulecheck; T4 pins the sha of P0's merge commit.
+  Example: `import { makeGitHub } from "rulecheck/github/transport"` with
+  `fetchTransport({ token: installationToken({ appId, privateKey, installationId }) })`.
 
 ## 4. Tasks, in order
 
@@ -114,7 +119,11 @@ Each task is one pull request or a small series; each ends with the check writte
 P0 is on `lightsound/rulecheck`; T1–T7 are on `lightsound/rulefleet`.
 
 **P0 (rulecheck): `exports` map and fetch transport** (app-design §4 "What must change in
-`src/github`", items 1–3).
+`src/github`", items 1–3). **Done 2026-09-16**, recorded as D26 with the departures from the
+text below: the transport response is `{ status, headers, body }` (raw text; `makeGitHub`
+parses and maps errors once), `retryAfter` is an optional field set only when the API
+advertised a wait, item 4 (truncated trees) is done as well, and `tests/transport.test.ts`
+holds the new coverage next to the unchanged `tests/github.test.ts`.
 
 - Split `makeGh` into `makeGitHub(transport)` (shared response mapping: `treeEntry`,
   `pullRequest`, `parseError`) plus a `Transport` interface (`request(method, path, body) →
@@ -189,8 +198,8 @@ P0 is on `lightsound/rulecheck`; T1–T7 are on `lightsound/rulefleet`.
   `Snapshot`, mounts it with `snapshotFileSystem`, provides `Path.layer` (the POSIX `Path` from
   `effect`) and runs `scan("/", { home: null })` once; stores one `RepoReport` per repository in
   `repo_reports` with `schema_version`, and the run's rows.
-- A repository whose snapshot fails (no default-branch ref, 404, truncated tree, a 5xx after the
-  transport's retry) gets `scan_error` and `scan_error_at` on its row and the others scan. Add
+- A repository whose snapshot fails (no default-branch ref, 404, a tree over
+  `MAX_TREE_LISTINGS`, a 5xx after the transport's retry) gets `scan_error` and `scan_error_at` on its row and the others scan. Add
   `scan_error` to `docs/status-model.md` "Words outside the model" in rulecheck in the same
   step (app-design §4 job table).
 - `installation` `created` enqueues `scan-installation`; a `push` to a default branch that
@@ -296,7 +305,7 @@ These come from the `base` and `personal` packs of `lightsound/agent-rules`, whi
   page with the checkbox matrix writing `subscriptions.json` through `src/sync/subscribe.ts`
   (`pull-request` / `direct-commit` setting, D25); Repository page; `html.ts` sections exported
   and rendered by HeroUI components; `fullRescan` and `subscriptionChanges` settings UI;
-  truncated-tree fallback; the D23 workflow removed from `agent-rules` once the App has opened
+  the D23 workflow removed from `agent-rules` once the App has opened
   the next real pull requests; `WriteLock` Durable Object in use.
 - **M3**: pricing and billing (Stripe checkout and portal, `plan` column and repository gate
   live, over-limit rule: scanned but not synced); custom domain in the Alchemy stack; status

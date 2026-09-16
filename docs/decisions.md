@@ -928,6 +928,80 @@ the design as a candidate calling the same function. Nothing in the CLI changes 
 It dissolves only if all three read one place, and the one place they already read is the pack
 repository; a database in front of it would be the second place, a cache behind it is not.
 
+## 2026-09-16 D26: One GitHub client over two transports; a truncated tree is listed subtree by subtree
+
+The hosted App (D25, [app-design.md](app-design.md) §4, [m1-kickoff.md](m1-kickoff.md) P0) runs
+rulecheck's `scan` and `sync` on workerd, where no process can be spawned, and the CLI keeps
+running them through `gh api`, where no token is ever held by rulecheck. Both must read a
+response the same way, or the App's status and the CLI's could disagree about the same
+repository. So the client is split at the wire: `Transport` (`src/github/transport.ts`) turns
+one request (`method`, `path`, JSON `body`) into one response (`status`, lowercased `headers`,
+raw `body` text) and knows nothing about repositories; `makeGitHub(transport)` holds every path,
+request body, and response mapping (`treeEntry`, `pullRequest`, the error `message`) and knows
+nothing about processes, sockets, or credentials. `ghTransport` (`gh.ts`) is the CLI's front and
+the only module that spawns a process; `fetchTransport` (`fetch.ts`) uses `fetch` alone and
+takes its bearer token as an `Effect<string>`, so the caller decides how it is minted:
+`Effect.succeed(pat)`, a `Config`, or `installationToken(...)`
+(`installation-token.ts`: RS256 App JWT through `crypto.subtle`, exchanged for an installation
+token cached until five minutes before it expires; a PKCS#1 key is refused with the
+`openssl pkcs8 -topk8 -nocrypt` command in the message). `package.json` gains the `exports` map
+from the kickoff (`./domain/*`, `./scan/*`, `./sync/*`, `./report/html|labels|render|sync`,
+`./github/*`, every entry a `.ts` source), so the App imports `rulecheck/scan/scan` from a
+sha-pinned git dependency; `tests/exports.test.ts` imports through the package name itself.
+
+**Rate limits** live in `fetchTransport`, where D14 said a retry would go once a real run needed
+one: every response's quota headers are reported through `onRateLimit`, a `403`/`429` GitHub
+marks as a secondary limit (`retry-after`, or a message naming it) is retried once after the
+advertised delay when that delay is at most `maxRetryDelaySeconds` (120), and an exhausted
+primary quota is never waited out in place: it reaches the caller as a `GitHubError` whose new
+`retryAfter` (seconds; absent when the API gave no hint) says how long a job should delay itself.
+`setRef` gains `force` (default `true`, today's behavior) for the D25 fast-forward-only writer.
+
+**Truncated trees.** `repositorySnapshot` used to refuse a repository whose recursive listing
+the API cut short. app-design §4 sketched a shallow fallback that lists the root and the
+directories rulecheck reads and marks the report `partial`; a partial tree makes `missing-path`
+verification guess, which the precision rule forbids, and `partial` would be a new word in the
+model. The fallback built instead is complete: when the recursive listing is truncated, the tree
+is listed one level and each subtree is asked for recursively in turn, so the cost is one call
+per subtree too large to list at once plus its children, not one per directory; directories the
+scan never descends into (`isIgnoredDirectory`: `node_modules`, `.git`, build output) are not
+listed; more than `MAX_TREE_LISTINGS` (200) calls is a `GitHubError` so one repository cannot
+spend a run's quota. `getTree` therefore takes `recursive: false`. The report needs no new word.
+
+**What does not change.** Every operation of the `GitHub` service, its callers in `src/scan/`
+and `src/sync/`, the D10 order of measure, plan, measure, write, and the D14 fan-out are
+untouched; `tests/github.test.ts` runs unchanged. The fake gains the same surface the real API
+has (`tests/fake-github.ts`: `fakeRest` presents the store as GitHub's REST endpoints over
+`fetch`, `ghRunnerOver` presents that as `gh api` output), and one test runs `sync --all` through
+the fake service, `fetchTransport`, and `ghTransport` over one store and requires the same
+commits, files, and dry-run table from all three.
+
+| Decision | Chosen | Alternatives considered | Settled in round |
+| --- | --- | --- | --- |
+| Transport response shape | `{ status, headers, body }` with the raw body text; `makeGitHub` parses JSON and maps every `>= 400` to `GitHubError` | `{ status, json }` (app-design's sketch: loses `retry-after` and the quota headers the rate-limit rule needs, and a non-JSON 502 page has nowhere to go); returning a `Response` (Web API type the `gh` front would have to fabricate) | 2 |
+| Where an HTTP error becomes a `GitHubError` | In `makeGitHub`, once, for both transports; a transport fails only when the API could not be reached (status null) | each transport mapping its own errors (the two fronts drift; the `gh` stderr format would leak into the App) | 1 |
+| `gh` error body | The API's JSON body when `gh` printed one on stdout; otherwise the `gh: <message> (HTTP <status>)` line becomes the body's `message`, so the CLI's messages stay byte for byte | `gh api --include` to read real headers and status (a header parser for one consumer; `gh` already prints the status line) | 1 |
+| `retryAfter` on `GitHubError` | Optional `retryAfter?: number` (seconds), set only when the API advertised a wait | required `retryAfter: number \| null` (the kickoff's wording; every constructor in `src/`, `tests/`, and the fake changes for a field nine callers never set); a subclass `RateLimited` (a second error type for callers to match) | 2 |
+| Secondary-limit retry | Once, on `403`/`429` with `retry-after` or a message naming the secondary limit, after the advertised delay (60 s when none), capped at `maxRetryDelaySeconds` (120); primary exhaustion never retried, `retryAfter` handed back | Effect `Schedule` retry on every 5xx/429 (D14: no retry policy until a real run shows one necessary; the App's job queue is the retry); waiting out a primary reset in place (up to an hour inside a Worker request) | 2 |
+| Surfacing the quota | `onRateLimit(limit)` on `fetchTransport`, called with every response's parsed headers, plus `parseRateLimit` / `retryAfterOf` exported | quota on every service result (changes every operation's return type for one consumer); a `Ref` service the transport updates (a service the CLI would have to provide for nothing) | 2 |
+| Token input | `token: Effect<string, GitHubError>` evaluated per request (the kickoff's form) | a `GitHubToken` Effect service (one more layer every test and the CLI must provide; the Effect parameter already is the injection point); a string (cannot refresh) | 1 |
+| Installation token cache | A closure holding the key and the token; refresh at five minutes before `expires_at`; concurrent first calls may each mint | `Effect.cachedWithTTL` (the TTL is only known after the mint); a `Semaphore` around the mint (a lock for a harmless duplicate token) | 2 |
+| Truncated tree fallback | Divide and conquer: on truncation, list one level and ask each non-ignored subtree recursively; budget of 200 listings | shallow root plus the directories rulecheck reads and a `partial` word (false `missing-path` findings, a new model word); one non-recursive call per directory (thousands of calls on the repositories that truncate); keep refusing (the App's `scan_error`, a customer's monorepo never measured) | 3 |
+| `getTree` surface | `options?: { recursive?: boolean }`, default recursive | a second method `listTree` (every fake and front implements two paths for one endpoint) | 1 |
+| `exports` entries | The kickoff §3 table in full (`./report/render` and `./report/sync` included) with `./github/*` as a pattern; `gh.ts` is reachable and documented as never imported by the App | named `./github/client|fs|transport|fetch|installation-token` only (hides `gh.ts` from the App, but every new file in the directory is a `package.json` edit) | 1 |
+| Verifying `exports` | `tests/exports.test.ts` imports through the package name (Bun's self-reference), plus a scratch `bun add github:lightsound/rulecheck#<sha>` type-check by hand for the PR | `bun link` into a fixture project (a global link on the machine that runs the tests) | 1 |
+| Base64 in the shared mapping | `atob`, present on Bun, Node, and workerd | `Buffer` (Node compatibility flag on the Worker for one decode) | 1 |
+| Test fronts | `fakeRest` and `ghRunnerOver` in `tests/fake-github.ts`, so the one object store is behind all three fronts | a second in-memory REST store (two stores that can disagree about the same repository) | 2 |
+| `makeGh` | Removed; `layerGh` stays for `main.ts` and tests call `makeGitHub(ghTransport(run))` | keep `makeGh` as an alias (a name for the pre-split shape with no caller) | 1 |
+| This entry | Written, because the split departs from app-design's sketch in the response shape and the truncation fallback, and because the fallback changes what `scan` reports for a truncated repository | none (the kickoff said no entry unless the shape departs; it does) | 1 |
+
+**Structural check.** The constraint is "two runtimes, one meaning per response". It dissolves
+only if the meaning is computed once, and the smallest thing that can be computed once is the
+mapping from a raw HTTP response to a service result; the transports below it are then free to
+be as different as a process and a socket. For truncation, the constraint is "a listing the API
+will not give in one call"; it dissolves because Git Data trees are addressable by sha, so a
+listing the API refuses whole can always be asked for in parts.
+
 ## Recording rule
 
 Add an entry here whenever a decision changes what rulecheck writes, what it reports, or which

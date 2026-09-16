@@ -29,7 +29,9 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
   agent-rules runs `sync --all` on every push to `main` that touches `packs/**` or
   `subscriptions.json`, and on demand with a dry-run input; `sync --run-url <url>` links each
   pull request to the run that wrote it. The workflow is live once the secret `RULECHECK_TOKEN`
-  is set in agent-rules (Step 6).
+  is   set in agent-rules (Step 6). The `GitHub` client is one mapping over two transports (D26):
+  `gh api` for the CLI, `fetch` with an App installation token for the hosted App; `package.json`
+  `exports` lets the App import the `.ts` sources by subpath (Step 7).
 - `lightsound/agent-rules/packs/base/AGENTS.md`: the portable pack `base` (D7 naming),
   environment-neutral only (Step 1, [agent-rules#1](https://github.com/lightsound/agent-rules/pull/1)).
   The repository's root `AGENTS.md` instructs agents working in agent-rules itself and is not
@@ -239,7 +241,7 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
   not built now: a nightly `schedule` as a safety net, a `pull_request` dry run on pack
   changes, the `--html` page as a run artifact.
 
-## Step 7: P0 for RuleFleet, the `src/github` transport split — specified 2026-09-16, not started
+## Step 7: P0 for RuleFleet, the `src/github` transport split — done 2026-09-16 (D26)
 
 - The hosted App (product name RuleFleet, private repository `lightsound/rulefleet`) is built
   from [m1-kickoff.md](m1-kickoff.md), which hands the M1 plan to the agents working there. The
@@ -248,10 +250,22 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
   installation token provider and rate-limit handling, give `setRef` a `force` option, and add
   the `package.json` `exports` map the App imports through (app-design §4 "What must change in
   `src/github`"; the subpath list is in the kickoff, §3).
-- Done when: the kickoff's P0 done check passes (`bun run check` green, `fetchTransport` and
-  the JWT signer covered in `tests/github.test.ts`, the CLI's `sync --all --dry-run` output
-  unchanged through `ghTransport`, `bun add github:lightsound/rulecheck#<sha>` type-checks from a
-  scratch project). The App's T4 pins that sha.
+- Result: `src/github/transport.ts` (`Transport`, `makeGitHub`), `gh.ts` (`ghTransport`,
+  `layerGh`; the only process spawn), `fetch.ts` (`fetchTransport`: token as `Effect<string>`,
+  one retry on a secondary rate limit, `onRateLimit`, `retryAfter` on `GitHubError`),
+  `installation-token.ts` (`installationToken`, `installationTokenTransport`: WebCrypto RS256
+  JWT, PKCS#1 refused), `getTree(…, { recursive: false })` and `setRef(…, { force })`, and the
+  truncated-tree fallback in `repositorySnapshot` (subtree by subtree, `MAX_TREE_LISTINGS`),
+  which app-design had deferred to M2 and is done here because it fell out of the same
+  interface change. `package.json` `exports` per the kickoff §3 table; `tests/exports.test.ts`
+  imports through the package name. `tests/transport.test.ts` covers `fetchTransport` against a
+  scripted `fetch`, the JWT signer against a generated key, the fallback, and one `sync --all`
+  through the fake service, `fetchTransport` over `fakeRest`, and `ghTransport` over
+  `ghRunnerOver`, requiring the same commits and dry-run table from all three.
+- Done check: `bun run check` green (216 tests); `tests/github.test.ts` unchanged in behavior;
+  the CLI reads a real public repository identically through `ghTransport` and
+  `fetchTransport` (same sha, same 62 files); `bun add github:lightsound/rulecheck#<sha>` from a
+  scratch project resolves `rulecheck/scan/scan` and type-checks. The App's T4 pins that sha.
 
 ## Deferred: Skills distribution (D18, 2026-09-16)
 
