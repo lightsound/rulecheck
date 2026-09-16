@@ -415,7 +415,8 @@ describe("sync", () => {
     );
     expect(github.calls).toEqual([]);
 
-    const result = await runSync({ repo: "acme/both" });
+    const runUrl = "https://github.com/acme/agent-rules/actions/runs/7";
+    const result = await runSync({ repo: "acme/both", runUrl });
     expect(result.kind).toBe("opened");
     if (result.kind !== "opened") return;
     expect(github.fileAt("acme/both", "heads/agent-rules/base", "AGENTS.md")).toBe(
@@ -427,6 +428,8 @@ describe("sync", () => {
       "- append CLAUDE.md content to AGENTS.md under `## Merged from CLAUDE.md` (verbatim, before any managed block; duplicates or conflicts with the text above it are left for review)",
     );
     expect(pull?.body).toContain("- replace CLAUDE.md with the wrapper (`@AGENTS.md`)");
+    // The single-target path threads `--run-url` into the written body (D23).
+    expect(pull?.body).toEndWith(`Written by [this run](${runUrl}).`);
   });
 
   test("both have content, CLAUDE.md repeats AGENTS.md: only the wrapper is written; a marker in either file blocks", async () => {
