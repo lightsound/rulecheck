@@ -446,37 +446,41 @@ Decided by the owner (2026-09-16); none changes sections 3–5.
 | Domain | Later | `workers.dev` for every stage until a product name exists; the custom domain is one resource in the same Alchemy stack when it does |
 | Webhook verification | Hand-written HMAC-SHA256 over the raw body with `crypto.subtle`, constant-time compare | Twenty lines, no dependency; `@octokit/webhooks` is the alternative when its typed payloads become worth the package |
 
-### Front end: React on Workers, framework to be picked
+### Front end: React + TanStack Start on Workers, HeroUI Pro
 
-Decided by the owner: the dashboard is **React-based** and lives in a **private repository**.
-The reason is one fact: the owner holds a paid React component library whose license forbids
-redistribution in open source, and the dashboard's UI is built on it. So the App repository is
-private (`lightsound/rulecheck-app` or a repository under a product organization; the account is
-pending, M0), the component library is a private dependency there, and the CLI in this
-repository stays open source and framework-free. The one remaining open question (section 10)
-is which React meta-framework runs it on Workers:
+Decided by the owner: the dashboard is **React with TanStack Start** on Workers, its UI built on
+**HeroUI Pro** (the paid HeroUI component set; the owner holds the license), and it lives in a
+**private repository** (`lightsound/rulecheck-app`, on the owner's personal GitHub account for
+now; an organization only if one is ever needed). Private because HeroUI Pro's license forbids
+redistribution in open source, so the component code cannot sit in a public repository; the CLI
+in this repository stays open source and framework-free. The **marketing site and the
+documentation** may live in the same private repository on the same stack (decided for now;
+revisit if a static site turns out cheaper to run apart). Documentation tooling is not decided:
+the candidates are **Fumadocs** (MDX docs inside the TanStack Start app, same deploy, same
+design tokens) and **Mintlify** (hosted, MDX in the repository, nothing to run, a second
+domain and a subscription).
+
+The framework comparison that led to the pick, kept for the record:
 
 | Candidate | For | Against |
 | --- | --- | --- |
-| TanStack Start (recommended) | Type-safe file routes, loaders, and server functions; SSR on Workers through Vite with the Cloudflare plugin; TanStack Table and Query for the matrix, rows, and run pages; the owner's component library is plain React and drops in | The youngest of the three; fewer production reports on Workers; server functions are its own convention next to `HttpApi` (kept for webhooks and the job API, so two request models coexist by design) |
+| TanStack Start (chosen) | Type-safe file routes, loaders, and server functions; SSR on Workers through Vite with the Cloudflare plugin; TanStack Table and Query for the matrix, rows, and run pages; HeroUI Pro is plain React and drops in | The youngest of the three; fewer production reports on Workers; server functions are its own convention next to `HttpApi` (kept for webhooks and the job API, so two request models coexist by design) |
 | React Router v7 (framework mode) | The mature Remix `loader` / `action` model, which fits the App's form-and-redirect flows; first-class Cloudflare Workers template; large ecosystem | Less type inference across routes than TanStack; data APIs shaped around HTML forms, so the checkbox matrix needs client code either way |
 | Next.js on Workers (OpenNext) | The most React tooling and the most familiar to hires or contractors; App Router server components | Runs through an adapter layer (OpenNext) rather than natively; heaviest bundle and cold start of the three; the adapter is another thing that can break on a Next release |
 
-**Recommendation: TanStack Start.** Best type story end to end (routes, loaders, table, query
-in one family), native Workers deployment through Vite, and nothing between React and the
-runtime. React Router v7 is the safe second; Next-on-Workers is not recommended for a product
-whose whole surface is three data pages.
+Why TanStack Start: best type story end to end (routes, loaders, table, query in one family),
+native Workers deployment through Vite, and nothing between React and the runtime. React
+Router v7 was the safe second; Next-on-Workers was not recommended for a product whose whole
+surface is three data pages. Not chosen further out: SolidStart / Solid 2 (the owner maintains
+`lightsound/solid2-agent-kit`, but HeroUI Pro is React), Astro islands (a second component
+model next to React for no gain on three interactive pages), HTMX-style fragments over
+`renderHtml`'s strings (no component model for HeroUI to plug into).
 
-Not chosen, and why: SolidStart / Solid 2 (the owner maintains `lightsound/solid2-agent-kit`,
-but the component library is React), Astro islands (a second component model next to React
-for no gain on three interactive pages), HTMX-style fragments over `renderHtml`'s strings (no
-component model for the library to plug into).
-
-Constraint whatever is picked: the words on the page stay the ones `labels.ts` prints, and the
-report's structure comes from `html.ts` (its sections exported as data in M2, rendered by React
-components that carry the D21 tokens), so the design system is carried, not re-implemented. M1
-serves the `renderHtml` page as a plain response behind `HttpApi`, inside the framework's route
-shell once the pick is made; every candidate above can wrap a server-rendered HTML string.
+Constraint: the words on the page stay the ones `labels.ts` prints, and the report's structure
+comes from `html.ts` (its sections exported as data in M2, rendered by HeroUI components that
+carry the D21 tokens as the theme), so the design system is carried, not re-implemented. M1
+serves the `renderHtml` page as a plain response inside a TanStack Start route, with `HttpApi`
+handling webhooks and the job API next to it.
 
 ## 7. Security
 
@@ -528,9 +532,9 @@ the unit is a week because the milestones gate on each other, not because any on
 
 | Milestone | Done when | Weeks |
 | --- | --- | --- |
-| M0: design accepted | This document merged with the questions in section 10 answered (the framework pick excepted, due before M2); D25 recorded; **Accounts**: the GitHub organization that owns the App registration and the private repository, and the Cloudflare account, chosen; the App registered on GitHub (name, permissions, webhook URL to a stub), one registration per stage; the template repository `lightsound/agent-rules-template` published | 0.5 |
+| M0: design accepted | This document merged with every question in section 10 answered; D25 recorded; **Accounts**: the dedicated Cloudflare account created (billing set up, Alchemy state store bootstrapped) and the App registration and private repository placed under the personal GitHub account; **HeroUI Pro** license confirmed to cover use in the private repository (and the marketing site, if it shares it); the App registered on GitHub (name, permissions, webhook URL to a stub), one registration per stage; the template repository `lightsound/agent-rules-template` published | 0.5 |
 | M1: install and read-only dashboard | The transport split and `fetchTransport` land in rulecheck (with `fake-github.ts` coverage); the private App repository exists and depends on rulecheck at a sha; the Alchemy stack deploys `prod`, `dev_*`, and `pr-*` stages from GitHub Actions; install → `scan-installation` → Overview page served from `repo_reports`; `push` rescans one repository; the `fullRescan` schedule. Dogfood on `lightsound`, personal installation included | 3 |
-| M2: sync and subscriptions | Pack source registration; `sync-target` on pack push, `Sync now`, dry run; runs and audit; `src/sync/subscribe.ts` in rulecheck with `fake-github.ts` coverage and its decision entry; the `subscriptionChanges` and `fullRescan` settings; Pack & subscriptions page with the subscriptions matrix writing D25 changes through it; Repository page; `html.ts` sections exported and rendered by the React framework picked; the D23 workflow removed from `agent-rules` once the App has opened the next real pull requests (replacement, not coexistence) | 3 |
+| M2: sync and subscriptions | Pack source registration; `sync-target` on pack push, `Sync now`, dry run; runs and audit; `src/sync/subscribe.ts` in rulecheck with `fake-github.ts` coverage and its decision entry; the `subscriptionChanges` and `fullRescan` settings; Pack & subscriptions page with the subscriptions matrix writing D25 changes through it; Repository page; `html.ts` sections exported and rendered by HeroUI components in TanStack Start routes; the D23 workflow removed from `agent-rules` once the App has opened the next real pull requests (replacement, not coexistence) | 3 |
 | M3: organizations and billing | Product name decided and the custom domain added to the stack; pricing decided (section 8), plan column and repository gate live; Stripe checkout and portal; installation switcher for users in several organizations; uninstall lifecycle; the truncated-tree fallback; status page and the alerts in section 6 | 3 |
 
 Total about ten weeks to a chargeable product. M2 carries the product risk (does a team accept
@@ -544,8 +548,8 @@ document does not have to be diffed to find them.
 
 | # | Question | Answer |
 | --- | --- | --- |
-| 1 | Where does the App code live? | A **private repository** (`lightsound/rulecheck-app`, or a repository under a product organization; see 10), depending on `rulecheck` at a commit sha (D23's pinning; `effect` is exact-pinned) with an `exports` map added to rulecheck in M1. Private because the dashboard uses the owner's paid React component library, whose license forbids redistribution in open source. The CLI stays open source here |
-| 2 | Front end | **React-based**, for the same reason. Framework: see the one open question below |
+| 1 | Where does the App code live? | A **private repository** (`lightsound/rulecheck-app` on the owner's personal GitHub account; see 10), depending on `rulecheck` at a commit sha (D23's pinning; `effect` is exact-pinned) with an `exports` map added to rulecheck in M1. Private because the dashboard uses HeroUI Pro, whose license forbids redistribution in open source. The CLI stays open source here. The marketing site and the docs may live in the same repository on the same stack (decided for now; docs tooling open between Fumadocs and Mintlify) |
+| 2 | Front end | **React + TanStack Start** on Workers, UI on **HeroUI Pro** |
 | 3 | Must the pack source be inside the installation? | **Yes.** The installation token can read and write it and nothing else is needed; a source outside would need a second credential to issue, store, and rotate |
 | 4 | May a subscription change go straight to the default branch? | **A per-installation setting**, `subscriptionChanges: "pull-request" \| "direct-commit"`, default `pull-request`; `direct-commit` is meant for solo accounts. Subscriber repositories are never written directly under either value (D25 updated) |
 | 5 | Scan schedule | Webhooks as tabulated in section 2 ("What each webhook does"); the full rescan interval is a per-installation setting `fullRescan: "daily" \| "weekly" \| "off"`, default `daily` |
@@ -553,12 +557,10 @@ document does not have to be diffed to find them.
 | 7 | The D23 workflow in `agent-rules` at M2 | **Removed when M2 ships**: the App replaces it; no coexistence (both would race on the same tool-owned branches) |
 | 8 | Retention | Defaults **accepted**: reports 90 days; snapshots, runs, audit 12 months; rows deleted 30 days after uninstall |
 | 9 | Product name | **Decided before M3** (the custom domain follows it) |
-| 10 | Accounts | The GitHub organization that owns the App registration and the private repository, and the Cloudflare account that runs it, are **pending**; an M0 done criterion |
+| 10 | Accounts | A **new, dedicated Cloudflare account** for the product (its own billing, API tokens, and Alchemy state store, nothing shared with other projects); **GitHub stays on the personal account** (`lightsound`) for the App registration and the private repository, an organization later if ever |
 
-**Still open (one):** which React meta-framework runs the dashboard on Workers. Candidates
-and the recommendation (TanStack Start; React Router v7 as the safe second; Next-on-Workers not
-recommended) are in section 6, "Front end: React on Workers". Due before M2 starts; M1 serves
-`renderHtml` behind `HttpApi` either way.
+No question is open. The only choice deliberately left for later is the documentation tooling
+(Fumadocs or Mintlify, section 6), which nothing before M3 depends on.
 
 ## Decisions
 
@@ -572,8 +574,8 @@ better option that produced nothing new.
 | Hosting | Cloudflare Workers + Queues + Durable Objects, Cron Triggers for the daily runs; Effect v4 on Workers is a stack the owner already runs, so no fallback is planned | Fly.io Bun container (full reuse, a server to run); Vercel functions plus a queue service (two vendors for one job model); Deno Deploy (Deno, a third runtime; no queue with retries) | 2 |
 | Infrastructure as code | Alchemy: one Effect-based TypeScript stack for every Cloudflare resource and secret; stages `prod` / `dev_<user>` / `pr-<n>`; deployed from GitHub Actions with credentials provisioned as code (decided by the owner) | `wrangler.jsonc` + `wrangler deploy`; Terraform / Pulumi; SST | decided by owner, n/a |
 | Pricing | Deferred to after M2; the design fixes only the `plan` column, the repository gate, and the over-limit rule (decided by the owner) | a placeholder tier table now (removed: numbers before the first buyer conversation anchor the wrong thing) | decided by owner, n/a |
-| Technology decisions | Effect `HttpApi`; D1 + Drizzle; Workers Logs; GitHub Actions + Alchemy deploy; session storage at implementation; domain later (decided by the owner) | Hono; raw SQL; Sentry; laptop deploys | decided by owner, n/a |
-| Front end | React, in a private repository, because the owner's paid React component library cannot be redistributed in open source (decided by the owner); the meta-framework is the one question left open, with TanStack Start recommended over React Router v7 and Next-on-Workers | SolidStart / Solid 2, Astro islands, HTMX-style fragments (each would sit next to a React component library or leave it unused) | recommendation settled in round 2; pick by owner |
+| Technology decisions | Effect `HttpApi`; D1 + Drizzle; Workers Logs; GitHub Actions + Alchemy deploy; session storage at implementation; domain later; a dedicated Cloudflare account for the product, GitHub on the personal account (decided by the owner) | Hono; raw SQL; Sentry; laptop deploys | decided by owner, n/a |
+| Front end | React + TanStack Start on Workers, HeroUI Pro for the UI, in a private repository because HeroUI Pro cannot be redistributed in open source (decided by the owner); the marketing site and docs may share the repository and stack, docs tooling open between Fumadocs and Mintlify | React Router v7 (the safe second), Next.js on Workers via OpenNext (adapter layer, heaviest); SolidStart / Solid 2, Astro islands, HTMX-style fragments (each would sit next to a React component library or leave it unused) | decided by owner, n/a |
 | Guard for `direct-commit` | Fast-forward-only ref update (parent = the head that was read, `force: false`, one re-read and retry on `422`, then `refused`), since the D10 ownership check cannot apply to a default branch | force update as for the tool-owned branch (would overwrite a commit pushed between read and write); a lock in the App only (does not see pushes from outside the App); require branch protection with the App as the only allowed pusher (a setting the solo account this targets does not have) | 1 |
 | Scan schedule | Webhook table in section 2 plus a per-installation `fullRescan` setting (`daily` default, `weekly`, `off`) (decided by the owner) | fixed daily rescan; webhooks only | decided by owner, n/a |
 | Bootstrap without a pack repository | Read-only inventory until a source is registered; (a) a public GitHub template repository the user instantiates with `Use this template` via a prefilled `github.com/new` link, then adds to the installation; (b) an existing repository; (c) a derived starter pack, post-MVP | the App creating the repository through the installation or user token (`Administration: write` on every visible repository for one onboarding click); the App pushing starter files into an empty repository the user created (`Contents: write` suffices, but the user still creates the repository, so the template saves the same click with fewer bytes of ours in the flow) | 2 |
@@ -583,7 +585,7 @@ better option that produced nothing new.
 | Team roles | None of the App's own: visibility from `GET /user/installations` and its repositories, admin from owner status of the installation account, subscription edits gated by the pack repository's own permissions | a roles table (a second permission system to keep in step with GitHub's); GitHub Teams mapping (adds `Members: read` for a gate the pack repository already enforces) | 2 |
 | GitHub client change | Split `makeGh` into shared response mapping plus a `Transport`; `ghTransport` for the CLI, `fetchTransport` with an installation token provider and rate-limit handling for the App | a second `GitHubService` implementation (duplicated mapping that drifts); Octokit (a dependency for twelve endpoints whose mapping exists) | 1 |
 | Where retries live | In `fetchTransport`: `retry-after` honored, one retry on secondary limit, job delayed below a remaining-calls floor | in the job runner (loses the header information); in `syncTarget` (D14 named the GitHub layer) | 1 |
-| App code location | Private repository (`lightsound/rulecheck-app` or under a product organization, account pending) depending on rulecheck at a sha; rulecheck gains an `exports` map; private because the paid React component library cannot be redistributed (confirmed by the owner) | `app/` workspace here (public App code, impossible with the library's license); npm publish (a version to bump for one consumer; D23's argument still holds) | 2 |
+| App code location | Private repository `lightsound/rulecheck-app` on the owner's personal GitHub account, depending on rulecheck at a sha; rulecheck gains an `exports` map; private because HeroUI Pro cannot be redistributed (confirmed by the owner) | `app/` workspace here (public App code, impossible with the library's license); npm publish (a version to bump for one consumer; D23's argument still holds); a GitHub organization now (later, if ever) | 2 |
 | Pull-style onboarding | A candidate CLI command (`rulecheck subscribe <owner>/<pack-repo> --pack <id>`, name open) run inside a repository, opening the D25 subscription pull request directly or through the App when it is installed; documented, not scheduled, needs its own decision entry | make it the only subscription path (a developer must be in the repository; an admin subscribing twenty repositories wants the matrix); have it write the subscriber's block directly (skips the pack repository, so the CLI and the App would disagree on who is subscribed); a GitHub Action in the subscriber (a workflow per repository to onboard one line) | 1 |
 | Per-repository failure in a full scan | Snapshots are built per repository; a failure becomes a `scan_error` on that repository's row (a row-level failure, not a shape or a pack status; glossary-listed as a word outside the four vocabularies when built) and the rest scan normally | one snapshot, one failure aborts the run (the CLI's behavior for one target; unacceptable over 200 repositories); a synthetic `RepoReport` with shape `none` (lies about the repository) | 1 |
 | Where the D25 writer lives | rulecheck `src/sync/subscribe.ts`, pure plan in `src/domain`, `fake-github.ts` tests; called by the App and by the candidate CLI command | App-only code (two writers once the CLI command exists, and outside the `fake-github.ts` rule); the App calling the CLI as a process (no `Bun.spawn` on Workers) | 1 |
