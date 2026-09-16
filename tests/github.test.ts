@@ -10,7 +10,8 @@ import {
   textEntry,
   withChanges,
 } from "../src/github/fs.ts";
-import { type GhResult, makeGh } from "../src/github/gh.ts";
+import { type GhResult, ghTransport } from "../src/github/gh.ts";
+import { makeGitHub } from "../src/github/transport.ts";
 import { renderSync } from "../src/report/sync.ts";
 import { resolvePacks } from "../src/scan/packs.ts";
 import { scan } from "../src/scan/scan.ts";
@@ -680,7 +681,7 @@ async function revOf(github: ReturnType<typeof fakeGitHub>): Promise<string> {
   );
 }
 
-describe("makeGh", () => {
+describe("makeGitHub over ghTransport", () => {
   function runner(responses: Record<string, GhResult | ((stdin: string | null) => GhResult)>) {
     const seen: Array<{ args: ReadonlyArray<string>; stdin: string | null }> = [];
     const run = async (args: ReadonlyArray<string>, stdin: string | null): Promise<GhResult> => {
@@ -754,7 +755,7 @@ describe("makeGh", () => {
         stderr: "",
       },
     });
-    const gh = makeGh(run);
+    const gh = makeGitHub(ghTransport(run));
     const runP = <A, E>(e: Effect.Effect<A, E>) => Effect.runPromise(e);
 
     expect(await runP(gh.getRepository(repo))).toEqual({ defaultBranch: "trunk" });
@@ -805,10 +806,13 @@ describe("makeGh", () => {
   });
 
   test("a missing gh binary is a GitHubError, not a crash", async () => {
-    const gh = makeGh(async () => {
-      throw new Error("ENOENT");
-    });
+    const gh = makeGitHub(
+      ghTransport(async () => {
+        throw new Error("ENOENT");
+      }),
+    );
     const failure = await Effect.runPromise(gh.getRepository(repo).pipe(Effect.flip));
     expect(failure.message).toContain("install the GitHub CLI");
+    expect(failure.operation).toBe("getRepository");
   });
 });
