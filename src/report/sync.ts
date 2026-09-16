@@ -86,7 +86,7 @@ function statusOf(outcome: SyncOutcome): string {
 }
 
 /** The outcome label followed by its detail, as the text row prints it. */
-export function describeOutcome(outcome: SyncOutcome): string {
+function describeOutcome(outcome: SyncOutcome): string {
   const label = OUTCOME_LABEL[outcome.kind];
   const detail = outcomeDetail(outcome);
   switch (outcome.kind) {

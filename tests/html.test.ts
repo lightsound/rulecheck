@@ -397,10 +397,11 @@ describe("renderHtml", () => {
     expect(html).toContain(
       '<td class="mono">.agents/skills/review</td><td class="num">2</td><td>lock hash differs</td><td>.claude</td>',
     );
-    // The badge counts findings, malformed markers, and skill issues; the shape note is advice.
-    expect(html).toContain('<span class="tag tag-attention">3 findings</span>');
+    // The badge counts findings, malformed markers, and skill issues ("issues", since the glossary
+    // keeps `Finding` and `BlockIssue` apart); the shape note is advice and does not count.
+    expect(html).toContain('<span class="tag tag-attention">3 issues</span>');
     expect(html).toContain('<span class="mono">AGENTS.md:2</span> unpaired `agent-rules:end`');
-    expect(html).toContain('<span class="tag tag-attention">1 finding</span>');
+    expect(html).toContain('<span class="tag tag-attention">1 issue</span>');
     // Repositories without instruction files are hidden unless asked for, as in the text report.
     expect(html).not.toContain('<span class="mono name">acme/empty</span>');
     expect(html).toContain("1 without instruction files hidden");

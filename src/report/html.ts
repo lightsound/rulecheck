@@ -330,7 +330,7 @@ function repoCard(repo: RepoReport): string {
     <span class="mono name">${esc(repo.name)}</span>
     ${shapeChip(repo.shape)}
     <span class="budget">Cursor ~${fmt(repo.budget.cursor)} · Claude Code ~${fmt(repo.budget.claudeCode)}</span>
-    ${count > 0 ? `<span class="tag tag-attention">${count} ${count === 1 ? "finding" : "findings"}</span>` : ""}
+    ${count > 0 ? `<span class="tag tag-attention">${count} ${count === 1 ? "issue" : "issues"}</span>` : ""}
   </summary>
   <div class="card-body">
     ${issues.length > 0 ? `<ul class="issues">${issues.join("")}</ul>` : ""}

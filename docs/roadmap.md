@@ -200,6 +200,8 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
   removes the second phase at the cost of the one-pack-one-branch invariant in D10; needs a
   decision entry before it is built.
 - Later: GitHub App + webhook so status updates without a local tree; the web/desktop UI on top.
+  The `--html` page (D19) is the static preview of that view: the same numbers, matrix, and
+  cards from one scan, for judging whether the live version is worth building.
 
 ## Deferred: Skills distribution (D18, 2026-09-16)
 
