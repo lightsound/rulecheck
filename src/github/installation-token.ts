@@ -1,12 +1,7 @@
 import { Effect } from "effect";
 import { GitHubError } from "./client.ts";
-import {
-  DEFAULT_BASE_URL,
-  type Fetch,
-  type FetchTransportOptions,
-  fetchTransport,
-} from "./fetch.ts";
-import { errorMessageOf, type Transport } from "./transport.ts";
+import { type FetchTransportOptions, fetchTransport } from "./fetch.ts";
+import { errorMessageOf, retryAfterOf, type Transport } from "./transport.ts";
 
 /**
  * Installation tokens for a GitHub App (app-design §4, D26): a short-lived RS256 JWT signed with
@@ -20,15 +15,16 @@ import { errorMessageOf, type Transport } from "./transport.ts";
  * it is stored, and a PKCS#1 header is refused with a message that names the command.
  */
 
-export interface InstallationTokenOptions {
+/**
+ * The mint is one more `fetchTransport` request, so it takes every transport option except the
+ * token (which is the JWT): the `access_tokens` response reports its quota through the same
+ * `onRateLimit`, and a secondary limit on the mint waits through the same `sleep` and cap.
+ */
+export interface InstallationTokenOptions extends Omit<FetchTransportOptions, "token"> {
   readonly appId: string | number;
   /** The App's private key as a PKCS#8 PEM (`BEGIN PRIVATE KEY`). */
   readonly privateKey: string;
   readonly installationId: string | number;
-  /** API root; default `https://api.github.com`. */
-  readonly baseUrl?: string;
-  /** Default `globalThis.fetch`; injected by tests. */
-  readonly fetch?: Fetch;
   /** Clock in milliseconds since the epoch; default `Date.now`. Injected by tests. */
   readonly now?: () => number;
 }
@@ -70,23 +66,28 @@ export function installationToken(
 
   const mint = Effect.gen(function* () {
     const jwt = yield* appJwt(String(options.appId), yield* signingKey, now());
-    const transport = fetchTransport({
-      token: Effect.succeed(jwt),
-      baseUrl: options.baseUrl ?? DEFAULT_BASE_URL,
-      ...(options.fetch ? { fetch: options.fetch } : {}),
-    });
+    const {
+      appId: _appId,
+      privateKey: _privateKey,
+      installationId: _id,
+      now: _now,
+      ...transportOptions
+    } = options;
+    const transport = fetchTransport({ ...transportOptions, token: Effect.succeed(jwt) });
     const response = yield* transport.request({
       method: "POST",
       path: `app/installations/${options.installationId}/access_tokens`,
       body: null,
     });
     if (response.status >= 400) {
+      const retryAfter = retryAfterOf(response.headers);
       return yield* new GitHubError({
         operation,
         status: response.status,
         message:
           errorMessageOf(response.body) ??
           `installation ${options.installationId}: HTTP ${response.status}`,
+        ...(retryAfter === null ? {} : { retryAfter }),
       });
     }
     const data = yield* Effect.try({
@@ -116,9 +117,7 @@ export function installationToken(
 }
 
 /** `fetchTransport` authenticated as an installation of the App. */
-export function installationTokenTransport(
-  options: InstallationTokenOptions & Omit<FetchTransportOptions, "token">,
-): Transport {
+export function installationTokenTransport(options: InstallationTokenOptions): Transport {
   return fetchTransport({ ...options, token: installationToken(options) });
 }
 
