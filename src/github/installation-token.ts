@@ -21,9 +21,10 @@ import { errorMessageOf, retryAfterOf, type Transport } from "./transport.ts";
  * `onRateLimit`, and a secondary limit on the mint waits through the same `sleep` and cap.
  *
  * The quota the mint reports is the App's own (JWT-authenticated requests, 5,000 per hour per
- * App), a different bucket from the installation token's, and `x-ratelimit-resource` reads
- * `core` for both. A caller that must tell them apart passes one `onRateLimit` here and another
- * to the outer `fetchTransport` instead of using `installationTokenTransport`, which shares one.
+ * App), a different bucket from the installation token's, and the headers do not reliably tell
+ * the two apart (GitHub documents no `x-ratelimit-resource` value specific to App-authenticated
+ * requests). A caller that must tell them apart passes one `onRateLimit` here and another to the
+ * outer `fetchTransport` instead of using `installationTokenTransport`, which shares one.
  * In practice the App bucket is touched once per installation per token lifetime, so its
  * samples never approach a throttling floor.
  */
