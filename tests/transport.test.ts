@@ -417,19 +417,35 @@ describe("installationToken", () => {
         },
       ],
     });
+    let now = 1_700_000_000_000;
     const token = installationToken({
       appId: 1,
       privateKey: pem,
       installationId: 2,
       fetch,
+      now: () => now,
       userAgent: "rulefleet",
-      sleep: (s) => Effect.sync(() => void slept.push(s)),
+      sleep: (s) =>
+        Effect.sync(() => {
+          slept.push(s);
+          now += s * 1000;
+        }),
       onRateLimit: (limit) => Effect.sync(() => void seenLimits.push(limit)),
     });
     expect(await runP(token)).toBe("ghs_minted");
     expect(slept).toEqual([9]);
     expect(seen).toHaveLength(2);
     expect(headersOf(seen[0])["user-agent"]).toBe("rulefleet");
+    // The retry signs a fresh JWT rather than re-sending the one signed before the wait.
+    const iatOf = (call: { init: RequestInit } | undefined) =>
+      JSON.parse(
+        fromBase64Url(
+          headersOf(call)
+            .authorization?.replace(/^Bearer /, "")
+            .split(".")[1] ?? "",
+        ).toString(),
+      ).iat as number;
+    expect(iatOf(seen[1])).toBe(iatOf(seen[0]) + 9);
     expect(seenLimits).toEqual([
       { limit: 5000, remaining: 4000, reset: 1000, resource: null },
       { limit: 5000, remaining: 3999, reset: 1000, resource: "core" },

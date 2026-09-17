@@ -19,6 +19,13 @@ import { errorMessageOf, retryAfterOf, type Transport } from "./transport.ts";
  * The mint is one more `fetchTransport` request, so it takes every transport option except the
  * token (which is the JWT): the `access_tokens` response reports its quota through the same
  * `onRateLimit`, and a secondary limit on the mint waits through the same `sleep` and cap.
+ *
+ * The quota the mint reports is the App's own (JWT-authenticated requests, 5,000 per hour per
+ * App), a different bucket from the installation token's, and `x-ratelimit-resource` reads
+ * `core` for both. A caller that must tell them apart passes one `onRateLimit` here and another
+ * to the outer `fetchTransport` instead of using `installationTokenTransport`, which shares one.
+ * In practice the App bucket is touched once per installation per token lifetime, so its
+ * samples never approach a throttling floor.
  */
 export interface InstallationTokenOptions extends Omit<FetchTransportOptions, "token"> {
   readonly appId: string | number;
@@ -64,16 +71,21 @@ export function installationToken(
         ),
   );
 
+  // The JWT is the mint's bearer token, signed per request so a retry after a long secondary-limit
+  // wait presents a fresh one.
+  const jwt = Effect.flatMap(signingKey, (signing) =>
+    appJwt(String(options.appId), signing, now()),
+  );
+  const {
+    appId: _appId,
+    privateKey: _privateKey,
+    installationId: _id,
+    now: _now,
+    ...transportOptions
+  } = options;
+  const transport = fetchTransport({ ...transportOptions, token: jwt });
+
   const mint = Effect.gen(function* () {
-    const jwt = yield* appJwt(String(options.appId), yield* signingKey, now());
-    const {
-      appId: _appId,
-      privateKey: _privateKey,
-      installationId: _id,
-      now: _now,
-      ...transportOptions
-    } = options;
-    const transport = fetchTransport({ ...transportOptions, token: Effect.succeed(jwt) });
     const response = yield* transport.request({
       method: "POST",
       path: `app/installations/${options.installationId}/access_tokens`,

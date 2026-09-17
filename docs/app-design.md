@@ -335,7 +335,12 @@ tree, not the earlier sketch):
    minutes before `expires_at`. The mint is one more `fetchTransport` request and takes the same
    options (`onRateLimit`, `sleep`, `maxRetryDelaySeconds`, `userAgent`), so its response
    reports quota and retries like every other; `installationTokenTransport(options)` is the
-   two wired together.
+   two wired together, sharing one `onRateLimit`. The quota the mint reports is the App's own
+   bucket (JWT-authenticated requests, 5,000 per hour per App), not the installation's, and
+   `x-ratelimit-resource` reads `core` for both; a job runner that keys a floor on the
+   installation quota passes `installationToken` its own `onRateLimit` (or ignores the one
+   sample per installation per token lifetime the mint contributes) rather than using
+   `installationTokenTransport`.
    GitHub hands out the App private key as PKCS#1 (`BEGIN RSA PRIVATE KEY`) and
    `crypto.subtle.importKey` takes RSA keys as `pkcs8` only, so the key is converted once
    (`openssl pkcs8 -topk8 -nocrypt`) before it is stored as the secret; the signer refuses a
