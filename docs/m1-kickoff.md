@@ -199,9 +199,9 @@ holds the new coverage next to the unchanged `tests/github.test.ts`.
   `effect`) and runs `scan("/", { home: null })` once; stores one `RepoReport` per repository in
   `repo_reports` with `schema_version`, and the run's rows.
 - A repository whose snapshot fails (no default-branch ref, 404, a tree over
-  `MAX_TREE_LISTINGS`, a 5xx after the transport's retry) gets `scan_error` and `scan_error_at` on its row and the others scan. Add
-  `scan_error` to `docs/status-model.md` "Words outside the model" in rulecheck in the same
-  step (app-design §4 job table).
+  `MAX_TREE_LISTINGS`, a 5xx after the transport's retry) gets `scan_error` and `scan_error_at`
+  on its row and the others scan. Add `scan_error` to `docs/status-model.md` "Words outside the
+  model" in rulecheck in the same step (app-design §4 job table).
 - `installation` `created` enqueues `scan-installation`; a `push` to a default branch that
   touches a path from the webhook table enqueues `scan-repository` at the pushed sha.
 - Done check: after install, `repo_reports` holds one row per measurable repository within one

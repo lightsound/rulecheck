@@ -29,7 +29,7 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
   agent-rules runs `sync --all` on every push to `main` that touches `packs/**` or
   `subscriptions.json`, and on demand with a dry-run input; `sync --run-url <url>` links each
   pull request to the run that wrote it. The workflow is live once the secret `RULECHECK_TOKEN`
-  is   set in agent-rules (Step 6). The `GitHub` client is one mapping over two transports (D26):
+  is set in agent-rules (Step 6). The `GitHub` client is one mapping over two transports (D26):
   `gh api` for the CLI, `fetch` with an App installation token for the hosted App; `package.json`
   `exports` lets the App import the `.ts` sources by subpath (Step 7).
 - `lightsound/agent-rules/packs/base/AGENTS.md`: the portable pack `base` (D7 naming),

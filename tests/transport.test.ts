@@ -389,6 +389,87 @@ describe("installationToken", () => {
     expect((await flip(odd)).message).toContain("expires_at");
   });
 
+  test("the mint reports its quota through onRateLimit and retries a secondary limit through the injected sleep", async () => {
+    const { pem } = await testKey();
+    const slept: number[] = [];
+    const seenLimits: RateLimit[] = [];
+    const { fetch, seen } = scripted({
+      "POST app/installations/2/access_tokens": [
+        {
+          status: 403,
+          body: { message: "You have exceeded a secondary rate limit." },
+          headers: {
+            "retry-after": "9",
+            "x-ratelimit-limit": "5000",
+            "x-ratelimit-remaining": "4000",
+            "x-ratelimit-reset": "1000",
+          },
+        },
+        {
+          status: 201,
+          body: { token: "ghs_minted", expires_at: "2999-01-01T00:00:00Z" },
+          headers: {
+            "x-ratelimit-limit": "5000",
+            "x-ratelimit-remaining": "3999",
+            "x-ratelimit-reset": "1000",
+            "x-ratelimit-resource": "core",
+          },
+        },
+      ],
+    });
+    let now = 1_700_000_000_000;
+    const token = installationToken({
+      appId: 1,
+      privateKey: pem,
+      installationId: 2,
+      fetch,
+      now: () => now,
+      userAgent: "rulefleet",
+      sleep: (s) =>
+        Effect.sync(() => {
+          slept.push(s);
+          now += s * 1000;
+        }),
+      onRateLimit: (limit) => Effect.sync(() => void seenLimits.push(limit)),
+    });
+    expect(await runP(token)).toBe("ghs_minted");
+    expect(slept).toEqual([9]);
+    expect(seen).toHaveLength(2);
+    expect(headersOf(seen[0])["user-agent"]).toBe("rulefleet");
+    // The retry signs a fresh JWT rather than re-sending the one signed before the wait.
+    const iatOf = (call: { init: RequestInit } | undefined) =>
+      JSON.parse(
+        fromBase64Url(
+          headersOf(call)
+            .authorization?.replace(/^Bearer /, "")
+            .split(".")[1] ?? "",
+        ).toString(),
+      ).iat as number;
+    expect(iatOf(seen[1])).toBe(iatOf(seen[0]) + 9);
+    expect(seenLimits).toEqual([
+      { limit: 5000, remaining: 4000, reset: 1000, resource: null },
+      { limit: 5000, remaining: 3999, reset: 1000, resource: "core" },
+    ]);
+
+    // A mint delay over the cap is not waited out: the error carries the wait instead.
+    const capped = installationToken({
+      appId: 1,
+      privateKey: pem,
+      installationId: 3,
+      fetch: scripted({
+        "POST app/installations/3/access_tokens": {
+          status: 403,
+          body: { message: "secondary rate limit" },
+          headers: { "retry-after": "300" },
+        },
+      }).fetch,
+      sleep: (s) => Effect.sync(() => void slept.push(s)),
+      maxRetryDelaySeconds: 120,
+    });
+    expect(await flip(capped)).toMatchObject({ status: 403, retryAfter: 300 });
+    expect(slept).toEqual([9]);
+  });
+
   test("installationTokenTransport authenticates API calls with the minted token", async () => {
     const { pem } = await testKey();
     const fake = fakeGitHub({ "acme/r": { files: { "AGENTS.md": "# R\n" } } });

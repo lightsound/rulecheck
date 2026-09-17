@@ -318,33 +318,48 @@ implementation `effect` ships without a platform package. `resolvePacks` first `
 argument as a local directory; the server calls `loadPacks(snapshotFs, path, "/packs", label)`
 directly, which is already exported.
 
-What must change in `src/github` (small, and useful to the CLI too):
+What changed in `src/github` for this (shipped as P0, D26; the shape below is the one in the
+tree, not the earlier sketch):
 
-1. **Transport split.** `makeGh(run)` builds the `GitHubService` around one function, `api(method,
-   path, body)`, that spawns `gh`. Lift that function into a `Transport` interface (`request(method,
-   path, body) → { status, json }`), keep `ghTransport(run)` for the CLI, and add
-   `fetchTransport({ baseUrl, token })` where `token` is an `Effect<string>` so the caller decides
-   how it is minted. The response mapping (`treeEntry`, `pullRequest`, `parseError`) is shared.
-   `Bun.spawn` then lives only in `bunGhRunner`, which the server never imports.
-2. **Installation token provider.** `installationToken(appId, privateKey, installationId)`: an
-   RS256 JWT signed with WebCrypto (`crypto.subtle`, available on Bun, Node, and workerd), `POST
-   /app/installations/{id}/access_tokens`, cached until five minutes before `expires_at`.
+1. **Transport split.** `Transport` (`src/github/transport.ts`) turns one request (`method`,
+   `path`, JSON `body`) into one response `{ status, headers, body }`: the status, the lowercased
+   headers, and the raw body text, so `retry-after` and the quota headers survive and a non-JSON
+   error page has somewhere to go. `makeGitHub(transport)` holds every path, request body, and
+   response mapping (`treeEntry`, `pullRequest`, the error `message`) once, for both fronts.
+   `ghTransport(run)` (`gh.ts`) is the CLI's front and the only module that spawns a process;
+   `fetchTransport({ token, ... })` (`fetch.ts`) uses `fetch` alone, with `token` an
+   `Effect<string>` so the caller decides how it is minted. The server never imports `gh.ts`.
+2. **Installation token provider.** `installationToken({ appId, privateKey, installationId })`
+   (`installation-token.ts`): an RS256 JWT signed with WebCrypto (`crypto.subtle`, available on
+   Bun, Node, and workerd), `POST /app/installations/{id}/access_tokens`, cached until five
+   minutes before `expires_at`. The mint is one more `fetchTransport` request and takes the same
+   options (`onRateLimit`, `sleep`, `maxRetryDelaySeconds`, `userAgent`), so its response
+   reports quota and retries like every other; `installationTokenTransport(options)` is the
+   two wired together, sharing one `onRateLimit`. The quota the mint reports is the App's own
+   bucket (JWT-authenticated requests, 5,000 per hour per App), not the installation's, and the
+   headers do not reliably tell the two apart (GitHub documents no `x-ratelimit-resource` value
+   specific to App-authenticated requests, so do not build a discriminator on that header); a
+   job runner that keys a floor on the installation quota passes `installationToken` its own
+   `onRateLimit` (or ignores the one sample per installation per token lifetime the mint
+   contributes) rather than using `installationTokenTransport`.
    GitHub hands out the App private key as PKCS#1 (`BEGIN RSA PRIVATE KEY`) and
    `crypto.subtle.importKey` takes RSA keys as `pkcs8` only, so the key is converted once
    (`openssl pkcs8 -topk8 -nocrypt`) before it is stored as the secret; the signer refuses a
    PKCS#1 header with a message that names the command.
-3. **Rate-limit handling** in `fetchTransport` as described above. `GitHubError` gains
-   `retryAfter: number | null`. The one other interface change is `setRef`'s options gaining
+3. **Rate-limit handling** in `fetchTransport` as described above. `GitHubError` gains an
+   optional `retryAfter` (seconds, set only when the API advertised a wait; D26 chose the
+   optional field over `number | null`). The one other interface change is `setRef`'s options gaining
    `force: boolean` (default `true`, today's behavior) so the D25 `direct-commit` writer can ask
    for a fast-forward-only update; a `422` from GitHub then surfaces as a `GitHubError` with
    that status, which the writer treats as "the branch moved".
-4. **Truncated trees.** `repositorySnapshot` refuses a tree the API truncates (about 100,000
-   entries). The CLI never met one; a customer might. M2 adds a fallback that lists the root and
-   the directories rulecheck reads (`.cursor/rules`, `.claude`, `.agents/skills`, …)
-   non-recursively and marks the report `partial` (nested `AGENTS.md` and `missing-path`
-   verification are then incomplete and say so). Until then such a repository is a `scan_error`
-   row (job table above), not a failed run: snapshot assembly is per repository, so one
-   unreadable repository never aborts the others.
+4. **Truncated trees.** When the API truncates the recursive listing (about 100,000 entries),
+   `repositorySnapshot` lists the tree one level and asks for each subtree recursively in turn,
+   skipping the directories the scan never descends into (`isIgnoredDirectory`), so the snapshot
+   is complete and the report needs no `partial` word (D26 rejected the shallow fallback: a
+   partial tree makes `missing-path` verification guess). More than `MAX_TREE_LISTINGS` (200)
+   calls is a `GitHubError`, so one repository cannot spend a run's quota; such a repository is a
+   `scan_error` row (job table above), not a failed run: snapshot assembly is per repository, so
+   one unreadable repository never aborts the others.
 
 `src/main.ts` (`BunServices`, `BunRuntime`) is the CLI's entry and is not reused; the App has its
 own entry that provides `Path`, the snapshot `FileSystem` per job, and `GitHub` over
@@ -540,7 +555,7 @@ the unit is a week because the milestones gate on each other, not because any on
 | M0: design accepted | This document merged with every question in section 10 answered; D25 recorded; **Accounts**: the dedicated Cloudflare account created (billing set up, Alchemy state store bootstrapped) and the App registration and private repository placed under the personal GitHub account; **HeroUI Pro** license confirmed to cover use in the private repository (and the marketing site, if it shares it); the App registered on GitHub (name, permissions, webhook URL to a stub), one registration per stage; the template repository `lightsound/agent-rules-template` published | 0.5 |
 | M1: install and read-only dashboard | The transport split and `fetchTransport` land in rulecheck (with `fake-github.ts` coverage); the private App repository exists and depends on rulecheck at a sha; the Alchemy stack deploys `prod`, `dev_*`, and `pr-*` stages from GitHub Actions; install → `scan-installation` → Overview page served from `repo_reports`; `push` rescans one repository; the `fullRescan` schedule. Dogfood on `lightsound`, personal installation included | 3 |
 | M2: sync and subscriptions | Pack source registration; `sync-target` on pack push, `Sync now`, dry run; runs and audit; `src/sync/subscribe.ts` in rulecheck with `fake-github.ts` coverage and its decision entry; the `subscriptionChanges` and `fullRescan` settings; Pack & subscriptions page with the subscriptions matrix writing D25 changes through it; Repository page; `html.ts` sections exported and rendered by HeroUI components in TanStack Start routes; the D23 workflow removed from `agent-rules` once the App has opened the next real pull requests (replacement, not coexistence) | 3 |
-| M3: organizations and billing | Product name decided and the custom domain added to the stack; pricing decided (section 8), plan column and repository gate live; Stripe checkout and portal; installation switcher for users in several organizations; uninstall lifecycle; the truncated-tree fallback; status page and the alerts in section 6 | 3 |
+| M3: organizations and billing | Product name decided and the custom domain added to the stack; pricing decided (section 8), plan column and repository gate live; Stripe checkout and portal; installation switcher for users in several organizations; uninstall lifecycle; status page and the alerts in section 6 | 3 |
 
 Total about ten weeks to a chargeable product. M2 carries the product risk (does a team accept
 two pull requests per subscription, or does it switch to `direct-commit`); M3 the commercial
