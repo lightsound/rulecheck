@@ -146,17 +146,30 @@ export function withChanges(
 
 /** A `FileSystem` over a snapshot. Only the read operations the scan uses are implemented. */
 export function snapshotFileSystem(snapshot: Snapshot): FileSystem.FileSystem {
-  const directories = new Set<string>(["/"]);
-  for (const path of snapshot.keys()) {
-    let dir = path;
+  // Every directory implied by the paths, with its direct children. Built once so `stat`,
+  // `exists`, and `readDirectory` are lookups: `walk` calls `readDirectory` for every directory
+  // of the tree, and a scan of a large repository (tens of thousands of directories) must stay
+  // linear in the number of entries, not quadratic.
+  const children = new Map<string, Set<string>>([["/", new Set()]]);
+  const register = (child: string) => {
+    let current = child;
     for (;;) {
-      const slash = dir.lastIndexOf("/");
-      if (slash <= 0) break;
-      dir = dir.slice(0, slash);
-      if (directories.has(dir)) break;
-      directories.add(dir);
+      const slash = current.lastIndexOf("/");
+      const parent = slash <= 0 ? "/" : current.slice(0, slash);
+      const name = current.slice(slash + 1);
+      let names = children.get(parent);
+      const known = names !== undefined;
+      if (!known) {
+        names = new Set();
+        children.set(parent, names);
+      }
+      names?.add(name);
+      if (known || parent === "/") return;
+      current = parent;
     }
-  }
+  };
+  for (const path of snapshot.keys()) register(path);
+  const directories = children;
 
   const normalize = (path: string) => (path.length > 1 ? path.replace(/\/+$/, "") : path);
   const notFound = (method: string, path: string) =>
@@ -178,16 +191,8 @@ export function snapshotFileSystem(snapshot: Snapshot): FileSystem.FileSystem {
     },
     realPath: (path) => stat(path).pipe(Effect.map(() => normalize(path))),
     readDirectory: (path) => {
-      const target = normalize(path);
-      if (!directories.has(target)) return Effect.fail(notFound("readDirectory", path));
-      const prefix = target === "/" ? "/" : `${target}/`;
-      const names = new Set<string>();
-      for (const candidate of [...snapshot.keys(), ...directories]) {
-        if (candidate === target || !candidate.startsWith(prefix)) continue;
-        const rest = candidate.slice(prefix.length);
-        const name = rest.split("/")[0];
-        if (name) names.add(name);
-      }
+      const names = directories.get(normalize(path));
+      if (names === undefined) return Effect.fail(notFound("readDirectory", path));
       return Effect.succeed([...names].sort());
     },
     readFile: (path) => {
