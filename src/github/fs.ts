@@ -55,7 +55,10 @@ export const repositorySnapshot = (
     files.set(`${mount}/.git/HEAD`, textEntry(`${sha}\n`));
     for (const entry of entries) {
       if (entry.type !== "blob") continue;
-      files.set(`${mount}/${entry.path}`, lazyBlob(github, repo, entry.sha, `${mount}/${entry.path}`));
+      files.set(
+        `${mount}/${entry.path}`,
+        lazyBlob(github, repo, entry.sha, `${mount}/${entry.path}`),
+      );
     }
     return files;
   });
