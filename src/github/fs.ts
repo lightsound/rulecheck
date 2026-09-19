@@ -55,24 +55,52 @@ export const repositorySnapshot = (
     files.set(`${mount}/.git/HEAD`, textEntry(`${sha}\n`));
     for (const entry of entries) {
       if (entry.type !== "blob") continue;
-      // Both scan passes and the plan read the same few files; fetch each blob once.
-      const read = yield* Effect.cached(
-        github.getBlob(repo, entry.sha).pipe(
-          Effect.mapError((error) =>
-            systemError({
-              _tag: "Unknown",
-              module: "FileSystem",
-              method: "readFile",
-              pathOrDescriptor: `${mount}/${entry.path}`,
-              description: error.message,
-            }),
-          ),
-        ),
+      files.set(
+        `${mount}/${entry.path}`,
+        lazyBlob(github, repo, entry.sha, `${mount}/${entry.path}`),
       );
-      files.set(`${mount}/${entry.path}`, { size: 0, read });
     }
     return files;
   });
+
+/**
+ * A blob that is fetched on first read and remembered: both scan passes and the plan read the
+ * same few files, so each blob is fetched once. The memo is created when a read is asked for,
+ * not when the snapshot is built: a snapshot lists every blob of the tree (tens of thousands in
+ * a large repository) and the scan reads a handful, so per-entry state must stay a closure and
+ * a string, not a cached Effect with its own fiber-side state.
+ */
+function lazyBlob(
+  github: GitHubService,
+  repo: RepositoryRef,
+  blobSha: string,
+  path: string,
+): SnapshotEntry {
+  let memo: Effect.Effect<Uint8Array, PlatformError> | null = null;
+  return {
+    size: 0,
+    read: Effect.suspend(() => {
+      if (memo === null) {
+        memo = Effect.runSync(
+          Effect.cached(
+            github.getBlob(repo, blobSha).pipe(
+              Effect.mapError((error) =>
+                systemError({
+                  _tag: "Unknown",
+                  module: "FileSystem",
+                  method: "readFile",
+                  pathOrDescriptor: path,
+                  description: error.message,
+                }),
+              ),
+            ),
+          ),
+        );
+      }
+      return memo;
+    }),
+  };
+}
 
 /**
  * Every blob below a tree. One recursive call answers for almost every repository; when the API
