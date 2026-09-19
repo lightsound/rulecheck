@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { BunServices } from "@effect/platform-bun";
-import { Effect, FileSystem, Layer } from "effect";
+import { Effect, FileSystem, Layer, Path } from "effect";
 import { hashBlockBody } from "../src/domain/block.ts";
 import { type GitHub, GitHubError, parseRepositorySpec } from "../src/github/client.ts";
 import {
@@ -199,6 +199,31 @@ describe("snapshotFileSystem", () => {
     expect(failure.reason._tag).toBe("NotFound");
     const dirFailure = await runFs(fs.readDirectory("/elsewhere").pipe(Effect.flip));
     expect(dirFailure.reason._tag).toBe("NotFound");
+  });
+
+  test("a scan of a large tree stays linear: 20,000 directories walk in well under a second", async () => {
+    // DefinitelyTyped-sized: ~14,000 directories, ~70,000 blobs. Before the per-directory index,
+    // every `readDirectory` scanned every key, and `walk` (one call per directory) took minutes of
+    // CPU; a Worker invocation has about 30 seconds.
+    const big = new Map<string, ReturnType<typeof textEntry>>([
+      ["/github.com/acme/big/.git/HEAD", textEntry("abc\n")],
+      ["/github.com/acme/big/AGENTS.md", textEntry("# big\n")],
+    ]);
+    for (let i = 0; i < 20_000; i++) {
+      big.set(`/github.com/acme/big/types/pkg${i}/index.d.ts`, textEntry(""));
+      big.set(`/github.com/acme/big/types/pkg${i}/tests.ts`, textEntry(""));
+    }
+    const started = performance.now();
+    const report = await Effect.runPromise(
+      scan("/", { home: null }).pipe(
+        Effect.provide(
+          Layer.merge(Layer.succeed(FileSystem.FileSystem, snapshotFileSystem(big)), Path.layer),
+        ),
+      ),
+    );
+    const elapsed = performance.now() - started;
+    expect(report.repos.map((r) => r.name)).toEqual(["acme/big"]);
+    expect(elapsed).toBeLessThan(5_000);
   });
 
   test("withChanges overlays writes and deletions", async () => {
