@@ -278,11 +278,15 @@ webhook or a retried message does no second write:
 | `scan-repository` | `push` to a default branch (subscriber or not), `repository` events | `(installation, repo, head sha)` | Same pipeline over one repository, same `scan_error` handling; the installation's duplicates are recomputed from the stored `contentHash` values without refetching the others (a repository without a stored report contributes nothing until it has one) | 6–15 |
 | `sync-target` | `push` to the pack repository (one message per `subscriptions.json` target), `Sync now`, daily dry run | `(installation, repo, pack, pack sha, dry-run flag)` | `syncTarget` unchanged: measure, plan, measure, write. `writeLock` is the per-installation serializer below | reads as `scan-repository`, plus for a write: `getRef`, `getCommit`, `createTree`, `createCommit`, `setRef`, `listOpenPullRequests`, `createPullRequest` or `updatePullRequest` |
 
-A **run** groups the messages one trigger produced (one `sync` run per pack push, one `scan`
-run per rescan) and is what the run page and the audit log show; a message writes its row into
-its run when it finishes. The D14 fan-out therefore lives in the queue, not in `all.ts`, but
-each message still calls `syncTarget`, so the per-target checks stay in one place. `all.ts`
-keeps serving the CLI.
+A **run** is what the run page and the audit log show (one `sync` run per pack push, one `scan`
+run per rescan). For scans, a run is one Cloudflare Workflow instance (`id = run id`, D27):
+its first step plans the run (rows, `expected_rows`), one step per repository measures that
+repository (two attempts, then `scan_error`), and the last step closes the run from its rows,
+so the instance's end is the run's end and a repository that exceeds a platform limit fails
+only its own step. The D14 fan-out therefore lives in the orchestrator, not in `all.ts`, but
+each target still calls `syncTarget` when M2 moves sync runs onto the same shape, so the
+per-target checks stay in one place. `all.ts` keeps serving the CLI. The queue of the job table
+remains the entry point for webhook-triggered work and for M2's `sync-target`.
 
 **Write serialization (D14).** Reads run in parallel; content-creating requests to one
 installation pass through one lock. On Workers that lock is a Durable Object per installation

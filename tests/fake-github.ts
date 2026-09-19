@@ -18,6 +18,8 @@ import type { GhResult, GhRunner } from "../src/github/gh.ts";
 
 export interface FakeRepoInput {
   readonly defaultBranch?: string;
+  /** Reported by `getRepository` as the API's `size` (kilobytes); default 0. */
+  readonly size?: number;
   readonly files: Readonly<Record<string, string>>;
 }
 
@@ -31,6 +33,7 @@ interface StoredPull extends Omit<PullRequest, "title" | "body"> {
 
 interface StoredRepo {
   defaultBranch: string;
+  size: number;
   refs: Map<string, string>;
   pulls: StoredPull[];
 }
@@ -106,6 +109,7 @@ export function fakeGitHub(
     const defaultBranch = repo.defaultBranch ?? "main";
     repos.set(name, {
       defaultBranch,
+      size: repo.size ?? 0,
       refs: new Map([[`heads/${defaultBranch}`, commit]]),
       pulls: [],
     });
@@ -163,7 +167,9 @@ export function fakeGitHub(
 
   const plain: GitHubService = {
     getRepository: (repo) =>
-      repoOf("getRepository", repo).pipe(Effect.map((r) => ({ defaultBranch: r.defaultBranch }))),
+      repoOf("getRepository", repo).pipe(
+        Effect.map((r) => ({ defaultBranch: r.defaultBranch, size: r.size })),
+      ),
     getRef: (repo, name) =>
       repoOf("getRef", repo).pipe(Effect.map((r) => r.refs.get(name) ?? null)),
     getCommit: (repo, sha) =>
@@ -400,7 +406,7 @@ export function fakeRest(
     if (rest === "" && method === "GET")
       return service
         .getRepository(repo)
-        .pipe(Effect.map((r) => ok({ default_branch: r.defaultBranch })));
+        .pipe(Effect.map((r) => ok({ default_branch: r.defaultBranch, size: r.size })));
     if (rest.startsWith("git/ref/") && method === "GET")
       return service
         .getRef(repo, rest.slice("git/ref/".length))

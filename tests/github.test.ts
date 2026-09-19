@@ -783,7 +783,7 @@ describe("makeGitHub over ghTransport", () => {
     const gh = makeGitHub(ghTransport(run));
     const runP = <A, E>(e: Effect.Effect<A, E>) => Effect.runPromise(e);
 
-    expect(await runP(gh.getRepository(repo))).toEqual({ defaultBranch: "trunk" });
+    expect(await runP(gh.getRepository(repo))).toEqual({ defaultBranch: "trunk", size: 0 });
     expect(await runP(gh.getRef(repo, "heads/missing"))).toBeNull();
     expect(await runP(gh.getRef(repo, "heads/main"))).toBe("abc");
     expect(new TextDecoder().decode(await runP(gh.getBlob(repo, "b1")))).toBe("hé");

@@ -1002,6 +1002,36 @@ be as different as a process and a socket. For truncation, the constraint is "a 
 will not give in one call"; it dissolves because Git Data trees are addressable by sha, so a
 listing the API refuses whole can always be asked for in parts.
 
+## 2026-09-19 D27: A scan run is one Workflow instance; a repository is one step
+
+RuleFleet's first dogfood ([app-design.md](app-design.md) §4 Jobs) measured an installation of
+98 repositories as one queue message and then as 98 messages counted against an `expected_rows`
+column. Both shapes broke on the same repository: a fork of DefinitelyTyped (14,000 directories,
+71,000 blobs) hit the Worker CPU limit, then the memory limit, and a queue consumer that is
+killed by the platform leaves no row and no way to close the run; the batch it shared died with
+it, and the run stayed open for nine hours with 88 of 98 rows.
+
+**Decision.** A scan run is one Cloudflare Workflow instance whose id is the run id. The first
+step plans the run (writes the `runs` row and the repository list), one `step.do` per repository
+measures it with `retries.limit: 1` (a deterministic failure such as a platform kill is
+`scan_error` on the second attempt, recorded by a follow-up step), rate-limit waits are
+`step.sleep`, and the last step closes the run from its `run_rows`. The instance's end is the
+run's end. Queues stay the entry point (webhook → instance) and M2's `sync-target` decides its
+own shape then. `getRepository` returns the API's `size` so a repository far beyond what a step
+can hold is refused before its tree is fetched.
+
+| Decision | Chosen | Alternatives considered | Settled in round |
+| --- | --- | --- | --- |
+| Run orchestration | One Workflow instance per run, one step per repository; the platform records a killed step as a failure and retries it, and the instance outlives any single invocation | one queue message per run (killed whole); one message per repository counted against `expected_rows` (a killed message leaves no row; the run never closes; the batch dies together); a Durable Object per run counting rows (a second scheduler next to the queue) | 2 |
+| Retry budget for a repository | two attempts, then `scan_error` with the platform's reason | more attempts (a deterministic kill repeats; a rate limit is a `step.sleep`, not a retry) | 1 |
+| Very large repositories | `repositorySnapshot` stays lazy (an entry is a sha and a closure), `readDirectory` is indexed, and `getRepository.size` gates a repository the step cannot hold; no separate lane | a shallow listing for big trees (loses nested `AGENTS.md`); filtering the tree to the paths the scan reads (changes what `walk` sees) | 2 |
+| Where the fan-out lives | in the orchestrator; `all.ts` keeps serving the CLI; every sync target will still call `syncTarget` | fan-out inside `syncAll` on the server (a 200-target run inside one invocation) | 1 |
+
+**Structural check.** The constraint is "a repository that the platform kills must not take the
+run or its neighbours with it". It dissolves only if the unit the platform kills is the unit
+the run counts, and Workflows make that unit a step: killed, retried, and recorded by the
+engine rather than by the code that was killed.
+
 ## Recording rule
 
 Add an entry here whenever a decision changes what rulecheck writes, what it reports, or which

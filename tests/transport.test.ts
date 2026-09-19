@@ -76,7 +76,7 @@ describe("fetchTransport", () => {
         userAgent: "rulecheck-test",
       }),
     );
-    expect(await runP(github.getRepository(repo))).toEqual({ defaultBranch: "trunk" });
+    expect(await runP(github.getRepository(repo))).toEqual({ defaultBranch: "trunk", size: 0 });
     expect(seen[0]?.url).toBe("https://ghe.example/api/v3/repos/acme/r");
     const headers = headersOf(seen[0]);
     expect(headers.authorization).toBe("Bearer tok");
@@ -158,7 +158,7 @@ describe("fetchTransport", () => {
       "GET repos/acme/r/git/ref/heads/main": [limited, limited, limited],
     });
     const github = makeGitHub(fetchTransport({ token: Effect.succeed("t"), fetch, sleep }));
-    expect(await runP(github.getRepository(repo))).toEqual({ defaultBranch: "main" });
+    expect(await runP(github.getRepository(repo))).toEqual({ defaultBranch: "main", size: 0 });
     expect(slept).toEqual([7]);
     expect(seen).toHaveLength(2);
 
@@ -191,7 +191,7 @@ describe("fetchTransport", () => {
     const github = makeGitHub(
       fetchTransport({ token: Effect.succeed("t"), fetch, sleep, maxRetryDelaySeconds: 120 }),
     );
-    expect(await runP(github.getRepository(repo))).toEqual({ defaultBranch: "main" });
+    expect(await runP(github.getRepository(repo))).toEqual({ defaultBranch: "main", size: 0 });
     expect(slept).toEqual([60]);
     const slow = await flip(github.getRepository({ owner: "acme", name: "slow" }));
     expect(slow).toMatchObject({ status: 403, retryAfter: 300 });
@@ -488,7 +488,7 @@ describe("installationToken", () => {
     const github = makeGitHub(
       installationTokenTransport({ appId: 1, privateKey: pem, installationId: 2, fetch }),
     );
-    expect(await runP(github.getRepository(repo))).toEqual({ defaultBranch: "main" });
+    expect(await runP(github.getRepository(repo))).toEqual({ defaultBranch: "main", size: 0 });
     expect(authorizations[0]).toMatch(/^Bearer eyJ/);
     expect(authorizations[1]).toBe("Bearer ghs_installation");
   });
