@@ -1138,6 +1138,43 @@ like code". It dissolves only where those properties already exist, and the pack
 has all of them because D25 kept the file there; an editor in the App would have to carry each
 one across. Linking to GitHub's editor keeps the properties where they are and costs two URLs.
 
+## 2026-09-20 D31: A sync run is one Workflow instance, `load-source` first, one step per target
+
+D27 made a scan run one Workflow instance and left the shape of a sync run open. M2a A2 built it
+(`lightsound/rulefleet` `src/jobs/sync.ts`, `SyncRunWorkflow`), and the shape is the one
+`docs/m2-kickoff.md` §8 decision 4 chose, with two details the kickoff did not fix.
+
+**Decision.** One Workflow instance per sync run, `id = runId`, `packs: "all" | string[]` the
+only shape parameter. Steps in order: **`load-source`** reads the installation's `pack_sources`
+row, resolves its branch head with one `getRef`, fills the `packs` cache keyed by (source,
+commit) unless rows exist for that sha (an unchanged source costs `getRepository` + `getRef`),
+classifies every stored `RepoReport` against every loaded pack into `status_snapshots`, writes
+the `runs` row (`kind = sync`, `dry_run`), and plans one target per `subscriptions.json` entry
+pack by pack in file order (D14); an entry naming a repository the installation does not have
+or an archived one is written at once as a `refused` row with status `-` and consumes no step.
+**`target <repo> <pack>`**, one step per remaining target, three in flight, `retries.limit: 2`:
+the App's size gate, then `syncTarget` unchanged, then the D14 row (`planned` with `plus` /
+`minus` from `diffStats`, `nothing-to-do`, `up-to-date` with the pull request URL, `refused`
+with the measured status, or `failed` after the retries). **`finish`** closes the run from its
+rows. A `load-source` failure closes the run with `runs.error` and zero rows.
+
+The two details: (1) a `refused` row for a subscriber the installation does not have keys on a
+stable negative hash of the name, since there is no repository row to key on, so the
+(run, repository, pack) primary key holds and a page can tell the row is not a real repository;
+(2) the same `snapshotRows` function writes `status_snapshots` from the scan step for the
+repository it measured (A5), so history does not wait for a sync run.
+
+| Decision | Chosen | Alternatives considered | Settled in round |
+| --- | --- | --- | --- |
+| Execution unit of a sync run | one Workflow instance per run, one step per target, `load-source` first, `finish` last | one queue message per target (the shape D27 replaced); one instance per target with a parent; `syncAll` in one invocation; `ScanRunWorkflow` with a `kind` param | 2 (kickoff decision 4) |
+| Key of a `refused` row without a repository row | negative FNV-1a hash of the subscriber name, unique per (run, name, pack) | a nullable `repository_id` (breaks the primary key); skipping the row (the CLI prints it, and the table must equal the CLI's); a `subscriber` text column (schema change for one row kind) | 2 |
+| Where the token scope is decided | the Workflow class mints the read-only scope (`contents: read`, `pull_requests: read`) per instance; `runSync` receives a `GitHubService` and knows nothing of tokens | mint per step (M2b's live write does this for its per-target write token; a dry run has one scope) | 1 |
+
+**Structural check.** D27's principle holds unchanged: the unit the platform kills must be the
+unit the run counts, and a target is that unit. The dry-run boundary is a type (`dryRun: true`
+as a literal in M2a), so no write operation is reachable from the App until M2b widens it and
+adds the per-target write token; that is where the second half of this entry will be written.
+
 ## Recording rule
 
 Add an entry here whenever a decision changes what rulecheck writes, what it reports, or which
