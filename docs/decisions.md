@@ -1032,6 +1032,20 @@ run or its neighbours with it". It dissolves only if the unit the platform kills
 the run counts, and Workflows make that unit a step: killed, retried, and recorded by the
 engine rather than by the code that was killed.
 
+## 2026-09-20 D28: The dashboard frame may hydrate client components; rulecheck's sections stay static
+
+RuleFleet's Overview (T5) shipped as static HTML with no script: the owner saw it on a phone and
+the header did not fit, and the components that would fix it in HeroUI (a collapsing navigation
+bar, a dropdown installation switcher, a confirmed `Rescan`, a theme toggle) need a client.
+Meta refresh for the live banner also reloads the whole page every few seconds.
+
+**Decision.** The App frame (header, banners, controls, footer) may be hydrated with TanStack
+Start client components, one island per control that needs script; the page renders complete
+without them. rulecheck's sections stay the static HTML `html.ts` produces, never hydrated or
+re-rendered, so every number on the page is still the CLI's. The live banner fetches the run's
+progress from a JSON route and reloads the sections once when the run finishes. T5 is done in
+its static form; the change lands as T5b. Owner's decision, 2026-09-20.
+
 ## Recording rule
 
 Add an entry here whenever a decision changes what rulecheck writes, what it reports, or which
