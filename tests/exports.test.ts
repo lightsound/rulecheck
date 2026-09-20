@@ -24,6 +24,7 @@ describe("package.json exports", () => {
       "./report/render": "./src/report/render.ts",
       "./report/sync": "./src/report/sync.ts",
       "./github/*": "./src/github/*.ts",
+      "./package.json": "./package.json",
     });
   });
 
@@ -41,4 +42,9 @@ describe("package.json exports", () => {
     );
     expect(Layer.isLayer(layer)).toBe(true);
   });
+});
+
+test("the package manifest is importable, so a host can print rulecheck's version", async () => {
+  const manifest = (await import("rulecheck/package.json")) as { version: string };
+  expect(manifest.version).toMatch(/^\d+\.\d+\.\d+/);
 });

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { BunServices } from "@effect/platform-bun";
-import { Effect, FileSystem, Layer } from "effect";
+import { Effect, FileSystem, Layer, Path } from "effect";
 import { hashBlockBody } from "../src/domain/block.ts";
 import { type GitHub, GitHubError, parseRepositorySpec } from "../src/github/client.ts";
 import {
@@ -199,6 +199,31 @@ describe("snapshotFileSystem", () => {
     expect(failure.reason._tag).toBe("NotFound");
     const dirFailure = await runFs(fs.readDirectory("/elsewhere").pipe(Effect.flip));
     expect(dirFailure.reason._tag).toBe("NotFound");
+  });
+
+  test("a scan of a large tree stays linear: 20,000 directories walk in well under a second", async () => {
+    // DefinitelyTyped-sized: ~14,000 directories, ~70,000 blobs. Before the per-directory index,
+    // every `readDirectory` scanned every key, and `walk` (one call per directory) took minutes of
+    // CPU; a Worker invocation has about 30 seconds.
+    const big = new Map<string, ReturnType<typeof textEntry>>([
+      ["/github.com/acme/big/.git/HEAD", textEntry("abc\n")],
+      ["/github.com/acme/big/AGENTS.md", textEntry("# big\n")],
+    ]);
+    for (let i = 0; i < 20_000; i++) {
+      big.set(`/github.com/acme/big/types/pkg${i}/index.d.ts`, textEntry(""));
+      big.set(`/github.com/acme/big/types/pkg${i}/tests.ts`, textEntry(""));
+    }
+    const started = performance.now();
+    const report = await Effect.runPromise(
+      scan("/", { home: null }).pipe(
+        Effect.provide(
+          Layer.merge(Layer.succeed(FileSystem.FileSystem, snapshotFileSystem(big)), Path.layer),
+        ),
+      ),
+    );
+    const elapsed = performance.now() - started;
+    expect(report.repos.map((r) => r.name)).toEqual(["acme/big"]);
+    expect(elapsed).toBeLessThan(5_000);
   });
 
   test("withChanges overlays writes and deletions", async () => {
@@ -758,7 +783,7 @@ describe("makeGitHub over ghTransport", () => {
     const gh = makeGitHub(ghTransport(run));
     const runP = <A, E>(e: Effect.Effect<A, E>) => Effect.runPromise(e);
 
-    expect(await runP(gh.getRepository(repo))).toEqual({ defaultBranch: "trunk" });
+    expect(await runP(gh.getRepository(repo))).toEqual({ defaultBranch: "trunk", size: 0 });
     expect(await runP(gh.getRef(repo, "heads/missing"))).toBeNull();
     expect(await runP(gh.getRef(repo, "heads/main"))).toBe("abc");
     expect(new TextDecoder().decode(await runP(gh.getBlob(repo, "b1")))).toBe("hé");
@@ -814,5 +839,65 @@ describe("makeGitHub over ghTransport", () => {
     const failure = await Effect.runPromise(gh.getRepository(repo).pipe(Effect.flip));
     expect(failure.message).toContain("install the GitHub CLI");
     expect(failure.operation).toBe("getRepository");
+  });
+});
+
+describe("scan over a snapshot reads manifests only when a script is referenced", () => {
+  const files = (agents: string, manifests: number) => {
+    const out: Record<string, string> = { "AGENTS.md": agents, ".gitkeep": "" };
+    for (let i = 0; i < manifests; i++)
+      out[`types/p${i}/package.json`] = `{"scripts":{"s${i}":"x"}}`;
+    return out;
+  };
+  const scanIt = async (fake: ReturnType<typeof fakeGitHub>) => {
+    const repo = { owner: "acme", name: "many" };
+    let blobReads = 0;
+    const counting = {
+      ...fake.service,
+      getBlob: (r: typeof repo, sha: string) =>
+        Effect.suspend(() => {
+          blobReads++;
+          return fake.service.getBlob(r, sha);
+        }),
+    };
+    const sha = await Effect.runPromise(counting.getRef(repo, "heads/main"));
+    const snapshot = await Effect.runPromise(repositorySnapshot(counting, repo, sha ?? ""));
+    const report = await Effect.runPromise(
+      scan("/", { home: null }).pipe(
+        Effect.provide(
+          Layer.merge(
+            Layer.succeed(FileSystem.FileSystem, snapshotFileSystem(snapshot)),
+            Path.layer,
+          ),
+        ),
+      ),
+    );
+    return { report, blobReads: () => blobReads };
+  };
+
+  test("no script reference: no package.json is fetched", async () => {
+    const fake = fakeGitHub({
+      "acme/many": { files: files("# Many\n\nNo commands here.\n", 300) },
+    });
+    const { report, blobReads } = await scanIt(fake);
+    expect(report.repos[0]?.findings).toEqual([]);
+    // Only the instruction file itself was read.
+    expect(blobReads()).toBe(1);
+  });
+
+  test("a script reference reads the manifests up to the cap and finds the unknown one", async () => {
+    const fake = fakeGitHub({
+      "acme/many": { files: files("Run `bun run s1` and `bun run nope`.\n", 5) },
+    });
+    const { report, blobReads } = await scanIt(fake);
+    expect(report.repos[0]?.findings.map((f) => f.value)).toEqual(["nope"]);
+    expect(blobReads()).toBe(1 + 5);
+  });
+
+  test("above the cap the script check is skipped rather than guessed", async () => {
+    const fake = fakeGitHub({ "acme/many": { files: files("Run `bun run nope`.\n", 300) } });
+    const { report, blobReads } = await scanIt(fake);
+    expect(report.repos[0]?.findings).toEqual([]);
+    expect(blobReads()).toBe(1);
   });
 });

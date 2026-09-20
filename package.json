@@ -16,7 +16,8 @@
     "./report/labels": "./src/report/labels.ts",
     "./report/render": "./src/report/render.ts",
     "./report/sync": "./src/report/sync.ts",
-    "./github/*": "./src/github/*.ts"
+    "./github/*": "./src/github/*.ts",
+    "./package.json": "./package.json"
   },
   "scripts": {
     "dev": "bun run src/main.ts",

@@ -61,9 +61,10 @@ export class GitHubError extends Data.TaggedError("GitHubError")<{
 }> {}
 
 export interface GitHubService {
+  /** `size` is the API's repository size in kilobytes (0 when the API omits it). */
   readonly getRepository: (
     repo: RepositoryRef,
-  ) => Effect.Effect<{ readonly defaultBranch: string }, GitHubError>;
+  ) => Effect.Effect<{ readonly defaultBranch: string; readonly size: number }, GitHubError>;
   /** Sha of `refs/<name>` (`heads/main`), or null when the ref does not exist. */
   readonly getRef: (repo: RepositoryRef, name: string) => Effect.Effect<string | null, GitHubError>;
   readonly getCommit: (

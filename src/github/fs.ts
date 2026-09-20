@@ -55,24 +55,52 @@ export const repositorySnapshot = (
     files.set(`${mount}/.git/HEAD`, textEntry(`${sha}\n`));
     for (const entry of entries) {
       if (entry.type !== "blob") continue;
-      // Both scan passes and the plan read the same few files; fetch each blob once.
-      const read = yield* Effect.cached(
-        github.getBlob(repo, entry.sha).pipe(
-          Effect.mapError((error) =>
-            systemError({
-              _tag: "Unknown",
-              module: "FileSystem",
-              method: "readFile",
-              pathOrDescriptor: `${mount}/${entry.path}`,
-              description: error.message,
-            }),
-          ),
-        ),
+      files.set(
+        `${mount}/${entry.path}`,
+        lazyBlob(github, repo, entry.sha, `${mount}/${entry.path}`),
       );
-      files.set(`${mount}/${entry.path}`, { size: 0, read });
     }
     return files;
   });
+
+/**
+ * A blob that is fetched on first read and remembered: both scan passes and the plan read the
+ * same few files, so each blob is fetched once. The memo is created when a read is asked for,
+ * not when the snapshot is built: a snapshot lists every blob of the tree (tens of thousands in
+ * a large repository) and the scan reads a handful, so per-entry state must stay a closure and
+ * a string, not a cached Effect with its own fiber-side state.
+ */
+function lazyBlob(
+  github: GitHubService,
+  repo: RepositoryRef,
+  blobSha: string,
+  path: string,
+): SnapshotEntry {
+  let memo: Effect.Effect<Uint8Array, PlatformError> | null = null;
+  return {
+    size: 0,
+    read: Effect.suspend(() => {
+      if (memo === null) {
+        memo = Effect.runSync(
+          Effect.cached(
+            github.getBlob(repo, blobSha).pipe(
+              Effect.mapError((error) =>
+                systemError({
+                  _tag: "Unknown",
+                  module: "FileSystem",
+                  method: "readFile",
+                  pathOrDescriptor: path,
+                  description: error.message,
+                }),
+              ),
+            ),
+          ),
+        );
+      }
+      return memo;
+    }),
+  };
+}
 
 /**
  * Every blob below a tree. One recursive call answers for almost every repository; when the API
@@ -146,17 +174,30 @@ export function withChanges(
 
 /** A `FileSystem` over a snapshot. Only the read operations the scan uses are implemented. */
 export function snapshotFileSystem(snapshot: Snapshot): FileSystem.FileSystem {
-  const directories = new Set<string>(["/"]);
-  for (const path of snapshot.keys()) {
-    let dir = path;
+  // Every directory implied by the paths, with its direct children. Built once so `stat`,
+  // `exists`, and `readDirectory` are lookups: `walk` calls `readDirectory` for every directory
+  // of the tree, and a scan of a large repository (tens of thousands of directories) must stay
+  // linear in the number of entries, not quadratic.
+  const children = new Map<string, Set<string>>([["/", new Set()]]);
+  const register = (child: string) => {
+    let current = child;
     for (;;) {
-      const slash = dir.lastIndexOf("/");
-      if (slash <= 0) break;
-      dir = dir.slice(0, slash);
-      if (directories.has(dir)) break;
-      directories.add(dir);
+      const slash = current.lastIndexOf("/");
+      const parent = slash <= 0 ? "/" : current.slice(0, slash);
+      const name = current.slice(slash + 1);
+      let names = children.get(parent);
+      const known = names !== undefined;
+      if (!known) {
+        names = new Set();
+        children.set(parent, names);
+      }
+      names?.add(name);
+      if (known || parent === "/") return;
+      current = parent;
     }
-  }
+  };
+  for (const path of snapshot.keys()) register(path);
+  const directories = children;
 
   const normalize = (path: string) => (path.length > 1 ? path.replace(/\/+$/, "") : path);
   const notFound = (method: string, path: string) =>
@@ -178,16 +219,8 @@ export function snapshotFileSystem(snapshot: Snapshot): FileSystem.FileSystem {
     },
     realPath: (path) => stat(path).pipe(Effect.map(() => normalize(path))),
     readDirectory: (path) => {
-      const target = normalize(path);
-      if (!directories.has(target)) return Effect.fail(notFound("readDirectory", path));
-      const prefix = target === "/" ? "/" : `${target}/`;
-      const names = new Set<string>();
-      for (const candidate of [...snapshot.keys(), ...directories]) {
-        if (candidate === target || !candidate.startsWith(prefix)) continue;
-        const rest = candidate.slice(prefix.length);
-        const name = rest.split("/")[0];
-        if (name) names.add(name);
-      }
+      const names = directories.get(normalize(path));
+      if (names === undefined) return Effect.fail(notFound("readDirectory", path));
       return Effect.succeed([...names].sort());
     },
     readFile: (path) => {
