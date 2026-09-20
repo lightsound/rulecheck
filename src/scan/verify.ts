@@ -10,11 +10,18 @@ import type { AnalyzedFile } from "./analyze.ts";
  * Scripts are looked up in every package.json in the repo, so monorepo instructions that say
  * `bun run dev` for a workspace package are accepted. Bare `bun <name>` also runs dependency
  * binaries, so it is accepted when `<name>` is a dependency or exists in `node_modules/.bin`.
+ * The manifests are read only when an instruction file references a script at all, and only
+ * up to `MAX_MANIFESTS` of them: on a remote snapshot every read is a network call, and a
+ * repository like DefinitelyTyped holds thousands of package.json files. Above the cap the
+ * script check is skipped (no `unknown-script` finding), since a finding must be certain.
  *
  * A path is reported missing only when its first segment exists (filtering `owner/repo` style text)
  * and the path is not matched by the repository's root `.gitignore` (build output, auth state,
  * generated files that legitimately do not exist in a fresh checkout).
  */
+/** Most package.json files the script check reads; above this the check is skipped. */
+export const MAX_MANIFESTS = 200;
+
 export const verifyReferences = (
   fs: FileSystem.FileSystem,
   path: Path.Path,
@@ -23,22 +30,29 @@ export const verifyReferences = (
   analyzed: ReadonlyArray<AnalyzedFile>,
 ): Effect.Effect<Finding[]> =>
   Effect.gen(function* () {
-    const manifest = yield* collectManifests(fs, packageJsonPaths);
+    const considered = analyzed
+      .filter(
+        ({ file }) => !(file.kind === "cursor-rule" && file.frontmatter?.alwaysApply !== true),
+      )
+      .map(({ file, content }) => ({ file, refs: extractReferences(content) }));
     const hasPackageJson = packageJsonPaths.length > 0;
+    const scriptsReferenced = considered.some(({ refs }) => refs.some((r) => r.kind === "script"));
+    const checkScripts =
+      hasPackageJson && scriptsReferenced && packageJsonPaths.length <= MAX_MANIFESTS;
+    const manifest = checkScripts
+      ? yield* collectManifests(fs, packageJsonPaths)
+      : { scripts: new Set<string>(), dependencies: new Set<string>() };
     const gitignore = yield* loadGitignore(fs, path, repoRoot);
     const binDir = path.join(repoRoot, "node_modules", ".bin");
     const findings: Finding[] = [];
 
-    for (const { file, content } of analyzed) {
-      if (file.kind === "cursor-rule" && file.frontmatter?.alwaysApply !== true) {
-        // Scoped rules often describe files that only exist in a sibling package; skip them.
-        continue;
-      }
+    // Scoped rules often describe files that only exist in a sibling package; they were skipped above.
+    for (const { file, refs } of considered) {
       const fileDir = path.dirname(file.path);
 
-      for (const ref of extractReferences(content)) {
+      for (const ref of refs) {
         if (ref.kind === "script") {
-          if (!hasPackageJson || manifest.scripts.has(ref.value)) continue;
+          if (!checkScripts || manifest.scripts.has(ref.value)) continue;
           if (!ref.explicitRun) {
             if (manifest.dependencies.has(ref.value)) continue;
             if (yield* anyExists(fs, [path.join(binDir, ref.value)])) continue;
