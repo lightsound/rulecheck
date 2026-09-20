@@ -58,7 +58,25 @@ export interface HtmlOptions {
 export const GLOSSARY_URL =
   "https://github.com/lightsound/rulecheck/blob/main/docs/status-model.md";
 
-export function renderHtml(report: ScanReport, options: HtmlOptions): string {
+/**
+ * The pieces of the scan page for a host that supplies its own document (RuleFleet's Overview,
+ * app-design §5): the stylesheet, the header's subtitle, the sections, and the footer line, all
+ * already-escaped HTML. `renderHtml` wraps the same pieces in rulecheck's own document.
+ */
+export interface HtmlParts {
+  readonly css: string;
+  readonly title: string;
+  /** Already-escaped HTML. */
+  readonly subtitle: string;
+  /** Already-escaped HTML: every section of the page. */
+  readonly main: string;
+  /** Already-escaped HTML printed above the footer line, or null (D24). */
+  readonly footnote: string | null;
+  /** Already-escaped HTML: the version, the generation time, the glossary link. */
+  readonly footer: string;
+}
+
+export function renderHtmlParts(report: ScanReport, options: HtmlOptions): HtmlParts {
   const sections: string[] = [];
   sections.push(overview(report));
   sections.push(nextActions(report));
@@ -69,16 +87,28 @@ export function renderHtml(report: ScanReport, options: HtmlOptions): string {
   if (report.duplicates.length > 0) sections.push(duplicates(report));
   if (report.personal) sections.push(personalLayer(report.personal));
 
-  return document({
+  return {
+    css: CSS,
     title: "rulecheck scan",
     subtitle: `<code>${esc(report.root)}</code> · ${fmt(report.totals.repos)} ${plural(report.totals.repos, "repository", "repositories")} · scanned ${esc(report.scannedAt)}`,
-    body: sections.join("\n"),
-    version: options.version,
-    generatedAt: report.scannedAt,
+    main: sections.join("\n"),
     footnote:
       report.excludedNested.length > 0
         ? `${esc(describeExcludedNested(report.excludedNested))}: ${report.excludedNested.map((n) => `<span class="mono">${esc(n.name)}</span> (${esc(NESTED_KIND_LABEL[n.kind])} in <span class="mono">${esc(n.parent)}</span>)`).join(", ")}`
         : null,
+    footer: footerLine(options.version, report.scannedAt),
+  };
+}
+
+export function renderHtml(report: ScanReport, options: HtmlOptions): string {
+  const parts = renderHtmlParts(report, options);
+  return document({
+    title: parts.title,
+    subtitle: parts.subtitle,
+    body: parts.main,
+    version: options.version,
+    generatedAt: report.scannedAt,
+    footnote: parts.footnote,
   });
 }
 
@@ -817,11 +847,15 @@ ${CSS}
 ${doc.body}
 </main>
 <footer>
-${doc.footnote ? `  <p class="footnote">${doc.footnote}</p>\n` : ""}  rulecheck v${esc(doc.version)} · generated ${esc(doc.generatedAt)} · <a href="${GLOSSARY_URL}">status-model glossary</a>
+${doc.footnote ? `  <p class="footnote">${doc.footnote}</p>\n` : ""}  ${footerLine(doc.version, doc.generatedAt)}
 </footer>
 </body>
 </html>
 `;
+}
+
+function footerLine(version: string, generatedAt: string): string {
+  return `rulecheck v${esc(version)} · generated ${esc(generatedAt)} · <a href="${GLOSSARY_URL}">status-model glossary</a>`;
 }
 
 export function esc(text: string): string {

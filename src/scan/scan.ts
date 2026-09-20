@@ -3,21 +3,19 @@ import type { PlatformError } from "effect/PlatformError";
 import { findForeignMarkers, parseBlocks } from "../domain/block.ts";
 import { classifyNormalization, classifyShape, estimateBudget } from "../domain/classify.ts";
 import { distribute } from "../domain/pack.ts";
-import {
-  type BlockIssue,
-  type CanonicalShape,
-  type DuplicateGroup,
-  type ExcludedNestedRepo,
-  type ForeignRegion,
-  type InstructionFile,
-  type ManagedBlock,
-  type Normalization,
-  type PackDistribution,
-  type PersonalLayer,
-  type RepoReport,
-  SCAN_SCHEMA_VERSION,
-  type ScanReport,
-  type ScanTotals,
+import { assembleScanReport, DEFAULT_MIN_DUPLICATE_LINES } from "../domain/report.ts";
+import type {
+  BlockIssue,
+  CanonicalShape,
+  ExcludedNestedRepo,
+  ForeignRegion,
+  InstructionFile,
+  ManagedBlock,
+  Normalization,
+  PackDistribution,
+  PersonalLayer,
+  RepoReport,
+  ScanReport,
 } from "../domain/types.ts";
 import { type AnalyzedFile, analyzeFile } from "./analyze.ts";
 import { type LoadedPacks, loadPacks } from "./packs.ts";
@@ -41,8 +39,6 @@ export interface ScanOptions {
   readonly packs?: string | LoadedPacks | null;
 }
 
-const DEFAULT_MIN_DUPLICATE_LINES = 5;
-
 /** Scan `root` and produce a full report. Never writes to disk. */
 export const scan = (
   root: string,
@@ -62,11 +58,6 @@ export const scan = (
       discovered.repos,
       (repo) => analyzeRepo(repo, resolvedRoot, fs, path),
       { concurrency: 8 },
-    );
-
-    const duplicates = findDuplicates(
-      repos,
-      options.minDuplicateLines ?? DEFAULT_MIN_DUPLICATE_LINES,
     );
 
     const personal: PersonalLayer | null =
@@ -89,8 +80,7 @@ export const scan = (
       );
     }
 
-    return {
-      schemaVersion: SCAN_SCHEMA_VERSION,
+    return assembleScanReport({
       root: resolvedRoot,
       scannedAt: new Date().toISOString(),
       repos,
@@ -102,11 +92,10 @@ export const scan = (
           kind: nested.kind,
         }),
       ),
-      duplicates,
       personal,
       distribution,
-      totals: summarize(repos),
-    } satisfies ScanReport;
+      minDuplicateLines: options.minDuplicateLines ?? DEFAULT_MIN_DUPLICATE_LINES,
+    });
   });
 
 const ROOT_PAIR = new Set(["AGENTS.md", "CLAUDE.md", ".claude/CLAUDE.md"]);
@@ -200,77 +189,4 @@ export function displayName(repoRoot: string, scanRoot: string): string {
     return segments.slice(hostIndex + 1).join("/");
   }
   return relative;
-}
-
-function findDuplicates(repos: ReadonlyArray<RepoReport>, minLines: number): DuplicateGroup[] {
-  const groups = new Map<
-    string,
-    { tokens: number; lines: number; members: DuplicateGroup["members"][number][] }
-  >();
-
-  for (const repo of repos) {
-    for (const file of repo.files) {
-      if (file.lines < minLines || file.wrapperTarget !== null) continue;
-      const group = groups.get(file.contentHash) ?? {
-        tokens: file.tokens,
-        lines: file.lines,
-        members: [],
-      };
-      group.members.push({ repo: repo.name, relativePath: file.relativePath });
-      groups.set(file.contentHash, group);
-    }
-  }
-
-  return [...groups.entries()]
-    .filter(([, group]) => group.members.length > 1)
-    .map(([contentHash, group]) => ({ contentHash, ...group }))
-    .sort((a, b) => b.members.length - a.members.length || b.tokens - a.tokens);
-}
-
-function summarize(repos: ReadonlyArray<RepoReport>): ScanTotals {
-  const shapes: Record<CanonicalShape, number> = {
-    "agents-canonical": 0,
-    "agents-imported": 0,
-    "claude-canonical": 0,
-    "agents-only": 0,
-    "claude-only": 0,
-    "both-full": 0,
-    none: 0,
-  };
-  let files = 0;
-  let tokens = 0;
-  let findings = 0;
-  let reposWithInstructions = 0;
-  let blocks = 0;
-  let modifiedBlocks = 0;
-  let malformedMarkers = 0;
-  let skills = 0;
-  let skillIssues = 0;
-
-  for (const repo of repos) {
-    shapes[repo.shape] += 1;
-    files += repo.files.length;
-    findings += repo.findings.length;
-    if (repo.files.length > 0) reposWithInstructions += 1;
-    for (const file of repo.files) tokens += file.tokens;
-    blocks += repo.blocks.length;
-    modifiedBlocks += repo.blocks.filter((b) => b.modified).length;
-    malformedMarkers += repo.blockIssues.filter((i) => i.kind === "malformed-marker").length;
-    skills += repo.skills.skills.length;
-    skillIssues += repo.skills.issues.length;
-  }
-
-  return {
-    repos: repos.length,
-    reposWithInstructions,
-    files,
-    tokens,
-    findings,
-    shapes,
-    blocks,
-    modifiedBlocks,
-    malformedMarkers,
-    skills,
-    skillIssues,
-  };
 }
