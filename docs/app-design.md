@@ -12,29 +12,52 @@ is `lightsound/rulefleet` (not `lightsound/rulecheck-app` as answer 1 in section
 the bot account is `rulefleet[bot]`. The M1 handoff, [m1-kickoff.md](m1-kickoff.md), records the
 override; the design itself is unchanged.
 
+Revised 2026-09-20 for the dashboard's information architecture (D29: pages split by subject,
+pack side first; D30: packs are edited on GitHub): sections 1, 2, 3, 5, 6, and 9 and the
+decisions table. Architecture, jobs, data model, and security are as accepted at M0.
+
 Every judgment call is in the decisions table at the end, with the search round in which no
 better option appeared. Words in `code` that name a status, shape, or outcome are the ones
 [status-model.md](status-model.md) defines.
 
 ## 1. Goals and non-goals
 
+**Three goals, in the order the dashboard shows them (D29).** The person who installs the App
+wants to (1) **manage the source**: know what the packs are, where they live, and what they
+say, and get to the place where they are edited; (2) **see where each pack is distributed**:
+which repositories carry it, at which rev, and which are behind, blocked, or edited by hand;
+(3) **start and stop distribution**: subscribe or unsubscribe a repository, run a sync or a dry
+run, and follow the pull requests it opened. The health of the instruction files (shapes,
+budgets, findings, duplicates) is the fourth thing, a property of the repositories that
+matters when one of the three above points at a repository. All four are projections of one
+dataset, repository × pack with its pack status plus `subscriptions.json`, so the pages are
+split by subject (pack, repository, run), not by command (`scan`, `sync`).
+
 **Day 1 (after M2).** An organization installs the App on a set of repositories and gets:
 
-- a live Overview (the D19–D22 page: cards, `Next actions`, pack distribution, repository rows)
-  measured on every repository's default branch, updated on push, with no local tree;
 - a registered pack source (a repository laid out like `lightsound/agent-rules`: `packs/<id>/`,
-  `subscriptions.json`) and a subscriptions view;
+  `subscriptions.json`), each pack shown with its body, hash, rev, and a link to where it is
+  edited on GitHub (goal 1; D30);
+- the distribution of every pack over every repository, measured on each repository's
+  default branch, updated on push, with no local tree: the Fleet home with one card per pack,
+  the pack page with its subscribers, the Repositories table with one status column per pack
+  (goal 2);
 - a sync that opens or updates one pull request per repository per pack (D10, D14) when the
   pack repository's default branch changes, from a button, or as a dry run, authenticated as
-  the App;
+  the App; subscriptions changed from the pack page and landing in `subscriptions.json` (D25)
+  (goal 3);
 - pull requests attributed to `rulecheck[bot]`, each linking to the run that wrote it (D23's
   `--run-url`, pointing at the App's run page);
+- the health of the instruction files (the D19–D22 sections: `Next actions`, repository rows,
+  duplicates, budgets) on the Repositories page and each repository's page, and as the last
+  section of the Fleet home;
 - team access derived from GitHub: whoever can read a repository can read its rows; whoever
   administers the installation account can register sources and trigger syncs.
 
 **Not in the MVP.**
 
-- A pack editor. Packs are edited in the pack repository with the tools the team already has;
+- A pack editor. GitHub is the editor (D30): the pack page links to GitHub's edit page for
+  `packs/<id>/AGENTS.md` and to its new-file page for a new pack, and shows the body read-only.
   D6's "author a pack in a web app" is deferred past M3.
 - Auto-merge. The App opens pull requests; humans or per-repository auto-merge (D6, off by
   default, not implemented) merge them.
@@ -51,16 +74,23 @@ better option appeared. Words in `code` that name a status, shape, or outcome ar
 
 **Install → first scan → dashboard.** GitHub's install page (organization or personal account;
 "all repositories" or a selection) → `installation` webhook → the App records the installation
-and its repositories and enqueues one full scan → the user lands on `/i/<installation>` and sees
-the page fill in (a row per repository as its report arrives; in M1 the page reloads without
-script, `<meta http-equiv="refresh">` while a run is in flight; from T5b the banner fetches the
-run's progress and the sections reload when it finishes, D28). Without a pack source the page has no
-`Pack distribution` section and says so with a link to the next step.
+and its repositories and enqueues one full scan → the user lands on `/i/<installation>`, the
+Fleet home (section 5), and sees the page fill in (a row per repository as its report arrives;
+in M1 the page reloads without script, `<meta http-equiv="refresh">` while a run is in flight;
+from T5b the banner fetches the run's progress and the sections reload when it finishes, D28).
+Without a pack source the Fleet home opens with the onboarding card below instead of the pack
+cards.
 
 **Bootstrap: an installation with no pack repository yet.** Until a pack source is registered
 the dashboard is the read-only inventory: shapes, budgets, duplicates, findings, skills, the
 `Next actions` list without pack rows. That is already useful and needs no write permission
-exercised. The onboarding banner offers three ways to get a pack repository:
+exercised. The Fleet home then opens with two things. First, the facts the reports already
+hold about distribution: the managed blocks found in the stored `RepoReport`s, grouped by
+`source` (how many repositories carry one, how many distinct `hash=` values, which `rev=`s),
+with the sentence that registering the pack repository is what turns them into statuses; no
+pack status word is printed here, because none has been measured (the D9 classifier needs the
+pack's current hash). Second, the onboarding card, which offers the ways to get a pack
+repository; (a) and (b) are shown as links, (c) is post-MVP and not shown:
 
 - **(a) Create a pack repository.** The App publishes a public GitHub template repository
   (`lightsound/agent-rules-template`: `packs/base/AGENTS.md` as a commented starter,
@@ -69,10 +99,11 @@ exercised. The onboarding banner offers three ways to get a pack repository:
   with the template preselected
   (`https://github.com/new?template_owner=lightsound&template_name=agent-rules-template&owner=<account>&name=agent-rules`),
   the user clicks `Use this template`, then adds the new repository to the installation (GitHub's
-  install page again, or the link the banner gives) and selects it in the App. The
-  `installation_repositories` webhook makes the new repository appear in the selector without a
-  reload. Three clicks, all of them GitHub's own pages, and the App never holds the permission to
-  create repositories. Least privilege decided this: creating the repository from the App
+  install page again, or the link the card gives) and selects it in the App (Settings, pack
+  source). The `installation_repositories` webhook makes the new repository appear in the
+  selector without a reload. Three clicks, all of them GitHub's own pages, and the App never
+  holds the permission to create repositories. Least privilege decided this: creating the
+  repository from the App
   (`POST /repos/{template_owner}/{template_repo}/generate` or `POST /orgs/{org}/repos`) needs
   `Administration: write` on the installation, a permission that also deletes and reconfigures
   every repository the App can see, for one click at onboarding; asking for it through the user
@@ -97,11 +128,19 @@ unchanged, stores the packs and subscriptions as a cache keyed by the commit sha
 and re-runs the installation scan with `packs` set so every repository × pack gets a status.
 One pack source per installation in the MVP.
 
-**Subscriptions.** The Pack & subscriptions page lists every pack with its subscribers and every
-installed repository with its `not-subscribed` projection (`classifyIfSubscribed`, D20: what a
-sync would do the moment it is subscribed). Ticking a repository under a pack does not write the
-database: it changes `subscriptions.json` in the pack repository (D25), in one of two ways
-chosen by the per-installation setting `subscriptionChanges`:
+**Subscriptions.** The pack page (`/i/<installation>/packs/<pack>`, section 5) lists the
+pack's subscribers with their status, and under a fold every other installed repository with
+its `not-subscribed` projection (`classifyIfSubscribed`, D20: what a sync would do the moment
+it is subscribed). Each row carries two facts side by side, because they are two facts
+([status-model.md](status-model.md), "Subscription and block are two facts"): whether the
+repository is in the pack's `subscriptions.json` list (the checkbox) and what its block reads
+(the status chip). Unsubscribing removes the list entry and nothing else: the block stays in
+the repository, the row keeps reading `current` or `outdated` from it (D9), and no sync run
+has it as a target any more (D14). The page says so on the row (block present, not in
+`subscriptions.json`); the App opens no pull request that removes a block, which would be a new
+normalization and needs its own decision entry. Ticking a repository under a pack does not
+write the database: it changes `subscriptions.json` in the pack repository (D25), in one of two
+ways chosen by the per-installation setting `subscriptionChanges`:
 
 - `pull-request` (default): a pull request against the pack repository; the pending change is
   shown on the page as "subscription PR #n open" until it merges, and the merge's `push`
@@ -165,8 +204,8 @@ cheap (6–15 calls) and the job key dedupes it:
 | `push` | to the pack repository's default branch; a touched path is under `packs/**` or is `subscriptions.json` | reload the pack cache at the pushed sha; one `sync-target` per subscriber × pack (live, or dry run when the setting says so) |
 | `push` | to a subscriber's (or any installed repository's) default branch; a touched path is `AGENTS.md`, `CLAUDE.md`, `.claude/CLAUDE.md`, a nested `AGENTS.md`, under `.cursor/**`, `.claude/**`, `.agents/skills/**`, or is `package.json` (the script check) | `scan-repository` at the pushed sha |
 | `push` | any other branch, or no matching path | nothing (recorded, no job) |
-| `installation_repositories` | `added` | `scan-repository` for each added repository; the selector on the Pack & subscriptions page updates |
-| `installation_repositories` | `removed` | prune: mark `removed_at`, drop the repository from the matrix and the candidate list; its rows stay for history |
+| `installation_repositories` | `added` | `scan-repository` for each added repository; the Repositories table, the candidate fold on each pack page, and the pack-source selector in Settings update |
+| `installation_repositories` | `removed` | prune: mark `removed_at`, drop the repository from the Repositories table, the pack pages, and the candidate list; its rows stay for history |
 | `installation` | `created` / `unsuspend` | full `scan-installation` |
 | `installation` | `suspend` / `deleted` | stop jobs; `deleted` starts the 30-day deletion (section 7) |
 | `pull_request` | `closed` on a branch `agent-rules/*` or `rulecheck/subscriptions` | status refresh: `scan-repository` for the base repository (a merge is also a `push`, so this catches a close without merge, where the row stays `eligible` / `outdated` and the run row is annotated `PR closed`) |
@@ -178,9 +217,11 @@ default `daily`: one `scan-installation` and one dry-run sync run per interval, 
 under the webhooks. `off` is for an installation that trusts deliveries and wants the API budget
 for something else; the page shows when the last full measurement happened either way.
 
-A run page shows the D14 table as it fills: repository, pack, remote status, outcome
-(`planned +N -M`, `opened`, `updated`, `up-to-date`, `nothing-to-do`, `refused: …`,
-`failed: …`), each pull request linked.
+The Runs page lists every run of the installation (kind, trigger, started, finished, counts
+per outcome); a sync run opened shows the D14 table as it fills: repository, pack, remote
+status, outcome (`planned +N -M`, `opened`, `updated`, `up-to-date`, `nothing-to-do`,
+`refused: …`, `failed: …`), each pull request linked; a scan run shows its rows (`scanned`,
+`scan_error` with the reason).
 
 **Pull request experience.** Unchanged from the CLI (`pullRequestText`): title
 `chore(agent-rules): …`, body naming the normalization applied, the pack, the rev, "this branch
@@ -236,7 +277,11 @@ reproducible from GitHub; dropping the database loses history, never configurati
   be inside the installation.
 - A team that prefers the CLI or the D23 workflow keeps working; the App is a view and a runner
   over the same files.
-- Pack editing in the UI, when it comes, is the same mechanism on `packs/<id>/AGENTS.md`.
+- Pack editing stays on GitHub (D30): the pack page shows the body read-only with its hash and
+  rev and links to GitHub's edit page for `packs/<id>/AGENTS.md` (and its new-file page for a
+  new pack), so review, history, CODEOWNERS, and branch protection are the pack repository's
+  own. An in-App editor, if one is ever built, would be the same mechanism as the
+  subscriptions writer on `packs/<id>/AGENTS.md`, and needs its own decision entry.
 
 ## 4. Architecture
 
@@ -396,35 +441,86 @@ kept for 90 days, snapshots and runs for 12 months, audit for 12 months (section
 
 ## 5. Dashboard pages
 
-The dashboard has three pages (HTML pages the App serves, not images or mockups), all rendered
-server-side. rulecheck's sections keep the D21 design system (Primer tokens, no script,
-`<details>` folds, print keeps what is open) and are embedded as the static HTML `html.ts`
-produces. The App frame around them is HeroUI / HeroUI Pro, and from T5b on it may hydrate
-client components where a control needs script (a collapsing navigation bar, a dropdown
-switcher, a confirmed action, a live run banner that fetches progress instead of reloading the
-page, a theme toggle): hydration is limited to those islands, the page still renders complete
-without it, and the embedded sections are never hydrated or re-rendered (D28). T5 shipped the
-Overview as static HTML with no script at all (`<meta http-equiv="refresh">` while a run is in
-flight) and is done in that form. Labels come from `src/report/labels.ts`; nothing on a page is
-a word the glossary does not have.
+The dashboard is one frame with a sidebar of five entries, `Fleet / Packs / Repositories /
+Runs / Settings`, and the pages under them (HTML pages the App serves, not images or mockups),
+all rendered server-side. The information architecture is D29: pages are split by subject
+(pack, repository, run), not by command (`scan`, `sync`); the pack side is primary, the
+repository side secondary; a control that writes (M2) appears on the page that already shows
+what it acts on, so M1 → M2 adds buttons and checkboxes to existing pages and no page of its
+own. Every page is read-only in M1; the writes of M2 are marked below.
 
-1. **Overview page** (`/i/<installation>`): the D19–D22 page as `renderHtml` produces it, with
-   an App header (installation switcher, `Rescan`, `Pack source`, sign out) and a run banner
-   when a run is in flight. In M1 the page is served byte for byte from a `ScanReport` assembled
-   from `repo_reports` and `status_snapshots`; in M2 `html.ts` exports its sections so the header
-   and the matrix links can point at the pages below instead of anchors.
-2. **Repository page** (`/i/<installation>/r/<owner>/<repo>`): the repository row opened, plus
-   what the page could not hold: the files it loads with budgets per tool, findings with
-   `file:line` linking to the GitHub blob at the measured sha, managed blocks with `source`,
-   `rev`, `hash`, status per pack with the next-action verb, the skills inventory with lock
-   state, and the history of this repository's rows in past runs (status over time, pull
-   requests opened for it).
-3. **Pack & subscriptions page** (`/i/<installation>/packs`): the registered source with
-   `head_sha` and `loadPacks` warnings; one card per pack (id, hash, rev, subscribers, the
-   stacked status bar); the subscriptions matrix (every installed repository × every pack, a
-   checkbox per cell; checked cells that are not yet in `subscriptions.json` show
-   `PR #n open`); the `Sync now` / `Dry run` controls; the list of runs with their tables; the
-   audit log for the installation.
+rulecheck's sections keep the D21 design system (Primer tokens, no script, `<details>` folds,
+print keeps what is open) and are embedded as the static HTML `html.ts` produces. The App frame
+around them is HeroUI / HeroUI Pro, and from T5b on it may hydrate client components where a
+control needs script (a collapsing navigation bar or sidebar, a dropdown switcher, a confirmed
+action, a live run banner that fetches progress instead of reloading the page, a theme toggle):
+hydration is limited to those islands, the page still renders complete without it, and the
+embedded sections are never hydrated or re-rendered (D28). T5 shipped the D19–D22 page at
+`/i/<installation>` as static HTML with no script at all (`<meta http-equiv="refresh">` while a
+run is in flight) and is done in that form; the Fleet home below takes its place at the same
+route, and its sections move to the Repositories page and the repository page. Labels come from
+`src/report/labels.ts`; the App may write navigation headings and onboarding prose of its own,
+but a status, shape, outcome, or skill lock word is never one the glossary does not have. Where
+the App assembles a view itself (the pack cards, the tables; from `status_snapshots` and
+`repo_reports`), the words are `labels.ts`'s and the order of statuses is `STATUS_ORDER`, so a
+card and the CLI's page agree on every count.
+
+1. **Fleet** (`/i/<installation>`, home): the question "where does each pack stand, and what
+   is next". Three sections in this order. **Pack distribution**: the registered source (name,
+   short `head_sha`, loaded at) and one card per pack with the stacked status bar, the counts
+   per status (nonzero, `STATUS_ORDER`), rev and short hash, the number of open pull requests,
+   a link to the pack page, and in M2 the `Dry run` / `Sync` controls for that pack (also once
+   for every pack, next to the source). **Next actions**: the D21 list, same verbs
+   (`STATUS_ACTION`), same order, each row linking to its repository and its open pull request.
+   **Health**: the D21 overview cards reduced to one row (repositories, issues, instruction
+   files with the token sums), linking to the Repositories page. Without a pack source the
+   first section is the bootstrap state of section 2: the managed blocks found in the reports
+   and the onboarding card; `Next actions` then holds the issue rows only.
+2. **Packs** (`/i/<installation>/packs`) and the **pack page**
+   (`/i/<installation>/packs/<pack>`): goal 1 and the pack side of goals 2 and 3. The list shows
+   the source with `head_sha`, `loaded_at`, and the `loadPacks` warnings, one row per pack (id,
+   title, rev, hash, subscriber count, the stacked bar), and a `New pack on GitHub` link
+   (`github.com/<owner>/<repo>/new/<branch>?filename=packs/<id>/AGENTS.md`). The pack page shows
+   the body read-only (`<pre>`, with its size and token count), rev, hash, an `Edit on GitHub`
+   link (`github.com/<owner>/<repo>/edit/<branch>/packs/<id>/AGENTS.md`), one sentence
+   explaining the flow (edit → pull request → merge → `push` → one pull request per subscriber),
+   and in M2 `Dry run` / `Sync` for this pack; then the **Subscribers** table, one row per
+   subscriber: status chip, `file:line`, open pull request, the outcome of the last run for it,
+   and in M2 the subscription checkbox, with a filter by status; then, folded, the
+   `Not subscribed` candidates with the `classifyIfSubscribed` projection (D20) and in M2 a
+   checkbox to add each. A repository that carries the block without being in the list is a
+   row with the chip and an unticked checkbox and says so (section 2, Subscriptions). Pending
+   subscription changes show as `subscription PR #n open` under `pull-request`; under
+   `direct-commit` the row turns `eligible` at the next `push`.
+3. **Repositories** (`/i/<installation>/repositories`) and the **repository page**
+   (`/i/<installation>/r/<owner>/<repo>`): the repository side of goal 2 and the health of the
+   estate. The list is one table, one row per live repository, including those without
+   instruction files and those that could not be measured (`could not be measured: <reason>`
+   in place of their columns): shape, issue count, one status column per pack (chip and
+   `file:line`; absent until a source is registered, when the block's `source` and `rev` are
+   shown instead), the Cursor and Claude Code budgets; filters by owner, shape, issues, and pack
+   status; a search box; rows link to the repository page. Until `html.ts` exports its sections
+   as data (M2b), this page also embeds the D21 `Repositories` and `Duplicates` sections
+   unchanged as the static HTML `html.ts` produces (D28), under the table. The repository page
+   is the repository row opened, plus what the row could not hold: the files it loads with
+   budgets per tool, findings with `file:line` linking to the GitHub blob at the measured sha,
+   managed blocks with `source`, `rev`, `hash`, and whether the body was modified, status per
+   pack with the next-action verb, the skills inventory with lock state, and the history of this
+   repository's rows in past runs (status over time, pull requests opened for it).
+4. **Runs** (`/i/<installation>/runs`): the history side of goal 3. One row per run (kind
+   `scan` / `sync`, trigger, dry run or live, started, finished, counts per outcome); a run
+   opened shows its rows (section 2, "The Runs page"). M1 lists scan runs; sync runs arrive
+   with M2b.
+5. **Settings** (`/i/<installation>/settings`): the pack source (register, with the
+   inside-the-installation check and the `loadPacks` warnings as the checklist; remove), the
+   `subscriptionChanges` and `fullRescan` settings, the audit log (section 7), and the plain
+   statement of what the App's permissions let it write (section 4, `Contents: write`). In M1
+   the page shows `fullRescan` read-only and the audit log. Registering a source and changing
+   the two settings write the App's database only, so they belong to M2a; the subscription
+   checkbox and `Sync` are the writes to GitHub and belong to M2b (section 9).
+
+Mobile: the sidebar folds into the frame's drawer, the Fleet cards stack in one column, and
+the tables scroll horizontally; there is no separate layout.
 
 ## 6. Tech options
 
@@ -503,16 +599,20 @@ The framework comparison that led to the pick, kept for the record:
 Why TanStack Start: best type story end to end (routes, loaders, table, query in one family),
 native Workers deployment through Vite, and nothing between React and the runtime. React
 Router v7 was the safe second; Next-on-Workers was not recommended for a product whose whole
-surface is three data pages. Not chosen further out: SolidStart / Solid 2 (the owner maintains
-`lightsound/solid2-agent-kit`, but HeroUI Pro is React), Astro islands (a second component
-model next to React for no gain on three interactive pages), HTMX-style fragments over
-`renderHtml`'s strings (no component model for HeroUI to plug into).
+surface is a handful of data pages (three when this was written, five since D29). Not chosen
+further out: SolidStart / Solid 2 (the owner maintains `lightsound/solid2-agent-kit`, but HeroUI
+Pro is React), Astro islands (a second component model next to React for no gain on a few
+interactive pages), HTMX-style fragments over `renderHtml`'s strings (no component model for
+HeroUI to plug into).
 
 Constraint: the words on the page stay the ones `labels.ts` prints, and the report's structure
-comes from `html.ts` (its sections exported as data in M2, rendered by HeroUI components that
-carry the D21 tokens as the theme), so the design system is carried, not re-implemented. M1
-serves the `renderHtml` page as a plain response inside a TanStack Start route, with `HttpApi`
-handling webhooks and the job API next to it.
+comes from `html.ts` (its sections exported as data in M2b, rendered by HeroUI components that
+carry the D21 tokens as the theme), so the design system is carried, not re-implemented. Until
+then the App embeds `html.ts`'s sections as static HTML (D28) and assembles only what the
+sections do not hold (the Fleet pack cards, the Repositories and Subscribers tables) from
+`status_snapshots` and `repo_reports`, with `labels.ts`'s words and `STATUS_ORDER`. M1 serves
+those pages inside TanStack Start routes, with `HttpApi` handling webhooks and the job API
+next to it.
 
 ## 7. Security
 
@@ -542,7 +642,7 @@ handling webhooks and the job API next to it.
   action taken by a person (sign-in, pack source registered or removed, `Sync now`, `Rescan`,
   subscription change requested) and by GitHub (install, repositories added or removed,
   uninstall, suspend, authorization revoked), with actor, installation, target, run id, time.
-  Shown on the Pack & subscriptions page; kept 12 months; exportable as JSON.
+  Shown on the Settings page; kept 12 months; exportable as JSON.
 - **Uninstall**: the `installation` `deleted` event marks the installation, stops its jobs, and
   deletes its rows after 30 days (the grace period lets a reinstall keep history).
 
@@ -565,13 +665,17 @@ the unit is a week because the milestones gate on each other, not because any on
 | Milestone | Done when | Weeks |
 | --- | --- | --- |
 | M0: design accepted | This document merged with every question in section 10 answered; D25 recorded; **Accounts**: the dedicated Cloudflare account created (billing set up, Alchemy state store bootstrapped) and the App registration and private repository placed under the personal GitHub account; **HeroUI Pro** license confirmed to cover use in the private repository (and the marketing site, if it shares it); the App registered on GitHub (name, permissions, webhook URL to a stub), one registration per stage; the template repository `lightsound/agent-rules-template` published | 0.5 |
-| M1: install and read-only dashboard | The transport split and `fetchTransport` land in rulecheck (with `fake-github.ts` coverage); the private App repository exists and depends on rulecheck at a sha; the Alchemy stack deploys `prod`, `dev_*`, and `pr-*` stages from GitHub Actions; install → `scan-installation` → Overview page served from `repo_reports`; `push` rescans one repository; the `fullRescan` schedule. Dogfood on `lightsound`, personal installation included | 3 |
-| M2: sync and subscriptions | Pack source registration; `sync-target` on pack push, `Sync now`, dry run; runs and audit; `src/sync/subscribe.ts` in rulecheck with `fake-github.ts` coverage and its decision entry; the `subscriptionChanges` and `fullRescan` settings; Pack & subscriptions page with the subscriptions matrix writing D25 changes through it; Repository page; `html.ts` sections exported and rendered by HeroUI components in TanStack Start routes; the D23 workflow removed from `agent-rules` once the App has opened the next real pull requests (replacement, not coexistence) | 3 |
+| M1: install and read-only dashboard | The transport split and `fetchTransport` land in rulecheck (with `fake-github.ts` coverage); the private App repository exists and depends on rulecheck at a sha; the Alchemy stack deploys `prod`, `dev_*`, and `pr-*` stages from GitHub Actions; install → `scan-installation` → the D19–D22 page served from `repo_reports` at `/i/<installation>`; `push` rescans one repository; the `fullRescan` schedule. Dogfood on `lightsound`, personal installation included. **Remainder after D29, read-only:** the sidebar frame (`Fleet / Packs / Repositories / Runs / Settings`); the Fleet home in its bootstrap state (managed blocks found in the reports, the onboarding card) with `Next actions` and the health row; the Repositories table from `repo_reports` (shape, issues, budgets, block `source` / `rev`) with the D21 sections embedded under it; the Runs list of scan runs; Settings showing `fullRescan` and the audit log | 3 |
+| M2a: pack source and distribution (read) | Pack source registration (inside the installation; writes the database only); `loadPacks` at the source's HEAD and the installation scan with `packs` set, so `status_snapshots` fill; the Fleet pack cards; the Packs list and the pack page with body, hash, rev, the GitHub edit and new-file links (D30), the Subscribers table and the `Not subscribed` fold (both read-only); the pack status columns of the Repositories table; the `subscriptionChanges` and `fullRescan` settings; the scheduled dry run producing sync runs on the Runs page. No GitHub write and no `WriteLock`: goal 2 is met here | 1.5 |
+| M2b: sync and subscriptions (write) | `sync-target` on pack push, `Dry run` / `Sync` on the Fleet and pack pages (dry run the default state, live on a confirmed second click), the `WriteLock` Durable Object in use; `src/sync/subscribe.ts` in rulecheck with `fake-github.ts` coverage and its decision entry, the subscription checkbox on the pack page writing D25 changes through it and showing the pending `subscription PR #n open`; runs and audit rows for every write; `html.ts` sections exported and rendered by HeroUI components in TanStack Start routes (the Repositories table and the repository page stop embedding static sections); the D23 workflow removed from `agent-rules` once the App has opened the next real pull requests (replacement, not coexistence) | 1.5 |
 | M3: organizations and billing | Product name decided and the custom domain added to the stack; pricing decided (section 8), plan column and repository gate live; Stripe checkout and portal; installation switcher for users in several organizations; uninstall lifecycle; status page and the alerts in section 6 | 3 |
 
-Total about ten weeks to a chargeable product. M2 carries the product risk (does a team accept
-two pull requests per subscription, or does it switch to `direct-commit`); M3 the commercial
-one (name and pricing are decided there).
+Total about ten weeks to a chargeable product. M2 is two slices because they gate differently:
+M2a needs nothing but reads and can start the moment the M1 remainder lands, and it already
+answers goal 2 for an installation that distributes with the D23 workflow; M2b is where the
+App first writes to GitHub and where the product risk sits (does a team accept two pull
+requests per subscription, or does it switch to `direct-commit`). M3 carries the commercial
+risk (name and pricing are decided there).
 
 ## 10. Questions for the owner: answers
 
@@ -623,6 +727,9 @@ better option that produced nothing new.
 | Pack source scope | One source per installation, inside the installation (confirmed by the owner: the installation token reads and writes it; outside would mean a second credential) | several sources (a merge order between sources nobody asked for); a source outside the installation (a second credential to issue, store, and rotate) | 1 |
 | Overview in M1 | `renderHtml` output served as is under an App header | rebuilding the page as components first (three pages' worth of work before anything is live) | 1 |
 | Manual sync control | `Dry run` is the default state of the button; a live run is a second, confirmed action | one `Sync` button (a live write one click away); no manual trigger (a missed webhook then waits for the daily run) | 1 |
+| Dashboard information architecture (D29, 2026-09-20) | Five routes under a sidebar, split by subject: `Fleet` (home: pack cards, `Next actions`, health row), `Packs` (list and pack page: source, body, subscribers), `Repositories` (table and repository page), `Runs`, `Settings`; pack side primary, repository side secondary; M2 controls appear on the pages that already show their subject; the `not-subscribed` and bootstrap states are the same pages with the fold or the onboarding card | the D19–D22 page as home with a `Packs` link (goal 1–3 below the fold or on another page); pack-centred only (an empty home without a source, health demoted); a repository × pack matrix as the home (no place for the source or per-pack actions); a `Next actions` inbox as the home (empty when everything is `current`, no structure); two dashboards, health and distribution (one dataset shown twice); a setup wizard as the IA (it is the empty state of Fleet, not a page tree); minimal App with GitHub pull requests and checks as the status (no cross-repository view, D8) | 4 |
+| What "stop" means on the pack page | Unsubscribe only: the `subscriptions.json` entry is removed through the D25 writer; the block stays and the row shows both facts (unticked, `current` / `outdated` chip) | a pull request that removes the block (a new normalization and a new kind of write; recorded as a candidate without a decision entry) | 3 |
+| Pack editing (D30) | Not in the App: the pack page shows the body read-only with hash and rev and links to GitHub's edit and new-file pages for `packs/<id>/AGENTS.md`; the Packs list explains edit → merge → `push` → subscriber pull requests in one sentence | an in-App Markdown editor writing through the D25 mechanism (re-implements review, history, permissions, and branch protection the pack repository already has; the one advantage, rot detection before saving, is what a dry run after the merge shows as `refused`) | 2 |
 | Report storage | The `RepoReport` JSON as `scan --json` produces it, `schemaVersion` recorded, block bodies kept | strip block bodies (the pack text is the customer's own distributed text, and the detail screen shows it); store instruction file contents for a diff view (content the security section promises not to keep) | 1 |
 | Milestone unit | Weeks for one person with agents, four milestones | story points (nothing to calibrate against); no estimate (the owner asked for one) | 1 |
 
