@@ -223,6 +223,11 @@ Not part of the four vocabularies; listed so nobody mistakes them for one.
   `missing-path`. Reasons a row is `blocked` or a sync is `refused`, not states.
 - `SyncRefused` and `SyncFailed` (`src/sync/sync.ts`): the errors of the single-target path that
   `sync --all` turns into the `refused` and `failed` outcomes; both carry the measured status.
+- `committed` (RuleFleet M2b, `src/sync/subscribe.ts` when built, D25): the subscriptions
+  writer's result when a `subscriptions.json` change landed as one commit on the pack
+  repository's default branch (`subscriptionChanges: "direct-commit"`); under `pull-request` the
+  result is a sync outcome word (`opened` / `updated`). A result of the writer, not a pack
+  status or a sync outcome of `syncTarget`.
 - `scan_error` and `scanned` (RuleFleet, app-design §4 job table; kickoff T4): the per-repository
   outcome of a hosted scan job. `scan_error` is recorded on a `repositories` row (message and
   time) when its snapshot could not be built (no default-branch ref, 404, a tree over

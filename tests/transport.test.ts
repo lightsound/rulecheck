@@ -338,6 +338,49 @@ describe("installationToken", () => {
     expect(minted).toBe(2);
   });
 
+  test("scopes the mint to repositories and permissions when asked, and sends no body otherwise", async () => {
+    const { pem } = await testKey();
+    const bodies: Array<string | null> = [];
+    const fetch = async (_url: string, init: RequestInit) => {
+      bodies.push(typeof init.body === "string" ? init.body : null);
+      return new Response(
+        JSON.stringify({ token: "ghs_scoped", expires_at: "2026-09-16T11:00:00Z" }),
+        { status: 201 },
+      );
+    };
+    const now = () => Date.parse("2026-09-16T10:00:00Z");
+    await runP(installationToken({ appId: 7, privateKey: pem, installationId: 99, fetch, now }));
+    expect(bodies[0]).toBeNull();
+    await runP(
+      installationToken({
+        appId: 7,
+        privateKey: pem,
+        installationId: 99,
+        repositoryIds: [42],
+        permissions: { contents: "write", pull_requests: "write" },
+        fetch,
+        now,
+      }),
+    );
+    expect(JSON.parse(bodies[1] ?? "{}")).toEqual({
+      repository_ids: [42],
+      permissions: { contents: "write", pull_requests: "write" },
+    });
+    await runP(
+      installationToken({
+        appId: 7,
+        privateKey: pem,
+        installationId: 99,
+        permissions: { contents: "read", pull_requests: "read" },
+        fetch,
+        now,
+      }),
+    );
+    expect(JSON.parse(bodies[2] ?? "{}")).toEqual({
+      permissions: { contents: "read", pull_requests: "read" },
+    });
+  });
+
   test("refuses a PKCS#1 key naming the openssl command, and other non-PKCS#8 input", async () => {
     const pkcs1 = await flip(
       importPrivateKey("-----BEGIN RSA PRIVATE KEY-----\nMIIE\n-----END RSA PRIVATE KEY-----\n"),

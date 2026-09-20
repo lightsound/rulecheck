@@ -33,6 +33,17 @@ export interface InstallationTokenOptions extends Omit<FetchTransportOptions, "t
   /** The App's private key as a PKCS#8 PEM (`BEGIN PRIVATE KEY`). */
   readonly privateKey: string;
   readonly installationId: string | number;
+  /**
+   * Restrict the token to these repositories (GitHub's `repository_ids`). Absent: every
+   * repository of the installation.
+   */
+  readonly repositoryIds?: ReadonlyArray<number>;
+  /**
+   * Downgrade the token to these permissions (GitHub's `permissions`, a subset of the
+   * registration's; `contents: "read"` for a scan or a dry run, `contents: "write"` plus
+   * `pull_requests: "write"` for one live target). Absent: every permission of the registration.
+   */
+  readonly permissions?: Readonly<Record<string, "read" | "write">>;
   /** Clock in milliseconds since the epoch; default `Date.now`. Injected by tests. */
   readonly now?: () => number;
 }
@@ -81,16 +92,22 @@ export function installationToken(
     appId: _appId,
     privateKey: _privateKey,
     installationId: _id,
+    repositoryIds,
+    permissions,
     now: _now,
     ...transportOptions
   } = options;
+  const scope: Record<string, unknown> = {};
+  if (repositoryIds !== undefined) scope.repository_ids = [...repositoryIds];
+  if (permissions !== undefined) scope.permissions = { ...permissions };
+  const mintBody = Object.keys(scope).length > 0 ? scope : null;
   const transport = fetchTransport({ ...transportOptions, token: jwt });
 
   const mint = Effect.gen(function* () {
     const response = yield* transport.request({
       method: "POST",
       path: `app/installations/${options.installationId}/access_tokens`,
-      body: null,
+      body: mintBody,
     });
     if (response.status >= 400) {
       const retryAfter = retryAfterOf(response.headers);

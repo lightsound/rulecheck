@@ -1,4 +1,7 @@
 import { Effect, type FileSystem, type Path, Semaphore } from "effect";
+
+export type { WriteLock } from "./sync.ts";
+
 import type { PlatformError } from "effect/PlatformError";
 import type { Pack, PackStatusEntry } from "../domain/types.ts";
 import type { GitHub, GitHubError } from "../github/client.ts";

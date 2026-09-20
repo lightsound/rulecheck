@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { Effect, Semaphore } from "effect";
 import {
   findForeignMarkers,
   foreignRegionDrift,
@@ -18,6 +19,7 @@ import {
   WRAPPER_CONTENT,
 } from "../src/domain/sync.ts";
 import type { InstructionFile, ManagedBlock, PackStatusEntry } from "../src/domain/types.ts";
+import type { WriteLock } from "../src/sync/sync.ts";
 
 const BODY = "- Respond in Japanese.\n- Use Bun.";
 const OLD_BODY = "- Respond in Japanese.";
@@ -439,5 +441,26 @@ describe("unifiedDiff", () => {
       added: 0,
       removed: 0,
     });
+  });
+});
+
+describe("WriteLock", () => {
+  test("an Effect Semaphore satisfies the interface, and so does a structural adapter", async () => {
+    const semaphore: WriteLock = await Effect.runPromise(Semaphore.make(1));
+    const calls: string[] = [];
+    const adapter: WriteLock = {
+      withPermits:
+        () =>
+        <A, E, R>(self: Effect.Effect<A, E, R>) =>
+          Effect.gen(function* () {
+            calls.push("acquire");
+            const value = yield* self;
+            calls.push("release");
+            return value;
+          }),
+    };
+    expect(await Effect.runPromise(semaphore.withPermits(1)(Effect.succeed(1)))).toBe(1);
+    expect(await Effect.runPromise(adapter.withPermits(1)(Effect.succeed(2)))).toBe(2);
+    expect(calls).toEqual(["acquire", "release"]);
   });
 });
