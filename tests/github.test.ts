@@ -841,3 +841,63 @@ describe("makeGitHub over ghTransport", () => {
     expect(failure.operation).toBe("getRepository");
   });
 });
+
+describe("scan over a snapshot reads manifests only when a script is referenced", () => {
+  const files = (agents: string, manifests: number) => {
+    const out: Record<string, string> = { "AGENTS.md": agents, ".gitkeep": "" };
+    for (let i = 0; i < manifests; i++)
+      out[`types/p${i}/package.json`] = `{"scripts":{"s${i}":"x"}}`;
+    return out;
+  };
+  const scanIt = async (fake: ReturnType<typeof fakeGitHub>) => {
+    const repo = { owner: "acme", name: "many" };
+    let blobReads = 0;
+    const counting = {
+      ...fake.service,
+      getBlob: (r: typeof repo, sha: string) =>
+        Effect.suspend(() => {
+          blobReads++;
+          return fake.service.getBlob(r, sha);
+        }),
+    };
+    const sha = await Effect.runPromise(counting.getRef(repo, "heads/main"));
+    const snapshot = await Effect.runPromise(repositorySnapshot(counting, repo, sha ?? ""));
+    const report = await Effect.runPromise(
+      scan("/", { home: null }).pipe(
+        Effect.provide(
+          Layer.merge(
+            Layer.succeed(FileSystem.FileSystem, snapshotFileSystem(snapshot)),
+            Path.layer,
+          ),
+        ),
+      ),
+    );
+    return { report, blobReads: () => blobReads };
+  };
+
+  test("no script reference: no package.json is fetched", async () => {
+    const fake = fakeGitHub({
+      "acme/many": { files: files("# Many\n\nNo commands here.\n", 300) },
+    });
+    const { report, blobReads } = await scanIt(fake);
+    expect(report.repos[0]?.findings).toEqual([]);
+    // Only the instruction file itself was read.
+    expect(blobReads()).toBe(1);
+  });
+
+  test("a script reference reads the manifests up to the cap and finds the unknown one", async () => {
+    const fake = fakeGitHub({
+      "acme/many": { files: files("Run `bun run s1` and `bun run nope`.\n", 5) },
+    });
+    const { report, blobReads } = await scanIt(fake);
+    expect(report.repos[0]?.findings.map((f) => f.value)).toEqual(["nope"]);
+    expect(blobReads()).toBe(1 + 5);
+  });
+
+  test("above the cap the script check is skipped rather than guessed", async () => {
+    const fake = fakeGitHub({ "acme/many": { files: files("Run `bun run nope`.\n", 300) } });
+    const { report, blobReads } = await scanIt(fake);
+    expect(report.repos[0]?.findings).toEqual([]);
+    expect(blobReads()).toBe(1);
+  });
+});
