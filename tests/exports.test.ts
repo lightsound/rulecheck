@@ -42,3 +42,8 @@ describe("package.json exports", () => {
     expect(Layer.isLayer(layer)).toBe(true);
   });
 });
+
+test("the package manifest is importable, so a host can print rulecheck's version", async () => {
+  const manifest = (await import("rulecheck/package.json")) as { version: string };
+  expect(manifest.version).toMatch(/^\d+\.\d+\.\d+/);
+});
