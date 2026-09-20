@@ -107,18 +107,19 @@ the text report or in `scan --json`, and the status counts do not include it.
 A pack status is one word computed from two facts: whether the repository is in the pack's
 `subscriptions.json` list, and what block, if any, its root pair carries. The block decides
 first (D9): a repository that carries a block for the pack reads `current`, `outdated`,
-`modified`, or `blocked` whether or not it is in the list, and only a repository without a
-block reads `eligible` (in the list) or `not-subscribed` (not in the list). Two consequences
-follow, and a surface that shows the distribution must not hide either:
+`modified`, or `blocked` whether or not it is in the list; without a block, a repository not in
+the list reads `not-subscribed`, and one in the list reads `eligible`, or `blocked` when a
+marker or a foreign region stops the insertion. Two consequences follow, and a surface that
+shows the distribution must not hide either:
 
 - **Unsubscribing a repository that carries the block changes nothing in its status.** The
   lifecycle edge `unsubscribe` runs from `eligible` / `blocked` to `not-subscribed` only for a
-  repository without a block; with a block, removing the list entry leaves the row `current`
-  or `outdated`, `Next actions` keeps printing `Run sync to update the block` when the pack
-  moves on, and `sync --all` has no target for it any more (D14: targets come from the list),
-  so the block will never be updated by a sync. Only removing the block (a human edit; the sync
-  has no normalization that removes a block, and adding one needs a decision entry) or
-  re-subscribing ends that state.
+  repository without a block; with a block, removing the list entry leaves the row `current`,
+  `outdated`, `modified`, or `blocked` as it was, `Next actions` keeps printing the verb for
+  that status (`Run sync to update the block` when the pack moves on), and `sync --all` has no
+  target for it any more (D14: targets come from the list), so the block will never be updated
+  by a sync. Only removing the block (a human edit; the sync has no normalization that removes
+  a block, and adding one needs a decision entry) or re-subscribing ends that state.
 - **A repository can carry a block without ever having been subscribed** (a block placed by
   hand, or a subscription that was removed). `scan --packs` over checkouts reports it; the
   `sync --all` table does not, because it has no row for it.
