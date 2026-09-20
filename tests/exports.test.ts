@@ -24,6 +24,7 @@ describe("package.json exports", () => {
       "./report/render": "./src/report/render.ts",
       "./report/sync": "./src/report/sync.ts",
       "./github/*": "./src/github/*.ts",
+      "./package.json": "./package.json",
     });
   });
 
