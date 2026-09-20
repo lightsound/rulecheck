@@ -726,3 +726,23 @@ describe("renderSyncAllHtml", () => {
     expect(page).not.toContain("<edit>");
   });
 });
+
+describe("renderHtmlParts", () => {
+  test("the parts compose into the same page renderHtml prints", async () => {
+    const { renderHtml, renderHtmlParts } = await import("../src/report/html.ts");
+    const { assembleScanReport } = await import("../src/domain/report.ts");
+    const report = assembleScanReport({
+      root: "/x",
+      scannedAt: "2026-09-20T00:00:00.000Z",
+      repos: [],
+    });
+    const parts = renderHtmlParts(report, { version: "0.0.1" });
+    const page = renderHtml(report, { version: "0.0.1" });
+    expect(page).toContain(parts.css);
+    expect(page).toContain(parts.main);
+    expect(page).toContain(parts.subtitle);
+    expect(page).toContain(parts.footer);
+    expect(parts.footnote).toBeNull();
+    expect(parts.footer).toContain("rulecheck v0.0.1");
+  });
+});

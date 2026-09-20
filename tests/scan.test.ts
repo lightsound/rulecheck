@@ -717,3 +717,20 @@ describe("displayName", () => {
     expect(displayName("/x/projects/group/repo", "/x/projects")).toBe("group/repo");
   });
 });
+
+describe("assembleScanReport", () => {
+  test("recomputes duplicates and totals from stored RepoReports, like scan does", async () => {
+    const { assembleScanReport } = await import("../src/domain/report.ts");
+    const live = await run(scan(root, { home: null }));
+    expect(live.repos.length).toBeGreaterThan(1);
+    const rebuilt = assembleScanReport({
+      root: live.root,
+      scannedAt: live.scannedAt,
+      repos: live.repos,
+      excludedNested: live.excludedNested,
+    });
+    expect(rebuilt.duplicates).toEqual(live.duplicates);
+    expect(rebuilt.totals).toEqual(live.totals);
+    expect(rebuilt).toEqual(live);
+  });
+});
