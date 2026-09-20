@@ -139,7 +139,13 @@ export function makeGitHub(transport: Transport): GitHubService {
   return {
     getRepository: (repo) =>
       api("getRepository", "GET", repos(repo)).pipe(
-        Effect.map((data) => ({ defaultBranch: str(field(data, "default_branch")) ?? "main" })),
+        Effect.map((data) => {
+          const size = field(data, "size");
+          return {
+            defaultBranch: str(field(data, "default_branch")) ?? "main",
+            size: typeof size === "number" ? size : 0,
+          };
+        }),
       ),
 
     getRef: (repo, name) =>
