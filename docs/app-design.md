@@ -52,8 +52,9 @@ better option appeared. Words in `code` that name a status, shape, or outcome ar
 **Install → first scan → dashboard.** GitHub's install page (organization or personal account;
 "all repositories" or a selection) → `installation` webhook → the App records the installation
 and its repositories and enqueues one full scan → the user lands on `/i/<installation>` and sees
-the page fill in (a row per repository as its report arrives; the page reloads without script,
-`<meta http-equiv="refresh">` while a run is in flight). Without a pack source the page has no
+the page fill in (a row per repository as its report arrives; in M1 the page reloads without
+script, `<meta http-equiv="refresh">` while a run is in flight; from T5b the banner fetches the
+run's progress and the sections reload when it finishes, D28). Without a pack source the page has no
 `Pack distribution` section and says so with a link to the next step.
 
 **Bootstrap: an installation with no pack repository yet.** Until a pack source is registered
@@ -396,9 +397,16 @@ kept for 90 days, snapshots and runs for 12 months, audit for 12 months (section
 ## 5. Dashboard pages
 
 The dashboard has three pages (HTML pages the App serves, not images or mockups), all rendered
-server-side to the D21 design system (Primer tokens, no script beyond progressive enhancement,
-`<details>` folds, print keeps what is open). Labels come from `src/report/labels.ts`; nothing
-on a page is a word the glossary does not have.
+server-side. rulecheck's sections keep the D21 design system (Primer tokens, no script,
+`<details>` folds, print keeps what is open) and are embedded as the static HTML `html.ts`
+produces. The App frame around them is HeroUI / HeroUI Pro, and from T5b on it may hydrate
+client components where a control needs script (a collapsing navigation bar, a dropdown
+switcher, a confirmed action, a live run banner that fetches progress instead of reloading the
+page, a theme toggle): hydration is limited to those islands, the page still renders complete
+without it, and the embedded sections are never hydrated or re-rendered (D28). T5 shipped the
+Overview as static HTML with no script at all (`<meta http-equiv="refresh">` while a run is in
+flight) and is done in that form. Labels come from `src/report/labels.ts`; nothing on a page is
+a word the glossary does not have.
 
 1. **Overview page** (`/i/<installation>`): the D19–D22 page as `renderHtml` produces it, with
    an App header (installation switcher, `Rescan`, `Pack source`, sign out) and a run banner
