@@ -1,4 +1,16 @@
-import { Data, Effect, FileSystem, type Path, type Semaphore } from "effect";
+import { Data, Effect, FileSystem, type Path } from "effect";
+
+/**
+ * What `syncTarget` needs from a write lock: `withPermits(1)` around the write (D14). The CLI
+ * passes an Effect `Semaphore` (which satisfies this structurally); a host may pass anything with
+ * the same shape, such as an adapter over a Durable Object, without a platform type here.
+ */
+export interface WriteLock {
+  readonly withPermits: (
+    permits: number,
+  ) => <A, E, R>(self: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
+}
+
 import type { PlatformError } from "effect/PlatformError";
 import { foreignRegionDrift } from "../domain/block.ts";
 import { statusLocation } from "../domain/pack.ts";
@@ -43,7 +55,7 @@ export interface SyncTargetOptions {
    * Serializes the write calls of concurrent targets (D14): GitHub asks for content-creating
    * requests not to run concurrently. Reads run in parallel regardless.
    */
-  readonly writeLock?: Semaphore.Semaphore;
+  readonly writeLock?: WriteLock;
 }
 
 export interface SyncOptions extends SyncTargetOptions {
