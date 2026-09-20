@@ -223,6 +223,15 @@ Not part of the four vocabularies; listed so nobody mistakes them for one.
   `missing-path`. Reasons a row is `blocked` or a sync is `refused`, not states.
 - `SyncRefused` and `SyncFailed` (`src/sync/sync.ts`): the errors of the single-target path that
   `sync --all` turns into the `refused` and `failed` outcomes; both carry the measured status.
+- `scan_error` and `scanned` (RuleFleet, app-design §4 job table; kickoff T4): the per-repository
+  outcome of a hosted scan job. `scan_error` is recorded on a `repositories` row (message and
+  time) when its snapshot could not be built (no default-branch ref, 404, a tree over
+  `MAX_TREE_LISTINGS` listings, a 5xx after the transport's retry) and shown as an issue on the
+  repository row; `scanned` is the row of a repository that was measured. A row-level failure,
+  not a shape or a pack status, the way `failed` is a sync outcome. `incomplete` (RuleFleet, T7)
+  is a key in a run's `counts` set by the daily sweep when it closes a run whose Workflow
+  instance no longer exists (a platform kill before D27, a deleted instance): the rows stored so
+  far are kept and counted, and `incomplete: 1` marks that the run did not close on its own.
 - `NestedRepoKind`: `submodule` (label `submodule`; `.git` is a file, or the enclosing
   repository's `.gitmodules` lists the path) and `nested-clone` (label `nested clone`; `.git` is
   a directory nobody lists), D24. Why a repository inside another repository was left out of
