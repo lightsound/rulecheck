@@ -1046,6 +1046,98 @@ re-rendered, so every number on the page is still the CLI's. The live banner fet
 progress from a JSON route and reloads the sections once when the run finishes. T5 is done in
 its static form; the change lands as T5b. Owner's decision, 2026-09-20.
 
+## 2026-09-20 D29: The dashboard is split by subject (pack, repository, run), not by command; the pack side comes first
+
+RuleFleet's home after T5b was the D19–D22 page: overview cards (repositories, issues,
+instruction files), `Next actions`, repository rows, duplicates, and, only once a pack source
+is registered, `Pack distribution`. Reviewed against what the person who installs the App
+wants to do, it answered a different question. Their three goals are to manage the source
+(what the packs are, where they live, what they say), to see where each pack is distributed,
+and to start or stop distribution; the page answered "how healthy are the instruction files",
+which is the CLI's M1 question and the fourth thing a user looks at. Without a source the
+`Pack distribution` section was absent and an alert said the next step was M2, a developer's
+word; the eight repositories of the dogfood installation that already carried blocks were not
+mentioned. [app-design.md](app-design.md) §5 listed three pages (Overview, Repository, Pack &
+subscriptions) without a primary path, and the one page that held the three goals' controls was
+the last.
+
+**Decision.** The dashboard is one frame with a sidebar of five entries, split by the subject a
+page is about, not by the command that produces its data: **Fleet** (home: one card per pack
+with the stacked status bar, counts, rev, open pull requests, and in M2 the `Dry run` / `Sync`
+controls; then `Next actions`; then the health cards reduced to one row), **Packs** (the source,
+one row per pack; a pack page with the body read-only, hash, rev, the GitHub edit link, the
+subscribers table with status, `file:line`, pull request, last outcome, and in M2 the
+subscription checkbox; the `Not subscribed` candidates folded), **Repositories** (one table over
+every repository: shape, issues, one status column per pack, budgets; a repository page as
+app-design §5 already described it), **Runs** (scan and sync runs, the D14 table per sync run),
+**Settings** (pack source, `subscriptionChanges`, `fullRescan`, audit log, permissions). The
+pack side is primary and the repository side secondary because two of the three goals are
+pack-side projections and the third (distribution) has both sides; the repo × pack table lives
+in two places, the pack page (that pack's subscribers and candidates) and the Repositories
+table (every pack as a column), both built from `status_snapshots`. Without a source, Fleet
+opens with the managed blocks the stored `RepoReport`s already hold (per `source`: repositories,
+distinct hashes, revs; no status word, none is measured) and the bootstrap card of app-design
+§2 with options (a) and (b) as links. "Stop" on the pack page means unsubscribe: the
+`subscriptions.json` entry goes, the block stays, and the row shows both facts (the checkbox
+and the chip; [status-model.md](status-model.md), "Subscription and block are two facts"); the
+App opens no pull request that removes a block. M1's remainder lands the frame and every
+read-only part; M2 is split into a read slice (source registration → statuses → cards and
+tables) and a write slice (subscribe, sync, `WriteLock`, sync runs), app-design §9.
+
+**What does not change.** `scan`, `sync`, `--json`, the text report, the `--html` page and its
+sections (they are embedded on the Repositories page and the repository page, static, D28),
+every glossary word, D25. The App still invents no status, shape, or outcome word: where it
+assembles a card or a table itself, the words are `labels.ts`'s and the order is
+`STATUS_ORDER`.
+
+| Decision | Chosen | Alternatives considered | Settled in round |
+| --- | --- | --- | --- |
+| Primary path | Five routes under a sidebar, split by subject (`Fleet / Packs / Repositories / Runs / Settings`), pack side primary, repository side secondary | the D19–D22 page as home plus a `Packs` link (goals 1–3 below the fold or elsewhere); pack-centred only (an empty home without a source; health demoted to nothing); one repo × pack matrix as the home (scales to 200 repositories, but no place for the source, the body, or per-pack actions); a `Next actions` inbox as the home (D21's insight, but empty when all is `current` and structureless); two dashboards, health and distribution (one dataset shown twice, a mode to explain); a setup wizard as the IA (the empty state of Fleet, not a page tree); a minimal App that lets GitHub pull requests and checks carry the status (no cross-repository view, D8) | 4 |
+| First section of the home | The pack cards (the bootstrap card and the managed blocks found when no source is registered), then `Next actions`, then the health row | the health cards (the T5 order; not a goal); `Next actions` first (empty when nothing is due) | 3 |
+| Packs granularity | A list and one page per pack (`/packs/<pack>`) | one page with every pack's card and the whole matrix (app-design's first form; a pack page with body, subscribers, and history does not fit on one page beside another pack's) | 3 |
+| Where the repo × pack table lives | Twice, from the same `status_snapshots`: the pack page (that pack's subscribers and candidates) and the Repositories table (packs as columns) | also on Fleet (a third copy that lengthens the home) | 3 |
+| The D21 sections in M1's remainder | Embedded unchanged, static (D28), under the Repositories table and on the repository page; replaced by components when `html.ts` exports its sections (M2b) | componentizing every section first (app-design's rejected "Overview in M1" alternative, same reason) | 3 |
+| What "stop" means | Unsubscribe only, through the D25 writer; the block stays and the row shows both facts | a pull request removing the block (a new normalization and a new kind of write; recorded as a candidate without an entry) | 3 |
+| Bootstrap state | The managed blocks found in the stored reports as facts (per `source`: repository count, distinct `hash=` values, `rev=`s) plus the onboarding card; no status word | the alert alone (the T5 state; "M2" is not a user's word); printing `current` / `outdated` from the blocks against each other (no pack hash to compare with; the classifier would be guessing) | 2 |
+| M2 split | M2a read (source registration, statuses, cards and tables) before M2b write (subscribe, sync, lock, sync runs) | one M2 (the write slice gates the read slice on `WriteLock` and the subscriptions writer for no reason) | 2 |
+| Mobile | The sidebar folds into the frame's drawer; cards stack; tables scroll | a separate mobile layout | 3 |
+
+**Structural check.** The constraint is "three goals, each wants its own page, and the health
+report wants a fourth". It dissolves when the four are seen as projections of one dataset,
+repository × pack with its status plus `subscriptions.json`: the body and the source are the
+pack's own row, distribution is the pack's column of the matrix, start and stop are the
+operations on that column, and health is the repository's row. `scan` and `sync` are how the
+dataset is measured and acted on, not an axis of the data, so splitting pages by command put
+the axis in the wrong place. Split by subject, each goal is one page and M1 → M2 is the same
+pages gaining controls.
+
+## 2026-09-20 D30: Packs are edited on GitHub; the App links to the editor and shows the result
+
+D25 made `packs/**` on the pack repository's default branch canonical and said that pack
+editing in the UI, "when it comes", would be the same mechanism as the subscriptions writer.
+The dashboard's information architecture (D29) gives the pack a page of its own, so the
+question became concrete: does that page edit the body?
+
+**Decision.** No. The pack page shows the body read-only (with its size and token count), the
+hash and rev, the `loadPacks` warnings for the source, and two links into GitHub: `Edit on
+GitHub` (`github.com/<owner>/<repo>/edit/<branch>/packs/<id>/AGENTS.md`) on the pack page and
+`New pack on GitHub` (`github.com/<owner>/<repo>/new/<branch>?filename=packs/<id>/AGENTS.md`)
+on the Packs list. One sentence on the page describes the whole path: edit → pull request →
+merge → `push` webhook → one pull request per subscriber. That is the flow the D23 workflow and
+the App already run; the page explains it instead of adding a second entrance. App-design §1's
+non-goal ("a pack editor") and §3's consequence are reworded to this; an in-App editor, if it is
+ever built, would write through the D25 mechanism and needs its own decision entry.
+
+| Decision | Chosen | Alternatives considered | Settled in round |
+| --- | --- | --- | --- |
+| Where a pack is edited | On GitHub (web editor, github.dev, a clone, a cloud agent), reached from links on the pack page; the App shows the body, hash, rev, warnings | an in-App Markdown editor with preview and diff, saving as a commit or pull request through the D25 mechanism (re-implements pull request creation, review, history, CODEOWNERS, and branch protection that the pack repository already has; a second permission gate in front of GitHub's; an editor dependency that is weak on phones; the M0 non-goal) | 2 |
+| Rot detection before a pack change lands | None in the App at MVP; a pack that introduces a missing path or unknown script is `refused` per subscriber at the next dry run or sync, which the Runs page shows | run `references.ts` in the editor before saving (the one advantage of an in-App editor; without an editor there is no save step to hook); a dry run against a pack repository pull request before it merges (useful, a candidate without an entry) | 2 |
+
+**Structural check.** The constraint is "the pack must be reviewable, versioned, and protected
+like code". It dissolves only where those properties already exist, and the pack repository
+has all of them because D25 kept the file there; an editor in the App would have to carry each
+one across. Linking to GitHub's editor keeps the properties where they are and costs two URLs.
+
 ## Recording rule
 
 Add an entry here whenever a decision changes what rulecheck writes, what it reports, or which

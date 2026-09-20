@@ -102,6 +102,33 @@ is a projection, not a measurement: `classifyIfSubscribed` (`src/domain/pack.ts`
 the repository would read the moment it is added to `subscriptions.json`. It appears nowhere in
 the text report or in `scan --json`, and the status counts do not include it.
 
+### Subscription and block are two facts
+
+A pack status is one word computed from two facts: whether the repository is in the pack's
+`subscriptions.json` list, and what block, if any, its root pair carries. The block decides
+first (D9): a repository that carries a block for the pack reads `current`, `outdated`,
+`modified`, or `blocked` whether or not it is in the list, and only a repository without a
+block reads `eligible` (in the list) or `not-subscribed` (not in the list). Two consequences
+follow, and a surface that shows the distribution must not hide either:
+
+- **Unsubscribing a repository that carries the block changes nothing in its status.** The
+  lifecycle edge `unsubscribe` runs from `eligible` / `blocked` to `not-subscribed` only for a
+  repository without a block; with a block, removing the list entry leaves the row `current`
+  or `outdated`, `Next actions` keeps printing `Run sync to update the block` when the pack
+  moves on, and `sync --all` has no target for it any more (D14: targets come from the list),
+  so the block will never be updated by a sync. Only removing the block (a human edit; the sync
+  has no normalization that removes a block, and adding one needs a decision entry) or
+  re-subscribing ends that state.
+- **A repository can carry a block without ever having been subscribed** (a block placed by
+  hand, or a subscription that was removed). `scan --packs` over checkouts reports it; the
+  `sync --all` table does not, because it has no row for it.
+
+So a dashboard that offers "stop" as an action (RuleFleet, D29) shows the two facts side by
+side, the list membership and the block's status, instead of one word: a row that is not in the
+list and reads `current` is "stopped, block still present", which no single status says. In
+`scan --json` the facts are `distribution.packs[].subscribers` and `repos[].blocks`; the
+status is derived from them and adds nothing they do not carry.
+
 ### Next action per status
 
 The `Next actions` list of the `scan --html` page (D21) prints one row per repository × pack
