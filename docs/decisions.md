@@ -779,9 +779,10 @@ the order and content of the other sections.
 > link. The first live run opened [lightsound/kaede#130](https://github.com/lightsound/kaede/pull/130)
 > from the `subscriptions.json` push of 08:52Z with the workflow already disabled
 > (`disabled_manually`), and the second live run after its merge wrote nothing (roadmap Step
-> 8). The workflow file's deletion is [agent-rules#10](https://github.com/lightsound/agent-rules/pull/10)
-> and the `RULECHECK_TOKEN` removal follows it (pending owner; checklist in the Project store,
-> `docs/b7-retire-d23-workflow.md`).
+> 8). The workflow file was deleted with
+> [agent-rules#10](https://github.com/lightsound/agent-rules/pull/10) and the `RULECHECK_TOKEN`
+> Actions secret removed on 2026-09-21; the PAT itself is deleted by the owner as the last step
+> (checklist in the Project store, `docs/b7-retire-d23-workflow.md`).
 > What D23 decided about the write path stands: one `sync --all` / `syncTarget`, every D10 and
 > D14 check unchanged, nothing merged automatically. `sync --all` from a checkout remains the
 > manual retry path and the way to sync from an unmerged pack ref.

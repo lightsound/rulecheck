@@ -314,8 +314,9 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
   started live sync run `96247fea` (trigger `webhook:c3597b52…`, 15 targets, 24.7 s, 0 retries):
   14 rows `nothing-to-do` / `current` and one `opened` / `eligible` `+18 -0` for kaede × base,
   [lightsound/kaede#130](https://github.com/lightsound/kaede/pull/130) authored by
-  `rulefleet[bot]` on branch `agent-rules/base` (one `AGENTS.md`, the managed block appended after
-  the repository's existing foreign region, body ending with the run link), one `sync.opened`
+  `rulefleet[bot]` on branch `agent-rules/base` (one `AGENTS.md`, the managed block appended
+  after the repository's existing foreign region, body ending with the run link), one
+  `sync.opened`
   audit row with the URL, the `WriteLock` lease taken and released exactly once around the
   write; the D23 workflow did not run, so the pull request is the App's alone. After the owner
   merged #130 the merge push rescanned kaede (`status_snapshots` kaede × base `eligible` →
@@ -323,9 +324,10 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
   entered no write (no `WriteLock` call, branch `agent-rules/base` unchanged at `0b4b4de4`, no
   new pull request, no audit write). An earlier all-`current` manual live run `709cf86a`
   (08:45Z) had already exercised the per-repository write token on every target without a
-  write. The `Sync packs` workflow reads `disabled_manually`; its deletion is
-  [agent-rules#10](https://github.com/lightsound/agent-rules/pull/10) and the `RULECHECK_TOKEN`
-  removal follows it (pending owner; checklist in the Project store,
+  write. The `Sync packs` workflow was disabled on 2026-09-21 and
+  deleted with [agent-rules#10](https://github.com/lightsound/agent-rules/pull/10) the same
+  day, and the `RULECHECK_TOKEN` Actions secret was removed; the deletion of the PAT itself at
+  github.com/settings is the owner's last step (checklist in the Project store,
   `docs/b7-retire-d23-workflow.md`).
 
 ## Deferred: Skills distribution (D18, 2026-09-16)
