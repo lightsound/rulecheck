@@ -122,10 +122,11 @@ export class SyncRefused extends Data.TaggedError("SyncRefused")<{
  * GitHub failed after the base branch was measured (a read while checking the tool-owned branch,
  * or one of the write calls), so the measured status is known but the delivery is not. A
  * `GitHubError` before measurement escapes as itself: nothing about the target is known then.
+ * `status` is null for the subscriptions writer (D32), which measures no pack status.
  */
 export class SyncFailed extends Data.TaggedError("SyncFailed")<{
   readonly error: GitHubError;
-  readonly status: PackStatusEntry;
+  readonly status: PackStatusEntry | null;
 }> {}
 
 export const branchFor = (pack: string): string => `agent-rules/${pack}`;
