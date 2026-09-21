@@ -214,7 +214,7 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
   actions, matrix, and rows from one scan, for judging whether the live version is worth building.
   Designed in [app-design.md](app-design.md); see Step 6's "Later" for the state.
 
-## Step 6: Automatic sync from the pack repository — workflow landed 2026-09-16, secret pending
+## Step 6: Automatic sync from the pack repository — workflow landed 2026-09-16; superseded by the App 2026-09-21 (Step 8, B7)
 
 - Stop running `sync --all` by hand after every pack merge. The trigger is the merge itself, so
   the pack repository runs the sync: `.github/workflows/sync.yml` in `lightsound/agent-rules`
@@ -239,7 +239,13 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
   the real subscribers (14 targets, all `current`).
 - Operational rule that follows: a repository added to `subscriptions.json` is also added to the
   token's repository list, or its row reads `failed` and the run exits 1.
-- Later: a GitHub App replaces the PAT (installation token per run, writes attributed to the
+- Later — **done 2026-09-21**: the GitHub App (RuleFleet, M2b) replaced the PAT: a push to the
+  registered pack source starts a sync run whose live targets write with a per-repository
+  installation token (`contents` + `pull_requests` write, one `repository_ids` entry), and the
+  pull requests link the run page. The D23 workflow and `RULECHECK_TOKEN` are retired by the
+  owner once the first live run's pull requests merged (B7 checklist in the Project store,
+  `docs/b7-retire-d23-workflow.md`); the original design follows.
+- Originally: a GitHub App replaces the PAT (installation token per run, writes attributed to the
   app) when the tool leaves the single-owner phase; it is the same App the dashboard's webhook
   needs. Its MVP design is [app-design.md](app-design.md) (D25; nothing built yet). Candidates
   not built now: a nightly `schedule` as a safety net, a `pull_request` dry run on pack
@@ -295,6 +301,13 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
   `bun test` still renders every page from the fixture.
 - Not in M2a, by decision 16: no GitHub write and no `WriteLock` use; `dryRun` is the literal
   `true` in the Workflow params. M2b (kickoff §4) widens it.
+- M2b (kickoff §4), server side landed 2026-09-21: R2 the subscriptions writer (#44, D32), B1
+  the `WriteLock` Durable Object (rulefleet #32), B2 live sync runs with per-target write
+  tokens, the `sync_on_push` trigger mode defaulting to `dry-run`, and the `pull_request.closed`
+  note (#34), B3 `Apply` on the Subscribers form through `subscribe` (#35), B4 / B5 open pull
+  requests on Fleet and the `sync_on_push` setting (#36, UI pending), B6 the repository page
+  (#37, UI pending), B7 this note. Done when the first live run's pull requests merged and the
+  D23 workflow is gone (app-design §9 M2b row).
 
 ## Deferred: Skills distribution (D18, 2026-09-16)
 

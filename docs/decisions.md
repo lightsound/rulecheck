@@ -773,6 +773,16 @@ the order and content of the other sections.
 
 ## 2026-09-16 D23: The pack repository syncs itself: a GitHub Actions workflow in agent-rules runs `sync --all`
 
+> **2026-09-21, superseded by RuleFleet (M2b B7).** The App is now the trigger: a push to the
+> registered pack source starts a sync run (`SyncRunWorkflow`, D31), live when the
+> installation's `sync_on_push` is `live`, and its pull requests carry the run page as their
+> link. The `Sync packs` workflow in `lightsound/agent-rules` and its `RULECHECK_TOKEN` are
+> retired once the first live run has opened or updated the real subscribers' pull requests and
+> they merged (the owner's checklist is in the Project store, `docs/b7-retire-d23-workflow.md`).
+> What D23 decided about the write path stands: one `sync --all` / `syncTarget`, every D10 and
+> D14 check unchanged, nothing merged automatically. `sync --all` from a checkout remains the
+> manual retry path and the way to sync from an unmerged pack ref.
+
 Every distribution so far was a human running `sync --all` from a checkout of rulecheck after
 merging a pack change; the roadmap's multi-pack rollout note shows what that costs (merge, run,
 merge, run). The trigger is known in advance: the packs are outdated exactly when `packs/**` or
