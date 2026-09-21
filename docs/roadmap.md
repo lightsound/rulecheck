@@ -4,7 +4,7 @@ Ordered next steps. Each step is small enough for one chat session and ends with
 the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
 [decisions.md](decisions.md) (D4 to D12); tool facts in [tool-behavior.md](tool-behavior.md).
 
-## Current state (2026-09-15)
+## Current state (2026-09-21)
 
 - rulecheck: read-only scan works on `~/ghq` (shape, duplicates, budget, rot detection, personal
   layer, managed blocks, skills inventory, pack distribution status via `--packs`, which reads a
@@ -32,6 +32,10 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
   is set in agent-rules (Step 6). The `GitHub` client is one mapping over two transports (D26):
   `gh api` for the CLI, `fetch` with an App installation token for the hosted App; `package.json`
   `exports` lets the App import the `.ts` sources by subpath (Step 7).
+- RuleFleet (`lightsound/rulefleet`, the hosted App): M1 and M2a are live on `prod` for the
+  dogfood installation; the registered pack source is `lightsound/agent-rules`, and every push to
+  it or the daily Cron produces a dry-run sync run whose table equals `sync --all --dry-run`
+  (Step 8). M2b (the first App-side GitHub write) is next.
 - `lightsound/agent-rules/packs/base/AGENTS.md`: the portable pack `base` (D7 naming),
   environment-neutral only (Step 1, [agent-rules#1](https://github.com/lightsound/agent-rules/pull/1)).
   The repository's root `AGENTS.md` instructs agents working in agent-rules itself and is not
@@ -266,6 +270,31 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
   the CLI reads a real public repository identically through `ghTransport` and
   `fetchTransport` (same sha, same 62 files); `bun add github:lightsound/rulecheck#<sha>` from a
   scratch project resolves `rulecheck/scan/scan` and type-checks. The App's T4 pins that sha.
+
+## Step 8: M2a, pack source and distribution (read) — done 2026-09-21 (D31)
+
+- Built on `lightsound/rulefleet` from [m2-kickoff.md](m2-kickoff.md) §3: A1 pack source
+  registration and the settings (#21), A2 `SyncRunWorkflow` dry-run only (#22), A3 pack-source
+  webhooks (#23), A4 the run detail page and the pack page's "last run" column (#25), A5
+  `status_snapshots` from the scan step and the scheduled dry run (#24), A6 D31 (#42) and this
+  entry. rulecheck's part was P1 (#41): `WriteLock` interface, scoped installation tokens,
+  `committed` in the glossary. The App pins rulecheck `0869ebb`.
+- Done check, `prod`, dogfood installation 163007037, 2026-09-21 03:08 UTC: registering
+  `lightsound/agent-rules` from Settings wrote one `pack_sources` row (`head_sha` `fbb3aa4a`, the
+  source's `main` HEAD), two `packs` rows whose hashes equal the `hash=` of the blocks in this
+  repository's `AGENTS.md`, one `audit_log` row, and started dry-run sync run `acfc12e0` (trigger
+  `manual:lightsound`), which finished in 60 s: `load-source` 38 s, then 14 `target` steps (7
+  subscribers × 2 packs, three in flight, 0 retries), every row `nothing-to-do` / `current`, 0
+  refused or failed; `status_snapshots` holds 168 rows (84 scanned repositories × 2 packs: 16
+  `current`, 152 `not-subscribed`). `bun run dev sync --all --dry-run --packs
+  lightsound/agent-rules` from this repository at the same source sha lists the same 14 targets
+  in the same order; 12 of 14 rows identical, the other 2 (`lightsound/rererepo`) unmeasurable
+  from the verifying machine because its token cannot read that private repository (the App's
+  installation token can), not a divergence in the sync logic. The Fleet cards, the pack page,
+  and the Repositories status columns render from the real source through `fleetModel`;
+  `bun test` still renders every page from the fixture.
+- Not in M2a, by decision 16: no GitHub write and no `WriteLock` use; `dryRun` is the literal
+  `true` in the Workflow params. M2b (kickoff §4) widens it.
 
 ## Deferred: Skills distribution (D18, 2026-09-16)
 
