@@ -327,9 +327,10 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
   (08:45Z) had already exercised the per-repository write token on every target without a
   write. The `Sync packs` workflow was disabled on 2026-09-21 and
   deleted with [agent-rules#10](https://github.com/lightsound/agent-rules/pull/10) the same
-  day, and the `RULECHECK_TOKEN` Actions secret was removed; the deletion of the PAT itself at
-  github.com/settings is the owner's last step (checklist in the Project store,
-  `docs/b7-retire-d23-workflow.md`).
+  day, the `RULECHECK_TOKEN` Actions secret was removed, and the two fine-grained PATs behind it
+  (`rulecheck-sync`, `rulecheck-sync-agent-rules`) were deleted at 11:06 UTC; no credential other
+  than the App's installation tokens can write to a subscriber any more (checklist in the
+  Project store, `docs/b7-retire-d23-workflow.md`). B7 complete.
 
 ## Deferred: Skills distribution (D18, 2026-09-16)
 

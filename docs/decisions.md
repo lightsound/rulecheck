@@ -782,8 +782,8 @@ the order and content of the other sections.
 > (`disabled_manually`), and the second live run after its merge wrote nothing (roadmap Step
 > 8). The workflow file was deleted with
 > [agent-rules#10](https://github.com/lightsound/agent-rules/pull/10) and the `RULECHECK_TOKEN`
-> Actions secret removed on 2026-09-21; the PAT itself is deleted by the owner as the last step
-> (checklist in the Project store, `docs/b7-retire-d23-workflow.md`).
+> Actions secret removed and the two PATs behind it deleted on 2026-09-21 (checklist in the
+> Project store, `docs/b7-retire-d23-workflow.md`). B7 complete.
 > What D23 decided about the write path stands: one `sync --all` / `syncTarget`, every D10 and
 > D14 check unchanged, nothing merged automatically. `sync --all` from a checkout remains the
 > manual retry path and the way to sync from an unmerged pack ref.
