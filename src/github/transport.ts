@@ -24,6 +24,8 @@ export interface TransportRequest {
   readonly path: string;
   /** JSON body, or null for none. */
   readonly body: unknown | null;
+  /** Extra request headers for this call only (a transport that has no headers ignores them). */
+  readonly headers?: Readonly<Record<string, string>>;
 }
 
 export interface TransportResponse {
