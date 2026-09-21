@@ -301,13 +301,32 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
   `bun test` still renders every page from the fixture.
 - Not in M2a, by decision 16: no GitHub write and no `WriteLock` use; `dryRun` is the literal
   `true` in the Workflow params. M2b (kickoff §4) widens it.
-- M2b (kickoff §4), server side landed 2026-09-21: R2 the subscriptions writer (#44, D32), B1
-  the `WriteLock` Durable Object (rulefleet #32), B2 live sync runs with per-target write
-  tokens, the `sync_on_push` trigger mode defaulting to `dry-run`, and the `pull_request.closed`
-  note (#34), B3 `Apply` on the Subscribers form through `subscribe` (#35), B4 / B5 open pull
-  requests on Fleet and the `sync_on_push` setting (#36, UI pending), B6 the repository page
-  (#37, UI pending), B7 this note. Done when the first live run's pull requests merged and the
-  D23 workflow is gone (app-design §9 M2b row).
+- M2b (kickoff §4) — **done 2026-09-21**: R2 the subscriptions writer (#44, D32), B1 the
+  `WriteLock` Durable Object (rulefleet #32), B2 live sync runs with per-target write tokens,
+  the `sync_on_push` trigger mode defaulting to `dry-run`, and the `pull_request.closed` notes
+  (#34), B3 `Apply` on the Subscribers form through `subscribe` (#35), B4 / B5 open pull requests
+  on Fleet and the `sync_on_push` setting with the audit log (#36), B6 the repository page with
+  rulecheck's `Repositories` / `Duplicates` sections as components under a parity test (#37), B7
+  the D23 retirement (#45 and the owner's checklist).
+- M2b done check, `prod`, dogfood installation 163007037, 2026-09-21: the owner disabled the
+  D23 workflow, switched `sync_on_push` to `live` (audit `settings.sync_on_push` `dry-run ->
+  live`), and added `lightsound/kaede` to `base` in `subscriptions.json`; the push at 08:52:22Z
+  started live sync run `96247fea` (trigger `webhook:c3597b52…`, 15 targets, 24.7 s, 0 retries):
+  14 rows `nothing-to-do` / `current` and one `opened` / `eligible` `+18 -0` for kaede × base,
+  [lightsound/kaede#130](https://github.com/lightsound/kaede/pull/130) authored by
+  `rulefleet[bot]` on branch `agent-rules/base` (one `AGENTS.md`, the managed block appended after
+  the repository's existing foreign region, body ending with the run link), one `sync.opened`
+  audit row with the URL, the `WriteLock` lease taken and released exactly once around the
+  write; the D23 workflow did not run, so the pull request is the App's alone. After the owner
+  merged #130 the merge push rescanned kaede (`status_snapshots` kaede × base `eligible` →
+  `current`), and a second manual live run `b69aa8ac` (10:35Z) read 15 × `nothing-to-do`,
+  entered no write (no `WriteLock` call, branch `agent-rules/base` unchanged at `0b4b4de4`, no
+  new pull request, no audit write). An earlier all-`current` manual live run `709cf86a`
+  (08:45Z) had already exercised the per-repository write token on every target without a
+  write. The `Sync packs` workflow reads `disabled_manually`; its deletion is
+  [agent-rules#10](https://github.com/lightsound/agent-rules/pull/10) and the `RULECHECK_TOKEN`
+  removal follows it (pending owner; checklist in the Project store,
+  `docs/b7-retire-d23-workflow.md`).
 
 ## Deferred: Skills distribution (D18, 2026-09-16)
 

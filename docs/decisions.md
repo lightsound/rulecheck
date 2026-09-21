@@ -773,12 +773,15 @@ the order and content of the other sections.
 
 ## 2026-09-16 D23: The pack repository syncs itself: a GitHub Actions workflow in agent-rules runs `sync --all`
 
-> **2026-09-21, superseded by RuleFleet (M2b B7).** The App is now the trigger: a push to the
-> registered pack source starts a sync run (`SyncRunWorkflow`, D31), live when the
+> **Retired 2026-09-21, superseded by RuleFleet (M2b B7).** The App is now the trigger: a push
+> to the registered pack source starts a sync run (`SyncRunWorkflow`, D31), live when the
 > installation's `sync_on_push` is `live`, and its pull requests carry the run page as their
-> link. The `Sync packs` workflow in `lightsound/agent-rules` and its `RULECHECK_TOKEN` are
-> retired once the first live run has opened or updated the real subscribers' pull requests and
-> they merged (the owner's checklist is in the Project store, `docs/b7-retire-d23-workflow.md`).
+> link. The first live run opened [lightsound/kaede#130](https://github.com/lightsound/kaede/pull/130)
+> from the `subscriptions.json` push of 08:52Z with the workflow already disabled
+> (`disabled_manually`), and the second live run after its merge wrote nothing (roadmap Step
+> 8). The workflow file's deletion is [agent-rules#10](https://github.com/lightsound/agent-rules/pull/10)
+> and the `RULECHECK_TOKEN` removal follows it (pending owner; checklist in the Project store,
+> `docs/b7-retire-d23-workflow.md`).
 > What D23 decided about the write path stands: one `sync --all` / `syncTarget`, every D10 and
 > D14 check unchanged, nothing merged automatically. `sync --all` from a checkout remains the
 > manual retry path and the way to sync from an unmerged pack ref.
@@ -1184,6 +1187,13 @@ repository it measured (A5), so history does not wait for a sync run.
 unit the run counts, and a target is that unit. The dry-run boundary is a type (`dryRun: true`
 as a literal in M2a), so no write operation is reachable from the App until M2b widens it and
 adds the per-target write token; that is where the second half of this entry will be written.
+
+**Measured on `prod`, 2026-09-21 (roadmap Step 8).** Dry run `acfc12e0` (M2a, 14 targets, 60 s,
+`load-source` 38 s) equalled the CLI table row for row; live run `96247fea` (15 targets, 24.7 s)
+opened one pull request with the lock taken once around the write and 14 `nothing-to-do` rows
+that never reached a write; live run `b69aa8ac` over an all-`current` fleet made no write call.
+The shape held as decided: one instance per run, `load-source` first, three targets in flight,
+zero step retries in all three runs.
 
 ## 2026-09-21 D32: The subscriptions writer, `src/sync/subscribe.ts`
 
