@@ -535,6 +535,79 @@ describe("installationToken", () => {
     expect(authorizations[0]).toMatch(/^Bearer eyJ/);
     expect(authorizations[1]).toBe("Bearer ghs_installation");
   });
+
+  test("a stateless installation token (ghs_ JWT, ~520 characters) is carried opaque through scan and sync --all --dry-run", async () => {
+    // GitHub's 2026 rollout: `POST …/access_tokens` with `X-GitHub-Stateless-S2S-Token: enabled`
+    // returns a `ghs_`-prefixed JWT of about 520 characters with two dots instead of the short
+    // opaque token. Nothing here may assume a length or a shape.
+    const { pem } = await testKey();
+    const segment = (n: number) =>
+      "A".repeat(n).replace(/A/g, () => "ab0Z-_"[Math.floor(Math.random() * 6)] ?? "a");
+    const stateless = `ghs_${segment(36)}.${segment(300)}.${segment(180)}`;
+    expect(stateless.length).toBeGreaterThanOrEqual(520);
+    expect(stateless.split(".").length).toBe(3);
+    expect(stateless).toMatch(/^ghs_[A-Za-z0-9._-]{36,}$/);
+
+    const fake = fakeGitHub({
+      "acme/agent-rules": {
+        files: {
+          "packs/base/AGENTS.md": "# base\n",
+          "subscriptions.json": JSON.stringify({ base: ["acme/eligible"] }),
+        },
+      },
+      "acme/eligible": { files: { "AGENTS.md": "# E\n", "CLAUDE.md": "@AGENTS.md\n" } },
+    });
+    const rest = fakeRest(fake);
+    const mintHeaders: string[] = [];
+    const authorizations: string[] = [];
+    const fetch = async (url: string, init: RequestInit) => {
+      const headers = init.headers as Record<string, string>;
+      if (url.endsWith("/access_tokens")) {
+        mintHeaders.push(
+          headers["X-GitHub-Stateless-S2S-Token"] ?? headers["x-github-stateless-s2s-token"] ?? "",
+        );
+        return new Response(
+          JSON.stringify({ token: stateless, expires_at: "2999-01-01T00:00:00Z" }),
+          { status: 201 },
+        );
+      }
+      authorizations.push(headers.authorization ?? "");
+      return rest(url, init);
+    };
+    const github = makeGitHub(
+      installationTokenTransport({
+        appId: 1,
+        privateKey: pem,
+        installationId: 2,
+        fetch,
+        mintHeaders: { "X-GitHub-Stateless-S2S-Token": "enabled" },
+      }),
+    );
+    const run = <A, E>(effect: Effect.Effect<A, E, BunServices.BunServices | GitHub>) =>
+      Effect.runPromise(
+        effect.pipe(
+          Effect.provide(Layer.mergeAll(BunServices.layer, Layer.succeed(GitHub, github))),
+        ),
+      );
+    // scan path: the repository snapshot (getRepository, getRef, getCommit, getTree, getBlob)
+    const eligible = { owner: "acme", name: "eligible" };
+    const sha = (await run(github.getRef(eligible, "heads/main"))) ?? "";
+    const snapshot = await run(repositorySnapshot(github, eligible, sha));
+    expect([...snapshot.keys()].filter((k) => !k.includes("/.git/")).sort()).toEqual([
+      "/github.com/acme/eligible/AGENTS.md",
+      "/github.com/acme/eligible/CLAUDE.md",
+    ]);
+    // sync path: the pack source read (loadPacks) and one dry-run target
+    const dry = await run(syncAll({ packs: "acme/agent-rules", pack: null, dryRun: true }));
+    expect(dry.rows.map((row) => `${row.target.repo}:${row.outcome.kind}`)).toEqual([
+      "acme/eligible:planned",
+    ]);
+
+    expect(mintHeaders).toEqual(["enabled"]);
+    expect(authorizations.length).toBeGreaterThan(5);
+    expect(new Set(authorizations)).toEqual(new Set([`Bearer ${stateless}`]));
+    expect(fake.calls).toEqual([]);
+  });
 });
 
 describe("repositorySnapshot on a truncated tree", () => {

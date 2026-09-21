@@ -44,6 +44,13 @@ export interface InstallationTokenOptions extends Omit<FetchTransportOptions, "t
    * `pull_requests: "write"` for one live target). Absent: every permission of the registration.
    */
   readonly permissions?: Readonly<Record<string, "read" | "write">>;
+  /**
+   * Extra headers on the mint request only. GitHub's temporary
+   * `X-GitHub-Stateless-S2S-Token: enabled | disabled` forces the new stateless (`ghs_` JWT,
+   * ~520 characters) or the classic opaque token format during the 2026 rollout; the token is
+   * opaque to this module either way.
+   */
+  readonly mintHeaders?: Readonly<Record<string, string>>;
   /** Clock in milliseconds since the epoch; default `Date.now`. Injected by tests. */
   readonly now?: () => number;
 }
@@ -94,6 +101,7 @@ export function installationToken(
     installationId: _id,
     repositoryIds,
     permissions,
+    mintHeaders,
     now: _now,
     ...transportOptions
   } = options;
@@ -108,6 +116,7 @@ export function installationToken(
       method: "POST",
       path: `app/installations/${options.installationId}/access_tokens`,
       body: mintBody,
+      ...(mintHeaders === undefined ? {} : { headers: mintHeaders }),
     });
     if (response.status >= 400) {
       const retryAfter = retryAfterOf(response.headers);

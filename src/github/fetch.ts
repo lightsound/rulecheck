@@ -60,6 +60,7 @@ export const fetchTransport = (options: FetchTransportOptions): Transport => {
     method: string,
     path: string,
     body: unknown | null,
+    extraHeaders: Readonly<Record<string, string>> = {},
   ): Effect.Effect<TransportResponse, GitHubError> =>
     Effect.gen(function* () {
       const token = yield* options.token;
@@ -67,10 +68,13 @@ export const fetchTransport = (options: FetchTransportOptions): Transport => {
         method,
         headers: {
           accept: "application/vnd.github+json",
+          // The token is opaque here: any length, any prefix (GitHub's stateless `ghs_` JWTs
+          // included); it is never inspected, logged, or stored by this module.
           authorization: `Bearer ${token}`,
           "user-agent": options.userAgent ?? "rulecheck",
           "x-github-api-version": "2022-11-28",
           ...(body === null ? {} : { "content-type": "application/json" }),
+          ...extraHeaders,
         },
         ...(body === null ? {} : { body: JSON.stringify(body) }),
       };
@@ -102,14 +106,14 @@ export const fetchTransport = (options: FetchTransportOptions): Transport => {
     });
 
   return {
-    request: ({ method, path, body }) =>
+    request: ({ method, path, body, headers }) =>
       Effect.gen(function* () {
         const operation = `${method} ${path}`;
-        const first = yield* once(operation, method, path, body);
+        const first = yield* once(operation, method, path, body, headers);
         const delay = secondaryLimitDelay(first);
         if (delay === null || delay > maxRetryDelay) return first;
         yield* sleep(delay);
-        return yield* once(operation, method, path, body);
+        return yield* once(operation, method, path, body, headers);
       }),
   };
 };
