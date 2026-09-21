@@ -311,7 +311,8 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
 - M2b done check, `prod`, dogfood installation 163007037, 2026-09-21: the owner disabled the
   D23 workflow, switched `sync_on_push` to `live` (audit `settings.sync_on_push` `dry-run ->
   live`), and added `lightsound/kaede` to `base` in `subscriptions.json`; the push at 08:52:22Z
-  started live sync run `96247fea` (trigger `webhook:c3597b52…`, 15 targets, 24.7 s, 0 retries):
+  started live sync run `96247fea` (trigger `webhook:c3597b52…`, 15 targets, 24.7 s, no
+  retries):
   14 rows `nothing-to-do` / `current` and one `opened` / `eligible` `+18 -0` for kaede × base,
   [lightsound/kaede#130](https://github.com/lightsound/kaede/pull/130) authored by
   `rulefleet[bot]` on branch `agent-rules/base` (one `AGENTS.md`, the managed block appended
