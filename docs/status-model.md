@@ -222,8 +222,9 @@ Not part of the four vocabularies; listed so nobody mistakes them for one.
 - `BlockIssueKind`: `malformed-marker`, `foreign-marker`; `FindingKind`: `unknown-script`,
   `missing-path`. Reasons a row is `blocked` or a sync is `refused`, not states.
 - `SyncRefused` and `SyncFailed` (`src/sync/sync.ts`): the errors of the single-target path that
-  `sync --all` turns into the `refused` and `failed` outcomes; both carry the measured status.
-- `committed` (RuleFleet M2b, `src/sync/subscribe.ts` when built, D25): the subscriptions
+  `sync --all` turns into the `refused` and `failed` outcomes; both carry the measured status,
+  null when the subscriptions writer raised them (it measures no pack status).
+- `committed` (RuleFleet M2b, `src/sync/subscribe.ts`, D25 / D32): the subscriptions
   writer's result when a `subscriptions.json` change landed as one commit on the pack
   repository's default branch (`subscriptionChanges: "direct-commit"`); under `pull-request` the
   result is a sync outcome word (`opened` / `updated`). A result of the writer, not a pack

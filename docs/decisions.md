@@ -1175,6 +1175,44 @@ unit the run counts, and a target is that unit. The dry-run boundary is a type (
 as a literal in M2a), so no write operation is reachable from the App until M2b widens it and
 adds the per-target write token; that is where the second half of this entry will be written.
 
+## 2026-09-21 D32: The subscriptions writer, `src/sync/subscribe.ts`
+
+D25 made `subscriptions.json` on the pack repository the one place a subscription lives and
+announced a writer for it. M2b B3 of RuleFleet needs it, and `docs/m2-kickoff.md` decisions 5
+and 6 fixed its shape: the Subscribers table is the basket, `Apply` posts the desired set, the
+writer diffs it and writes once, synchronously in the request under the installation's
+`WriteLock`. This entry records the writer as built.
+
+**Decision.** rulecheck gains a second write path next to `syncTarget`, in the same directory
+and under the same rules: `subscribe(options)` requires `GitHub`, measures first (the file at
+the base head; in `pull-request` mode also the tool-owned branch `rulecheck/subscriptions`,
+whose tip must be a rulecheck commit, D10, and whose pending set is the set difference tip
+minus base), plans with the pure `planSubscriptionChanges` (`src/domain/subscriptions.ts`:
+key order kept, a new pack key appended, `normalizeRepoName`, two-space JSON with a trailing
+newline, no-op changes dropped), measures the plan again (the planned text parses and encodes
+the net intent of every pair touched), then writes. `pull-request` mode: one commit on the base
+head, the branch created or force-moved, one pull request opened or updated whose body lists
+every pending change and links the page that wrote it; a tip that already holds the planned
+text under an open pull request is `up-to-date`; a plan equal to the base with an open pull
+request is a refusal naming the pull request (closing it drops the pending set; the App does
+not close pull requests, decision 5 round 2). `direct-commit` mode: one commit, fast-forward
+`setRef`; a 422 re-reads the head, plans once more on top of it, and tries once; the second 422
+is a refusal. Results: `nothing-to-do`, `planned`, `up-to-date`, `opened`, `updated`, and
+`committed` (status-model, words outside the model); errors `SyncRefused` / `SyncFailed` with
+`status: null`. No CLI command.
+
+| Decision | Chosen | Alternatives considered | Settled in round |
+| --- | --- | --- | --- |
+| What the pending set is | the set difference between the branch tip's file and the base's, re-applied on the current base | the tip file taken whole as the new base (stale when the base moved since the branch was built); a database table (D25 forbids a second source of truth) | 2 |
+| Second measurement | parse the planned text and check the net op per (pack, repo) touched | check every applied change (wrong when a pending add meets a requested remove: the net is "absent") | 2 |
+| A change that changes nothing | dropped by the planner; the writer compares sets and answers `nothing-to-do` | a refusal per no-op (makes a resubmitted form fail) | 1 |
+| Commit ownership marker | the existing `chore(agent-rules):` prefix (`isRulecheckCommit`), subject `update subscriptions` | a second prefix (a second thing every front must recognize) | 1 |
+
+**Structural check.** D25's principle stands: the file and the branch are the truth, and this
+writer only moves them; nothing about a subscription is stored anywhere else by rulecheck. The
+App caches what it can read from the branch (`pack_sources.pending_*`, kickoff §5) and refreshes
+that cache from webhooks, never the other way round.
+
 ## Recording rule
 
 Add an entry here whenever a decision changes what rulecheck writes, what it reports, or which
