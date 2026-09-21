@@ -311,11 +311,13 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
 - M2b done check, `prod`, dogfood installation 163007037, 2026-09-21: the owner disabled the
   D23 workflow, switched `sync_on_push` to `live` (audit `settings.sync_on_push` `dry-run ->
   live`), and added `lightsound/kaede` to `base` in `subscriptions.json`; the push at 08:52:22Z
-  started live sync run `96247fea` (trigger `webhook:c3597b52…`, 15 targets, 24.7 s, 0 retries):
+  started live sync run `96247fea` (trigger `webhook:c3597b52…`, 15 targets, 24.7 s, no
+  retries):
   14 rows `nothing-to-do` / `current` and one `opened` / `eligible` `+18 -0` for kaede × base,
   [lightsound/kaede#130](https://github.com/lightsound/kaede/pull/130) authored by
-  `rulefleet[bot]` on branch `agent-rules/base` (one `AGENTS.md`, the managed block appended after
-  the repository's existing foreign region, body ending with the run link), one `sync.opened`
+  `rulefleet[bot]` on branch `agent-rules/base` (one `AGENTS.md`, the managed block appended
+  after the repository's existing foreign region, body ending with the run link), one
+  `sync.opened`
   audit row with the URL, the `WriteLock` lease taken and released exactly once around the
   write; the D23 workflow did not run, so the pull request is the App's alone. After the owner
   merged #130 the merge push rescanned kaede (`status_snapshots` kaede × base `eligible` →
@@ -323,10 +325,12 @@ the real tree (`bun run dev scan ~/ghq`). Decisions behind the order are in
   entered no write (no `WriteLock` call, branch `agent-rules/base` unchanged at `0b4b4de4`, no
   new pull request, no audit write). An earlier all-`current` manual live run `709cf86a`
   (08:45Z) had already exercised the per-repository write token on every target without a
-  write. The `Sync packs` workflow reads `disabled_manually`; its deletion is
-  [agent-rules#10](https://github.com/lightsound/agent-rules/pull/10) and the `RULECHECK_TOKEN`
-  removal follows it (pending owner; checklist in the Project store,
-  `docs/b7-retire-d23-workflow.md`).
+  write. The `Sync packs` workflow was disabled on 2026-09-21 and
+  deleted with [agent-rules#10](https://github.com/lightsound/agent-rules/pull/10) the same
+  day, the `RULECHECK_TOKEN` Actions secret was removed, and the two fine-grained PATs behind it
+  (`rulecheck-sync`, `rulecheck-sync-agent-rules`) were deleted at 11:06 UTC; no credential other
+  than the App's installation tokens can write to a subscriber any more (checklist in the
+  Project store, `docs/b7-retire-d23-workflow.md`). B7 complete.
 
 ## Deferred: Skills distribution (D18, 2026-09-16)
 

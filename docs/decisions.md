@@ -776,12 +776,14 @@ the order and content of the other sections.
 > **Retired 2026-09-21, superseded by RuleFleet (M2b B7).** The App is now the trigger: a push
 > to the registered pack source starts a sync run (`SyncRunWorkflow`, D31), live when the
 > installation's `sync_on_push` is `live`, and its pull requests carry the run page as their
-> link. The first live run opened [lightsound/kaede#130](https://github.com/lightsound/kaede/pull/130)
-> from the `subscriptions.json` push of 08:52Z with the workflow already disabled
+> link. The first live run opened
+> [lightsound/kaede#130](https://github.com/lightsound/kaede/pull/130) from the
+> `subscriptions.json` push of 08:52Z with the workflow already disabled
 > (`disabled_manually`), and the second live run after its merge wrote nothing (roadmap Step
-> 8). The workflow file's deletion is [agent-rules#10](https://github.com/lightsound/agent-rules/pull/10)
-> and the `RULECHECK_TOKEN` removal follows it (pending owner; checklist in the Project store,
-> `docs/b7-retire-d23-workflow.md`).
+> 8). The workflow file was deleted with
+> [agent-rules#10](https://github.com/lightsound/agent-rules/pull/10) and the `RULECHECK_TOKEN`
+> Actions secret removed and the two PATs behind it deleted on 2026-09-21 (checklist in the
+> Project store, `docs/b7-retire-d23-workflow.md`). B7 complete.
 > What D23 decided about the write path stands: one `sync --all` / `syncTarget`, every D10 and
 > D14 check unchanged, nothing merged automatically. `sync --all` from a checkout remains the
 > manual retry path and the way to sync from an unmerged pack ref.
