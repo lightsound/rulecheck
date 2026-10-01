@@ -28,8 +28,8 @@
     "check": "bun run typecheck && bun run lint && bun test"
   },
   "dependencies": {
-    "@effect/platform-bun": "4.0.0-rc.115",
-    "effect": "4.0.0-rc.115",
+    "@effect/platform-bun": "4.0.0",
+    "effect": "4.0.0",
     "ignore": "7.0.9",
     "js-tiktoken": "1.0.21"
   },

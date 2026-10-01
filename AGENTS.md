@@ -13,7 +13,7 @@ Health check for AI coding agent instruction files (`AGENTS.md`, `CLAUDE.md`, `.
 
 - Bun (runtime, package manager, test runner). Use `bun <file>`, `bun test`, `bun add`. Never `node`, `npm`, `pnpm`, `vitest`, `jest`.
 - TypeScript 7, strict. Imports use explicit `.ts` extensions.
-- Effect v4 (release candidate, exact-pinned). CLI is `effect/unstable/cli`; filesystem access goes through `FileSystem` / `Path` services so tests can substitute layers.
+- Effect v4 (stable, exact-pinned). CLI is `effect/cli`; filesystem access goes through `FileSystem` / `Path` services so tests can substitute layers.
 - Biome for lint and format.
 
 ## Commands
@@ -61,7 +61,7 @@ Health check for AI coding agent instruction files (`AGENTS.md`, `CLAUDE.md`, `.
 - Test the write path against `tests/fake-github.ts` only. Never point a test or a manual run without `--dry-run` at a real repository you do not own.
 - An installation token is opaque: `fetchTransport` puts it in `Authorization: Bearer` and nothing in `src/github/` reads its length, prefix, or shape, so GitHub's stateless `ghs_` JWT format (~520 characters, two dots) needs no code path of its own; `installationToken({ mintHeaders })` can force either format with GitHub's temporary `X-GitHub-Stateless-S2S-Token` header, which `tests/transport.test.ts` uses to run a scan and a dry-run sync under a 520-character token.
 - Everything under `src/github/` except `gh.ts` must run on workerd: no `Bun.*`, no `node:*`, no `Buffer`; `fetch`, `crypto.subtle`, `atob` only. A new operation goes into `GitHubService`, `makeGitHub`, the fake, and `fakeRest` together, so the three fronts keep answering alike.
-- Effect `unstable/*` modules may break between minor versions; bump `effect` and `@effect/platform-bun` together and re-run `bun run check`.
+- Bump `effect` and `@effect/platform-bun` together and re-run `bun run check`.
 
 <!-- agent-rules:begin source=base rev=749176a6369bb4206fc0ffb6e49329cf01c72040 hash=0ba521f2f137b14e657ffd3de0f4dc764d5a943199c3fd62f6e307f8d64cfbe1 -->
 # Shared conventions

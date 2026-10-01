@@ -566,7 +566,7 @@ Decided by the owner (2026-09-16); none changes sections 3–5.
 
 | Choice | Decided | Notes |
 | --- | --- | --- |
-| Web framework on Workers | Effect `HttpApi` (`effect/unstable/httpapi`) | Routes, schema-validated inputs, and the `GitHub` / queue services in one Effect layer, matching the CLI's `effect/unstable/cli`. Hono was the alternative (more Workers examples, a second request model next to Effect) |
+| Web framework on Workers | Effect `HttpApi` (`effect/http-api`) | Routes, schema-validated inputs, and the `GitHub` / queue services in one Effect layer, matching the CLI's `effect/cli`. Hono was the alternative (more Workers examples, a second request model next to Effect) |
 | Database access and migrations | D1 with Drizzle | Typed queries from the schema in section 4; `drizzle-kit` generates the numbered migrations, applied on deploy by the Alchemy stack. The schema stays Postgres-portable, which Drizzle keeps easy |
 | Observability | Workers Logs | Plus the `runs` table as the domain-level trace; alerts on `failed` rows above zero in a run and on webhook signature failures. Sentry is added only if errors need grouping across installations |
 | CI/CD | GitHub Actions + Alchemy deploy | `bun run check`, then `alchemy deploy --stage pr-<n>` on pull requests and `--stage prod` on `main`; credentials provisioned as code by an Alchemy `github` stack (a scoped Cloudflare API token written as Actions secrets). Revisit if Cloudflare ships a first-party build and deploy pipeline for Workers ("Cloudflare Artifacts") |
