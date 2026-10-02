@@ -28,9 +28,8 @@ App design (section 4, jobs and rate limits) and the CLI as it runs today.
   and `src/report/` unchanged. Node APIs used: `node:crypto` `createHash` (four files), `Buffer`;
   `js-tiktoken` is pure JavaScript with a few MB of rank tables. The GitHub client becomes
   `fetch`-only (`fetchTransport`); `Bun.spawn` stays in the CLI's `gh` runner and is never
-  imported by the server. Effect v4 release candidate, exact-pinned (`4.0.0-rc.115` at the time
-  of writing; Effect targets stable in Q3/Q4 2026,
-  [announcement](https://effect.website/blog/releases/effect/40-rc)).
+  imported by the server. Effect v4, exact-pinned (`4.0.0`;
+  [announcement](https://effect.website/blog/releases/effect/40)).
 - **Jobs.** Three message kinds (`scan-installation`, `scan-repository`, `sync-target`), each
   idempotent by key, each a few seconds of CPU and up to tens of seconds of wall time waiting on
   GitHub; a full scan of 200 repositories is about 3,000 API calls spread over many messages.
@@ -58,7 +57,7 @@ minimum, [pricing](https://developers.cloudflare.com/workers/platform/pricing/))
 Effect program; npm `alchemy` is at `2.0.0-beta.77` (published 2026-09-09, releases roughly
 weekly) and its README says "Expect breaking changes"
 ([repository](https://github.com/alchemy-run/alchemy)). Its peer range is
-`effect >=4.0.0-rc.112 || >=4.0.0`, so it installs beside rulecheck's pin.
+`effect >=4.0.0`, so it installs beside rulecheck's pin.
 
 **Vercel.** Vercel Functions run on Fluid compute (Node.js 24 GA and default; Bun 1.4 in public
 beta, [changelog](https://vercel.com/changelog/bun-1-4-is-now-available-in-vercel-functions)).
@@ -82,7 +81,7 @@ starts on Pro.
 | --- | --- | --- |
 | [Prisma Postgres](https://www.prisma.io/pricing) | Managed Postgres with built-in connection pooling; pooled TCP and a serverless HTTP driver (`@prisma/adapter-ppg`) for edge runtimes. Standard Postgres wire protocol, so Drizzle over `pg` works. Billed per operation (query), not per compute hour | GA |
 | [Prisma Compute](https://www.prisma.io/docs/compute/limitations) | TypeScript app hosting that runs on Bun next to Prisma Postgres, scales to zero, immutable deploys with preview URLs and rollback, per-branch preview environments, deploy from GitHub Actions with OIDC (`prisma/cloud-deploy-action`), config in `prisma.compute.ts`. Public beta 2026-06-08, GA 2026-08-28 ([changelog](https://www.prisma.io/changelog/2026-08-28)) | GA (three weeks old) |
-| [Prisma Composer](https://www.prisma.io/docs/composer) | A TypeScript framework that declares a multi-service topology (services, databases, secrets, and the first-party `cron`, `storage`, `streams` modules) and deploys it to Compute and Postgres with `prisma deploy module.ts`; `prisma dev` runs the same topology against local emulators. npm `@prisma/composer` `0.20.0` (2026-09-13, daily releases); repository created 2026-02-13, 5 stars. Its deploy engine is Alchemy (`alchemy 2.0.0-beta.74` in its dependencies) and it exact-pins `effect 4.0.0-rc.112`; the docs require the app to pin the same `effect` version or every command fails with `DEPS.EFFECT_VERSION_CONFLICT` ([getting started](https://www.prisma.io/docs/composer/getting-started)). Its CLI needs Node 22.18+ | Early Access, "APIs and commands can change between releases" |
+| [Prisma Composer](https://www.prisma.io/docs/composer) | A TypeScript framework that declares a multi-service topology (services, databases, secrets, and the first-party `cron`, `storage`, `streams` modules) and deploys it to Compute and Postgres with `prisma deploy module.ts`; `prisma dev` runs the same topology against local emulators. npm `@prisma/composer` `0.20.0` (2026-09-13, daily releases); repository created 2026-02-13, 5 stars. Its deploy engine is Alchemy (`alchemy 2.0.0-beta.74` in its dependencies) and it exact-pins an `effect` release candidate (`@prisma/composer` `0.25.0` still pins a release candidate, below rulecheck's `4.0.0`); the docs require the app to pin the same `effect` version or every command fails with `DEPS.EFFECT_VERSION_CONFLICT` ([getting started](https://www.prisma.io/docs/composer/getting-started)). Its CLI needs Node 22.18+ | Early Access, "APIs and commands can change between releases" |
 | [Prisma Accelerate](https://www.prisma.io/docs/accelerate) | Connection pooling plus a global query cache for Prisma ORM clients. Standalone Accelerate and the hosted `accelerate.prisma-data.net` connection retire on 2026-12-01; Prisma Postgres keeps pooling, drops caching ("not on our immediate roadmap"); Prisma 8 does not use it | Retiring; irrelevant to an app that uses Drizzle and has no query-cache need |
 
 Two things worth noticing before the comparison. Composer's cron module contradicts Compute's own

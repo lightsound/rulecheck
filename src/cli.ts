@@ -1,5 +1,5 @@
 import { Console, Effect, FileSystem, Option } from "effect";
-import { Argument, Command, Flag } from "effect/unstable/cli";
+import { Argument, Command, Flag } from "effect/cli";
 import pkg from "../package.json" with { type: "json" };
 import { reportFailure, reportIncomplete, reportUnwritable } from "./report/failure.ts";
 import { renderHtml, renderSyncAllHtml } from "./report/html.ts";
