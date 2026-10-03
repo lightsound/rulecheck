@@ -1,7 +1,7 @@
 import { Effect, Schema } from "effect";
 import { GitHubError } from "./client.ts";
 import { type FetchTransportOptions, fetchTransport } from "./fetch.ts";
-import { errorMessageOf, retryAfterOf, type Transport } from "./transport.ts";
+import { errorMessageOf, JsonUnknown, retryAfterOf, type Transport } from "./transport.ts";
 
 /**
  * Installation tokens for a GitHub App (app-design §4, D26): a short-lived RS256 JWT signed with
@@ -132,9 +132,7 @@ export function installationToken(
         ...(retryAfter === null ? {} : { retryAfter }),
       });
     }
-    const json = yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Unknown))(
-      response.body,
-    ).pipe(
+    const json = yield* Schema.decodeEffect(JsonUnknown)(response.body).pipe(
       Effect.mapError(
         () =>
           new GitHubError({

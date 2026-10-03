@@ -49,7 +49,7 @@ Health check for AI coding agent instruction files (`AGENTS.md`, `CLAUDE.md`, `.
 
 ## Rules
 
-- Keep `src/domain/` free of Effect and I/O. Anything that touches the filesystem lives in `src/scan/`; anything that talks to GitHub goes through the `GitHub` service in `src/github/`.
+- Keep `src/domain/` free of Effect runtime (services, generators, layers) and I/O; pure `Schema` decoding is allowed. Anything that touches the filesystem lives in `src/scan/`; anything that talks to GitHub goes through the `GitHub` service in `src/github/`.
 - Add a new detector as a pure function in `src/domain/` first, with a test, then wire it into `scan.ts` and `render.ts`.
 - A new shape, normalization, pack status, or sync outcome, and any new label, goes into `docs/status-model.md` first, then into the type and `src/report/labels.ts`; `tests/status-model.test.ts` enforces it. Labels for pack statuses and sync outcomes are the identifier with `-` replaced by a space. Renaming or removing a `scan --json` field bumps `schemaVersion`.
 - Findings favor precision over recall. A finding asks a human to act; when the text is ambiguous, skip it rather than guess. Every finding carries `file:line`. The rot-detection heuristics (what is extracted, what is skipped, how a reference is verified) are documented in the header comments of `src/domain/references.ts` and `src/scan/verify.ts`.

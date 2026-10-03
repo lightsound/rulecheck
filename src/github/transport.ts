@@ -77,6 +77,9 @@ export function retryAfterOf(
   return null;
 }
 
+/** `JSON.parse` as a schema: a JSON string to the `unknown` it decodes to. */
+export const JsonUnknown = Schema.fromJsonString(Schema.Unknown);
+
 /** A GitHub error body; anything else the API sends is not one. */
 const ErrorBody = Schema.fromJsonString(
   Schema.Struct({ message: Schema.optionalKey(Schema.String) }),
@@ -121,7 +124,7 @@ export function makeGitHub(transport: Transport): GitHubService {
           });
         }
         if (response.body.trim().length === 0) return Effect.succeed(null);
-        return Schema.decodeEffect(Schema.fromJsonString(Schema.Unknown))(response.body).pipe(
+        return Schema.decodeEffect(JsonUnknown)(response.body).pipe(
           Effect.mapError(
             () =>
               new GitHubError({
