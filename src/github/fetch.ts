@@ -55,66 +55,69 @@ export const fetchTransport = (options: FetchTransportOptions): Transport => {
   const sleep = options.sleep ?? ((seconds: number) => Effect.sleep(Duration.seconds(seconds)));
   const maxRetryDelay = options.maxRetryDelaySeconds ?? 120;
 
-  const once = (
+  const once = Effect.fnUntraced(function* (
     operation: string,
     method: string,
     path: string,
     body: unknown | null,
     extraHeaders: Readonly<Record<string, string>> = {},
-  ): Effect.Effect<TransportResponse, GitHubError> =>
-    Effect.gen(function* () {
-      const token = yield* options.token;
-      const init: RequestInit = {
-        method,
-        headers: {
-          accept: "application/vnd.github+json",
-          // The token is opaque here: any length, any prefix (GitHub's stateless `ghs_` JWTs
-          // included); it is never inspected, logged, or stored by this module.
-          authorization: `Bearer ${token}`,
-          "user-agent": options.userAgent ?? "rulecheck",
-          "x-github-api-version": "2022-11-28",
-          ...(body === null ? {} : { "content-type": "application/json" }),
-          ...extraHeaders,
-        },
-        ...(body === null ? {} : { body: JSON.stringify(body) }),
-      };
-      const response = yield* Effect.tryPromise({
-        try: () => doFetch(`${baseUrl}/${path}`, init),
-        catch: (cause) =>
-          new GitHubError({
-            operation,
-            status: null,
-            message: `could not reach ${baseUrl} (${describe(cause)})`,
-          }),
-      });
-      const text = yield* Effect.tryPromise({
-        try: () => response.text(),
-        catch: (cause) =>
-          new GitHubError({
-            operation,
-            status: response.status,
-            message: `could not read the response body (${describe(cause)})`,
-          }),
-      });
-      const headers: Record<string, string> = {};
-      response.headers.forEach((value, name) => {
-        headers[name.toLowerCase()] = value;
-      });
-      const limit = parseRateLimit(headers);
-      if (limit !== null && options.onRateLimit) yield* options.onRateLimit(limit);
-      return { status: response.status, headers, body: text };
+  ): Effect.fn.Return<TransportResponse, GitHubError> {
+    const token = yield* options.token;
+    const init: RequestInit = {
+      method,
+      headers: {
+        accept: "application/vnd.github+json",
+        // The token is opaque here: any length, any prefix (GitHub's stateless `ghs_` JWTs
+        // included); it is never inspected, logged, or stored by this module.
+        authorization: `Bearer ${token}`,
+        "user-agent": options.userAgent ?? "rulecheck",
+        "x-github-api-version": "2022-11-28",
+        ...(body === null ? {} : { "content-type": "application/json" }),
+        ...extraHeaders,
+      },
+      ...(body === null ? {} : { body: JSON.stringify(body) }),
+    };
+    const response = yield* Effect.tryPromise({
+      try: () => doFetch(`${baseUrl}/${path}`, init),
+      catch: (cause) =>
+        new GitHubError({
+          operation,
+          status: null,
+          message: `could not reach ${baseUrl} (${describe(cause)})`,
+        }),
     });
+    const text = yield* Effect.tryPromise({
+      try: () => response.text(),
+      catch: (cause) =>
+        new GitHubError({
+          operation,
+          status: response.status,
+          message: `could not read the response body (${describe(cause)})`,
+        }),
+    });
+    const headers: Record<string, string> = {};
+    response.headers.forEach((value, name) => {
+      headers[name.toLowerCase()] = value;
+    });
+    const limit = parseRateLimit(headers);
+    if (limit !== null && options.onRateLimit) yield* options.onRateLimit(limit);
+    return { status: response.status, headers, body: text };
+  });
 
   return {
-    request: ({ method, path, body, headers }) =>
-      Effect.gen(function* () {
-        const operation = `${method} ${path}`;
-        const first = yield* once(operation, method, path, body, headers);
-        const delay = secondaryLimitDelay(first);
-        if (delay === null || delay > maxRetryDelay) return first;
-        yield* sleep(delay);
-        return yield* once(operation, method, path, body, headers);
-      }),
+    request: Effect.fn("fetch.request")(function* ({
+      method,
+      path,
+      body,
+      headers,
+    }): Effect.fn.Return<TransportResponse, GitHubError> {
+      const operation = `${method} ${path}`;
+      const first = yield* once(operation, method, path, body, headers);
+      const delay = secondaryLimitDelay(first);
+      if (delay === null || delay > maxRetryDelay) return first;
+      yield* sleep(delay);
+      return yield* once(operation, method, path, body, headers);
+    }),
   };
 };
 

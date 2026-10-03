@@ -709,13 +709,18 @@ async function revOf(github: ReturnType<typeof fakeGitHub>): Promise<string> {
 describe("makeGitHub over ghTransport", () => {
   function runner(responses: Record<string, GhResult | ((stdin: string | null) => GhResult)>) {
     const seen: Array<{ args: ReadonlyArray<string>; stdin: string | null }> = [];
-    const run = async (args: ReadonlyArray<string>, stdin: string | null): Promise<GhResult> => {
-      seen.push({ args, stdin });
-      const path = args[args.indexOf("Accept: application/vnd.github+json") + 1] ?? "";
-      const response = responses[path];
-      if (response === undefined) return { exitCode: 1, stdout: "", stderr: `no fake for ${path}` };
-      return typeof response === "function" ? response(stdin) : response;
-    };
+    const run = (args: ReadonlyArray<string>, stdin: string | null) =>
+      Effect.tryPromise({
+        try: async (): Promise<GhResult> => {
+          seen.push({ args, stdin });
+          const path = args[args.indexOf("Accept: application/vnd.github+json") + 1] ?? "";
+          const response = responses[path];
+          if (response === undefined)
+            return { exitCode: 1, stdout: "", stderr: `no fake for ${path}` };
+          return typeof response === "function" ? response(stdin) : response;
+        },
+        catch: (cause) => cause,
+      });
     return { run, seen };
   }
   const repo = { owner: "acme", name: "r" };
@@ -831,11 +836,7 @@ describe("makeGitHub over ghTransport", () => {
   });
 
   test("a missing gh binary is a GitHubError, not a crash", async () => {
-    const gh = makeGitHub(
-      ghTransport(async () => {
-        throw new Error("ENOENT");
-      }),
-    );
+    const gh = makeGitHub(ghTransport(() => Effect.fail(new Error("ENOENT"))));
     const failure = await Effect.runPromise(gh.getRepository(repo).pipe(Effect.flip));
     expect(failure.message).toContain("install the GitHub CLI");
     expect(failure.operation).toBe("getRepository");

@@ -516,21 +516,25 @@ function pullJson(pull: PullRequest) {
 
 /** A `GhRunner` that answers like `gh api` would over the given `fetch`. */
 export function ghRunnerOver(fetch: Fetch, baseUrl = "https://api.github.com"): GhRunner {
-  return async (args, stdin): Promise<GhResult> => {
-    const method = args[args.indexOf("-X") + 1] ?? "GET";
-    const path = args[args.indexOf("Accept: application/vnd.github+json") + 1] ?? "";
-    const response = await fetch(`${baseUrl}/${path}`, {
-      method,
-      ...(stdin === null ? {} : { body: stdin }),
+  return (args, stdin) =>
+    Effect.tryPromise({
+      try: async (): Promise<GhResult> => {
+        const method = args[args.indexOf("-X") + 1] ?? "GET";
+        const path = args[args.indexOf("Accept: application/vnd.github+json") + 1] ?? "";
+        const response = await fetch(`${baseUrl}/${path}`, {
+          method,
+          ...(stdin === null ? {} : { body: stdin }),
+        });
+        const text = await response.text();
+        if (response.ok) return { exitCode: 0, stdout: text, stderr: "" };
+        let message = "";
+        try {
+          message = String((JSON.parse(text) as { message?: string }).message ?? "");
+        } catch {
+          message = text;
+        }
+        return { exitCode: 1, stdout: text, stderr: `gh: ${message} (HTTP ${response.status})` };
+      },
+      catch: (cause) => cause,
     });
-    const text = await response.text();
-    if (response.ok) return { exitCode: 0, stdout: text, stderr: "" };
-    let message = "";
-    try {
-      message = String((JSON.parse(text) as { message?: string }).message ?? "");
-    } catch {
-      message = text;
-    }
-    return { exitCode: 1, stdout: text, stderr: `gh: ${message} (HTTP ${response.status})` };
-  };
 }

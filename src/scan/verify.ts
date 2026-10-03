@@ -22,106 +22,101 @@ import type { AnalyzedFile } from "./analyze.ts";
 /** Most package.json files the script check reads; above this the check is skipped. */
 export const MAX_MANIFESTS = 200;
 
-export const verifyReferences = (
+export const verifyReferences = Effect.fn("verify.verifyReferences")(function* (
   fs: FileSystem.FileSystem,
   path: Path.Path,
   repoRoot: string,
   packageJsonPaths: ReadonlyArray<string>,
   analyzed: ReadonlyArray<AnalyzedFile>,
-): Effect.Effect<Finding[]> =>
-  Effect.gen(function* () {
-    const considered = analyzed
-      .filter(
-        ({ file }) => !(file.kind === "cursor-rule" && file.frontmatter?.alwaysApply !== true),
-      )
-      .map(({ file, content }) => ({ file, refs: extractReferences(content) }));
-    const hasPackageJson = packageJsonPaths.length > 0;
-    const scriptsReferenced = considered.some(({ refs }) => refs.some((r) => r.kind === "script"));
-    const checkScripts =
-      hasPackageJson && scriptsReferenced && packageJsonPaths.length <= MAX_MANIFESTS;
-    const manifest = checkScripts
-      ? yield* collectManifests(fs, packageJsonPaths)
-      : { scripts: new Set<string>(), dependencies: new Set<string>() };
-    const gitignore = yield* loadGitignore(fs, path, repoRoot);
-    const binDir = path.join(repoRoot, "node_modules", ".bin");
-    const findings: Finding[] = [];
+): Effect.fn.Return<Finding[]> {
+  const considered = analyzed
+    .filter(({ file }) => !(file.kind === "cursor-rule" && file.frontmatter?.alwaysApply !== true))
+    .map(({ file, content }) => ({ file, refs: extractReferences(content) }));
+  const hasPackageJson = packageJsonPaths.length > 0;
+  const scriptsReferenced = considered.some(({ refs }) => refs.some((r) => r.kind === "script"));
+  const checkScripts =
+    hasPackageJson && scriptsReferenced && packageJsonPaths.length <= MAX_MANIFESTS;
+  const manifest = checkScripts
+    ? yield* collectManifests(fs, packageJsonPaths)
+    : { scripts: new Set<string>(), dependencies: new Set<string>() };
+  const gitignore = yield* loadGitignore(fs, path, repoRoot);
+  const binDir = path.join(repoRoot, "node_modules", ".bin");
+  const findings: Finding[] = [];
 
-    // Scoped rules often describe files that only exist in a sibling package; they were skipped above.
-    for (const { file, refs } of considered) {
-      const fileDir = path.dirname(file.path);
+  // Scoped rules often describe files that only exist in a sibling package; they were skipped above.
+  for (const { file, refs } of considered) {
+    const fileDir = path.dirname(file.path);
 
-      for (const ref of refs) {
-        if (ref.kind === "script") {
-          if (!checkScripts || manifest.scripts.has(ref.value)) continue;
-          if (!ref.explicitRun) {
-            if (manifest.dependencies.has(ref.value)) continue;
-            if (yield* anyExists(fs, [path.join(binDir, ref.value)])) continue;
-          }
-          findings.push({
-            kind: "unknown-script",
-            file: file.relativePath,
-            line: ref.line,
-            value: ref.value,
-            message: `script "${ref.value}" is not defined in any package.json (${ref.raw})`,
-          });
-          continue;
+    for (const ref of refs) {
+      if (ref.kind === "script") {
+        if (!checkScripts || manifest.scripts.has(ref.value)) continue;
+        if (!ref.explicitRun) {
+          if (manifest.dependencies.has(ref.value)) continue;
+          if (yield* anyExists(fs, [path.join(binDir, ref.value)])) continue;
         }
-
-        const candidates = [path.resolve(fileDir, ref.value), path.resolve(repoRoot, ref.value)];
-        if (yield* anyExists(fs, candidates)) continue;
-
-        const first = ref.value.replace(/^\.\.\//, "").split("/")[0] ?? "";
-        const firstExists = yield* anyExists(fs, [
-          path.resolve(fileDir, first),
-          path.resolve(repoRoot, first),
-        ]);
-        if (!firstExists) continue;
-
-        if (isGitignored(gitignore, path, repoRoot, candidates)) continue;
-
         findings.push({
-          kind: "missing-path",
+          kind: "unknown-script",
           file: file.relativePath,
           line: ref.line,
           value: ref.value,
-          message: `path \`${ref.value}\` does not exist`,
+          message: `script "${ref.value}" is not defined in any package.json (${ref.raw})`,
         });
+        continue;
       }
+
+      const candidates = [path.resolve(fileDir, ref.value), path.resolve(repoRoot, ref.value)];
+      if (yield* anyExists(fs, candidates)) continue;
+
+      const first = ref.value.replace(/^\.\.\//, "").split("/")[0] ?? "";
+      const firstExists = yield* anyExists(fs, [
+        path.resolve(fileDir, first),
+        path.resolve(repoRoot, first),
+      ]);
+      if (!firstExists) continue;
+
+      if (isGitignored(gitignore, path, repoRoot, candidates)) continue;
+
+      findings.push({
+        kind: "missing-path",
+        file: file.relativePath,
+        line: ref.line,
+        value: ref.value,
+        message: `path \`${ref.value}\` does not exist`,
+      });
     }
+  }
 
-    return findings.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
-  });
+  return findings.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
+});
 
-const collectManifests = (
+const collectManifests = Effect.fnUntraced(function* (
   fs: FileSystem.FileSystem,
   packageJsonPaths: ReadonlyArray<string>,
-): Effect.Effect<{ scripts: Set<string>; dependencies: Set<string> }> =>
-  Effect.gen(function* () {
-    const scripts = new Set<string>();
-    const dependencies = new Set<string>();
-    for (const pkgPath of packageJsonPaths) {
-      const text = yield* fs
-        .readFileString(pkgPath)
-        .pipe(Effect.catchTag("PlatformError", () => Effect.succeed("{}")));
-      const manifest = parseManifest(text);
-      for (const name of manifest.scripts) scripts.add(name);
-      for (const name of manifest.dependencies) dependencies.add(name);
-    }
-    return { scripts, dependencies };
-  });
+): Effect.fn.Return<{ scripts: Set<string>; dependencies: Set<string> }> {
+  const scripts = new Set<string>();
+  const dependencies = new Set<string>();
+  for (const pkgPath of packageJsonPaths) {
+    const text = yield* fs
+      .readFileString(pkgPath)
+      .pipe(Effect.catchTag("PlatformError", () => Effect.succeed("{}")));
+    const manifest = parseManifest(text);
+    for (const name of manifest.scripts) scripts.add(name);
+    for (const name of manifest.dependencies) dependencies.add(name);
+  }
+  return { scripts, dependencies };
+});
 
-export const loadGitignore = (
+export const loadGitignore = Effect.fn("verify.loadGitignore")(function* (
   fs: FileSystem.FileSystem,
   path: Path.Path,
   repoRoot: string,
-): Effect.Effect<Ignore | null> =>
-  Effect.gen(function* () {
-    const text = yield* fs
-      .readFileString(path.join(repoRoot, ".gitignore"))
-      .pipe(Effect.catchTag("PlatformError", () => Effect.succeed<string | null>(null)));
-    if (text === null) return null;
-    return ignore().add(text);
-  });
+): Effect.fn.Return<Ignore | null> {
+  const text = yield* fs
+    .readFileString(path.join(repoRoot, ".gitignore"))
+    .pipe(Effect.catchTag("PlatformError", () => Effect.succeed<string | null>(null)));
+  if (text === null) return null;
+  return ignore().add(text);
+});
 
 /** True when any candidate, expressed relative to the repo root, is matched by .gitignore. */
 export function isGitignored(
@@ -141,16 +136,15 @@ export function isGitignored(
   return false;
 }
 
-const anyExists = (
+const anyExists = Effect.fnUntraced(function* (
   fs: FileSystem.FileSystem,
   paths: ReadonlyArray<string>,
-): Effect.Effect<boolean> =>
-  Effect.gen(function* () {
-    for (const candidate of paths) {
-      const exists = yield* fs
-        .exists(candidate)
-        .pipe(Effect.catchTag("PlatformError", () => Effect.succeed(false)));
-      if (exists) return true;
-    }
-    return false;
-  });
+): Effect.fn.Return<boolean> {
+  for (const candidate of paths) {
+    const exists = yield* fs
+      .exists(candidate)
+      .pipe(Effect.catchTag("PlatformError", () => Effect.succeed(false)));
+    if (exists) return true;
+  }
+  return false;
+});

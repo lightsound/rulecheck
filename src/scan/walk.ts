@@ -77,126 +77,127 @@ const DEFAULT_OPTIONS: WalkOptions = { maxDepth: 12, includeNested: false };
  * followed (`stat` resolves them), so a linked directory is visited under its link path; the
  * skills inventory folds such copies back together by real path.
  */
-export const walk = (
+export const walk = Effect.fn("walk.walk")(function* (
   root: string,
   options: Partial<WalkOptions> = {},
-): Effect.Effect<WalkResult, PlatformError, FileSystem.FileSystem | Path.Path> =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const { maxDepth, includeNested } = { ...DEFAULT_OPTIONS, ...options };
+): Effect.fn.Return<WalkResult, PlatformError, FileSystem.FileSystem | Path.Path> {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const { maxDepth, includeNested } = { ...DEFAULT_OPTIONS, ...options };
 
-    const repos = new Map<string, Bucket>();
-    const excludedNested: NestedRepo[] = [];
-    const gitmodules = new Map<string, ReadonlySet<string>>();
+  const repos = new Map<string, Bucket>();
+  const excludedNested: NestedRepo[] = [];
+  const gitmodules = new Map<string, ReadonlySet<string>>();
 
-    /** `path =` entries of the enclosing repository's `.gitmodules`, read once per repository. */
-    const gitmodulesOf = (repoRoot: string): Effect.Effect<ReadonlySet<string>> =>
-      Effect.gen(function* () {
-        const cached = gitmodules.get(repoRoot);
-        if (cached) return cached;
-        const content = yield* fs
-          .readFileString(path.join(repoRoot, ".gitmodules"))
-          .pipe(Effect.catchTag("PlatformError", () => Effect.succeed("")));
-        const paths = new Set(parseGitmodulesPaths(content));
-        gitmodules.set(repoRoot, paths);
-        return paths;
-      });
-
-    const classifyNested = (dir: string, parent: string): Effect.Effect<NestedRepoKind> =>
-      Effect.gen(function* () {
-        const git = yield* fs.stat(path.join(dir, ".git")).pipe(Effect.option);
-        const gitIsFile = git._tag === "Some" && git.value.type === "File";
-        if (gitIsFile) return classifyNestedRepo(true, false);
-        const listed = yield* gitmodulesOf(parent);
-        const relative = path.relative(parent, dir).split(path.sep).join("/");
-        return classifyNestedRepo(false, listed.has(relative));
-      });
-
-    const visit = (
-      dir: string,
-      depthFromRoot: number,
-      repoRoot: string | null,
-    ): Effect.Effect<void, PlatformError> =>
-      Effect.gen(function* () {
-        if (depthFromRoot > maxDepth) return;
-
-        const entries = yield* fs
-          .readDirectory(dir)
-          .pipe(Effect.catchTag("PlatformError", () => Effect.succeed<Array<string>>([])));
-
-        const isRepo = entries.includes(".git");
-        if (isRepo && repoRoot !== null && !includeNested) {
-          const kind = yield* classifyNested(dir, repoRoot);
-          excludedNested.push({ root: dir, parent: repoRoot, kind });
-          return;
-        }
-        const currentRepo = isRepo ? dir : repoRoot;
-        if (isRepo && !repos.has(dir)) {
-          repos.set(dir, { files: [], packageJsonPaths: [], skills: [], skillsLockPath: null });
-        }
-
-        const dirName = path.basename(dir);
-        for (const name of entries) {
-          if (isIgnoredDirectory(dirName, name)) continue;
-          const full = path.join(dir, name);
-          const info = yield* fs.stat(full).pipe(Effect.option);
-          if (info._tag === "None") continue;
-
-          if (info.value.type === "Directory") {
-            yield* visit(full, depthFromRoot + 1, currentRepo);
-            continue;
-          }
-          if (info.value.type !== "File" || currentRepo === null) continue;
-
-          const bucket = repos.get(currentRepo);
-          if (!bucket) continue;
-
-          if (name === "package.json") {
-            bucket.packageJsonPaths.push(full);
-            continue;
-          }
-
-          const relativePath = path.relative(currentRepo, full).split(path.sep).join("/");
-          if (relativePath === "skills-lock.json") {
-            bucket.skillsLockPath = full;
-            continue;
-          }
-          const skill = detectSkill(relativePath);
-          if (skill) {
-            bucket.skills.push({
-              name: skill.name,
-              agentDir: skill.agentDir,
-              path: path.dirname(full),
-              relativePath: skill.dir,
-            });
-            continue;
-          }
-          const kind = detectKind(relativePath);
-          if (!kind) continue;
-
-          bucket.files.push({
-            repoRoot: currentRepo,
-            path: full,
-            relativePath,
-            kind,
-            depth: relativePath.split("/").length - 1,
-          });
-        }
-      });
-
-    yield* visit(path.resolve(root), 0, null);
-
-    return {
-      repos: [...repos.entries()]
-        .map(([repoRoot, bucket]) => ({
-          root: repoRoot,
-          files: [...bucket.files].sort((a, b) => a.relativePath.localeCompare(b.relativePath)),
-          packageJsonPaths: [...bucket.packageJsonPaths].sort(),
-          skills: [...bucket.skills].sort((a, b) => a.relativePath.localeCompare(b.relativePath)),
-          skillsLockPath: bucket.skillsLockPath,
-        }))
-        .sort((a, b) => a.root.localeCompare(b.root)),
-      excludedNested: [...excludedNested].sort((a, b) => a.root.localeCompare(b.root)),
-    };
+  /** `path =` entries of the enclosing repository's `.gitmodules`, read once per repository. */
+  const gitmodulesOf = Effect.fnUntraced(function* (
+    repoRoot: string,
+  ): Effect.fn.Return<ReadonlySet<string>> {
+    const cached = gitmodules.get(repoRoot);
+    if (cached) return cached;
+    const content = yield* fs
+      .readFileString(path.join(repoRoot, ".gitmodules"))
+      .pipe(Effect.catchTag("PlatformError", () => Effect.succeed("")));
+    const paths = new Set(parseGitmodulesPaths(content));
+    gitmodules.set(repoRoot, paths);
+    return paths;
   });
+
+  const classifyNested = Effect.fnUntraced(function* (
+    dir: string,
+    parent: string,
+  ): Effect.fn.Return<NestedRepoKind> {
+    const git = yield* fs.stat(path.join(dir, ".git")).pipe(Effect.option);
+    const gitIsFile = git._tag === "Some" && git.value.type === "File";
+    if (gitIsFile) return classifyNestedRepo(true, false);
+    const listed = yield* gitmodulesOf(parent);
+    const relative = path.relative(parent, dir).split(path.sep).join("/");
+    return classifyNestedRepo(false, listed.has(relative));
+  });
+
+  const visit = Effect.fnUntraced(function* (
+    dir: string,
+    depthFromRoot: number,
+    repoRoot: string | null,
+  ): Effect.fn.Return<void, PlatformError> {
+    if (depthFromRoot > maxDepth) return;
+
+    const entries = yield* fs
+      .readDirectory(dir)
+      .pipe(Effect.catchTag("PlatformError", () => Effect.succeed<Array<string>>([])));
+
+    const isRepo = entries.includes(".git");
+    if (isRepo && repoRoot !== null && !includeNested) {
+      const kind = yield* classifyNested(dir, repoRoot);
+      excludedNested.push({ root: dir, parent: repoRoot, kind });
+      return;
+    }
+    const currentRepo = isRepo ? dir : repoRoot;
+    if (isRepo && !repos.has(dir)) {
+      repos.set(dir, { files: [], packageJsonPaths: [], skills: [], skillsLockPath: null });
+    }
+
+    const dirName = path.basename(dir);
+    for (const name of entries) {
+      if (isIgnoredDirectory(dirName, name)) continue;
+      const full = path.join(dir, name);
+      const info = yield* fs.stat(full).pipe(Effect.option);
+      if (info._tag === "None") continue;
+
+      if (info.value.type === "Directory") {
+        yield* visit(full, depthFromRoot + 1, currentRepo);
+        continue;
+      }
+      if (info.value.type !== "File" || currentRepo === null) continue;
+
+      const bucket = repos.get(currentRepo);
+      if (!bucket) continue;
+
+      if (name === "package.json") {
+        bucket.packageJsonPaths.push(full);
+        continue;
+      }
+
+      const relativePath = path.relative(currentRepo, full).split(path.sep).join("/");
+      if (relativePath === "skills-lock.json") {
+        bucket.skillsLockPath = full;
+        continue;
+      }
+      const skill = detectSkill(relativePath);
+      if (skill) {
+        bucket.skills.push({
+          name: skill.name,
+          agentDir: skill.agentDir,
+          path: path.dirname(full),
+          relativePath: skill.dir,
+        });
+        continue;
+      }
+      const kind = detectKind(relativePath);
+      if (!kind) continue;
+
+      bucket.files.push({
+        repoRoot: currentRepo,
+        path: full,
+        relativePath,
+        kind,
+        depth: relativePath.split("/").length - 1,
+      });
+    }
+  });
+
+  yield* visit(path.resolve(root), 0, null);
+
+  return {
+    repos: [...repos.entries()]
+      .map(([repoRoot, bucket]) => ({
+        root: repoRoot,
+        files: [...bucket.files].sort((a, b) => a.relativePath.localeCompare(b.relativePath)),
+        packageJsonPaths: [...bucket.packageJsonPaths].sort(),
+        skills: [...bucket.skills].sort((a, b) => a.relativePath.localeCompare(b.relativePath)),
+        skillsLockPath: bucket.skillsLockPath,
+      }))
+      .sort((a, b) => a.root.localeCompare(b.root)),
+    excludedNested: [...excludedNested].sort((a, b) => a.root.localeCompare(b.root)),
+  };
+});

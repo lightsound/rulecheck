@@ -1,4 +1,4 @@
-import { Console, Effect, FileSystem, Option } from "effect";
+import { Clock, Console, Effect, FileSystem, Option } from "effect";
 import { Argument, Command, Flag } from "effect/cli";
 import pkg from "../package.json" with { type: "json" };
 import { reportFailure, reportIncomplete, reportUnwritable } from "./report/failure.ts";
@@ -67,11 +67,12 @@ const html = Flag.File("html").pipe(
  * Written after the stdout report, so a bad path loses nothing already measured or opened, and it
  * fails as every expected failure does: one stderr line, exit 1.
  */
-const writeHtml = (path: string, content: string) =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    yield* fs.writeFileString(path, content);
-  }).pipe(Effect.catchTag("PlatformError", (error) => reportUnwritable(path, error)));
+const writeHtml = Effect.fnUntraced(function* (path: string, content: string) {
+  const fs = yield* FileSystem.FileSystem;
+  yield* fs
+    .writeFileString(path, content)
+    .pipe(Effect.catchTag("PlatformError", (error) => reportUnwritable(path, error)));
+});
 
 const scanCommand = Command.make(
   "scan",
@@ -169,7 +170,7 @@ const syncCommand = Command.make(
             htmlPath,
             renderSyncAllHtml(result, {
               version: pkg.version,
-              generatedAt: new Date().toISOString(),
+              generatedAt: new Date(yield* Clock.currentTimeMillis).toISOString(),
             }),
           );
         }
