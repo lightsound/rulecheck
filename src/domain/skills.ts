@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { Schema } from "effect";
 import type {
   InstalledSkill,
   SkillAgentDir,
@@ -57,18 +58,23 @@ export function computeSkillHash(files: ReadonlyArray<SkillFileContent>): string
   return hash.digest("hex");
 }
 
+/** `skills-lock.json` (version 1): a `version` number and a `skills` map of unknown entries. */
+const SkillsLockJson = Schema.fromJsonString(
+  Schema.Struct({
+    version: Schema.Number,
+    skills: Schema.Record(Schema.String, Schema.Unknown),
+  }),
+);
+
 /**
  * Read the project-scoped lock (`skills-lock.json`, version 1) into entries. Returns null when the
  * text is not a lock file of that shape, so the caller can tell "no lock" from "empty lock".
  */
 export function parseSkillsLock(text: string): SkillLockEntry[] | null {
-  let parsed: unknown;
+  let parsed: { readonly version: number; readonly skills: Record<string, unknown> };
   try {
-    parsed = JSON.parse(text);
+    parsed = Schema.decodeUnknownSync(SkillsLockJson)(text);
   } catch {
-    return null;
-  }
-  if (!isRecord(parsed) || typeof parsed.version !== "number" || !isRecord(parsed.skills)) {
     return null;
   }
 

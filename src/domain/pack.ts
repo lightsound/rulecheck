@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { Schema } from "effect";
 import { hashBlockBody, parseBlocks } from "./block.ts";
 import type {
   BlockIssue,
@@ -59,17 +60,19 @@ export function normalizeRepoName(name: string): string {
     .replace(/\.git$/, "");
 }
 
+/** `subscriptions.json`: pack id to subscriber list; non-array values are dropped below. */
+const SubscriptionsJson = Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown));
+
 /** Parse `subscriptions.json`. Returns null when the text is not an object of string arrays. */
 export function parseSubscriptions(text: string): Map<string, string[]> | null {
-  let parsed: unknown;
+  let parsed: Record<string, unknown>;
   try {
-    parsed = JSON.parse(text);
+    parsed = Schema.decodeUnknownSync(SubscriptionsJson)(text);
   } catch {
     return null;
   }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
   const result = new Map<string, string[]>();
-  for (const [pack, repos] of Object.entries(parsed as Record<string, unknown>)) {
+  for (const [pack, repos] of Object.entries(parsed)) {
     if (!Array.isArray(repos)) continue;
     result.set(
       pack,

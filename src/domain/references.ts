@@ -14,6 +14,8 @@
  * Verification of the extracted references is in `src/scan/verify.ts`.
  */
 
+import { Schema } from "effect";
+
 export type ReferenceKind = "script" | "path";
 
 export interface Reference {
@@ -333,12 +335,15 @@ const DEPENDENCY_FIELDS = [
   "optionalDependencies",
 ] as const;
 
+/** A package.json is an object of unknown fields; only `scripts` and dependency maps are read. */
+const ManifestJson = Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown));
+
 /** Read script and dependency names out of a package.json, tolerating malformed input. */
 export function parseManifest(packageJson: string): PackageManifest {
   const scripts = new Set<string>();
   const dependencies = new Set<string>();
   try {
-    const parsed = JSON.parse(packageJson) as Record<string, unknown>;
+    const parsed = Schema.decodeUnknownSync(ManifestJson)(packageJson);
     if (parsed.scripts && typeof parsed.scripts === "object") {
       for (const name of Object.keys(parsed.scripts)) scripts.add(name);
     }

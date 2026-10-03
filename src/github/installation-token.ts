@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { GitHubError } from "./client.ts";
 import { type FetchTransportOptions, fetchTransport } from "./fetch.ts";
 import { errorMessageOf, retryAfterOf, type Transport } from "./transport.ts";
@@ -54,6 +54,9 @@ export interface InstallationTokenOptions extends Omit<FetchTransportOptions, "t
   /** Clock in milliseconds since the epoch; default `Date.now`. Injected by tests. */
   readonly now?: () => number;
 }
+
+/** The fields the `access_tokens` mint response must carry. */
+const AccessTokenResponse = Schema.Struct({ token: Schema.String, expires_at: Schema.String });
 
 /** Refresh this long before `expires_at`, so a token handed out is good for a whole job. */
 const REFRESH_MARGIN_MS = 5 * 60 * 1000;
@@ -129,23 +132,38 @@ export function installationToken(
         ...(retryAfter === null ? {} : { retryAfter }),
       });
     }
-    const data = yield* Effect.try({
-      try: () => JSON.parse(response.body) as Record<string, unknown>,
-      catch: () =>
-        new GitHubError({ operation, status: response.status, message: "non-JSON token response" }),
-    });
-    const token = typeof data.token === "string" ? data.token : null;
-    const expiresAt =
-      typeof data.expires_at === "string" ? Date.parse(data.expires_at) : Number.NaN;
-    if (token === null || Number.isNaN(expiresAt)) {
+    const json = yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Unknown))(
+      response.body,
+    ).pipe(
+      Effect.mapError(
+        () =>
+          new GitHubError({
+            operation,
+            status: response.status,
+            message: "non-JSON token response",
+          }),
+      ),
+    );
+    const data = yield* Schema.decodeUnknownEffect(AccessTokenResponse)(json).pipe(
+      Effect.mapError(
+        () =>
+          new GitHubError({
+            operation,
+            status: response.status,
+            message: "token response has no `token` and `expires_at`",
+          }),
+      ),
+    );
+    const expiresAt = Date.parse(data.expires_at);
+    if (Number.isNaN(expiresAt)) {
       return yield* new GitHubError({
         operation,
         status: response.status,
         message: "token response has no `token` and `expires_at`",
       });
     }
-    cached = { token, expiresAt };
-    return token;
+    cached = { token: data.token, expiresAt };
+    return data.token;
   });
 
   return Effect.suspend(() =>
