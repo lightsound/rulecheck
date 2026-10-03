@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import {
   GitHubError,
   type GitHubService,
@@ -77,10 +77,18 @@ export function retryAfterOf(
   return null;
 }
 
+/** `JSON.parse` as a schema: a JSON string to the `unknown` it decodes to. */
+export const JsonUnknown = Schema.fromJsonString(Schema.Unknown);
+
+/** A GitHub error body; anything else the API sends is not one. */
+const ErrorBody = Schema.fromJsonString(
+  Schema.Struct({ message: Schema.optionalKey(Schema.String) }),
+);
+
 /** The `message` of a GitHub error body, when the body is one. */
 export function errorMessageOf(body: string): string | null {
   try {
-    return str(field(JSON.parse(body), "message"));
+    return Schema.decodeUnknownSync(ErrorBody)(body).message ?? null;
   } catch {
     return null;
   }
@@ -116,15 +124,16 @@ export function makeGitHub(transport: Transport): GitHubService {
           });
         }
         if (response.body.trim().length === 0) return Effect.succeed(null);
-        return Effect.try({
-          try: () => JSON.parse(response.body) as unknown,
-          catch: () =>
-            new GitHubError({
-              operation,
-              status: response.status,
-              message: "GitHub API returned non-JSON output",
-            }),
-        });
+        return Schema.decodeEffect(JsonUnknown)(response.body).pipe(
+          Effect.mapError(
+            () =>
+              new GitHubError({
+                operation,
+                status: response.status,
+                message: "GitHub API returned non-JSON output",
+              }),
+          ),
+        );
       }),
     );
 
