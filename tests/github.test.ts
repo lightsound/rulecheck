@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { BunServices } from "@effect/platform-bun";
 import { Effect, FileSystem, Layer, Path } from "effect";
 import { hashBlockBody } from "../src/domain/block.ts";
@@ -10,7 +13,7 @@ import {
   textEntry,
   withChanges,
 } from "../src/github/fs.ts";
-import { type GhResult, ghTransport } from "../src/github/gh.ts";
+import { bunGhRunner, type GhResult, ghTransport } from "../src/github/gh.ts";
 import { makeGitHub } from "../src/github/transport.ts";
 import { renderSync } from "../src/report/sync.ts";
 import { resolvePacks } from "../src/scan/packs.ts";
@@ -840,6 +843,27 @@ describe("makeGitHub over ghTransport", () => {
     const failure = await Effect.runPromise(gh.getRepository(repo).pipe(Effect.flip));
     expect(failure.message).toContain("install the GitHub CLI");
     expect(failure.operation).toBe("getRepository");
+  });
+
+  test("an interrupted wait kills the spawned gh", async () => {
+    // `bunGhRunner` owns the only child process in the codebase: a wait that ends early —
+    // here a timeout — must kill it rather than leave it running.
+    const dir = await mkdtemp(join(tmpdir(), "rulecheck-gh-shim-"));
+    await writeFile(join(dir, "gh"), "#!/bin/sh\nexec sleep 31337\n", { mode: 0o755 });
+    const path = process.env.PATH;
+    process.env.PATH = `${dir}:${path}`;
+    try {
+      const exit = await Effect.runPromiseExit(
+        bunGhRunner(["api", "/zen"], null).pipe(Effect.timeout("100 millis")),
+      );
+      expect(exit._tag).toBe("Failure");
+      // The killed child takes a moment to be reaped.
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(Bun.spawnSync(["pgrep", "-f", "sleep 31337"]).stdout.toString().trim()).toBe("");
+    } finally {
+      process.env.PATH = path;
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
 
