@@ -111,19 +111,18 @@ export function subscriptionPullRequestText(
 }
 
 /** `subscriptions.json` at a commit, or null when the commit has no such file. */
-const readFileAt = (
+const readFileAt = Effect.fnUntraced(function* (
   github: GitHubService,
   repo: RepositoryRef,
   commitSha: string,
-): Effect.Effect<{ text: string | null; tree: string }, GitHubError> =>
-  Effect.gen(function* () {
-    const commit = yield* github.getCommit(repo, commitSha);
-    const tree = yield* github.getTree(repo, commit.tree, { recursive: false });
-    const entry = tree.entries.find((e) => e.type === "blob" && e.path === SUBSCRIPTIONS_PATH);
-    if (entry === undefined) return { text: null, tree: commit.tree };
-    const bytes = yield* github.getBlob(repo, entry.sha);
-    return { text: new TextDecoder().decode(bytes), tree: commit.tree };
-  });
+): Effect.fn.Return<{ text: string | null; tree: string }, GitHubError> {
+  const commit = yield* github.getCommit(repo, commitSha);
+  const tree = yield* github.getTree(repo, commit.tree, { recursive: false });
+  const entry = tree.entries.find((e) => e.type === "blob" && e.path === SUBSCRIPTIONS_PATH);
+  if (entry === undefined) return { text: null, tree: commit.tree };
+  const bytes = yield* github.getBlob(repo, entry.sha);
+  return { text: new TextDecoder().decode(bytes), tree: commit.tree };
+});
 
 interface Planned {
   readonly text: string;
@@ -131,205 +130,201 @@ interface Planned {
 }
 
 /** base text + pending + requested changes, measured again by parsing the result. */
-const plan = (
+const plan = Effect.fnUntraced(function* (
   baseText: string | null,
   pending: ReadonlyArray<SubscriptionChange>,
   changes: ReadonlyArray<SubscriptionChange>,
   source: string,
-): Effect.Effect<Planned, SyncRefused> =>
-  Effect.gen(function* () {
-    const planned = planSubscriptionChanges(baseText, [...pending, ...changes]);
-    if ("reason" in planned) {
-      return yield* new SyncRefused({ message: `${source}: ${planned.reason}`, status: null });
+): Effect.fn.Return<Planned, SyncRefused> {
+  const planned = planSubscriptionChanges(baseText, [...pending, ...changes]);
+  if ("reason" in planned) {
+    return yield* new SyncRefused({ message: `${source}: ${planned.reason}`, status: null });
+  }
+  // Second measurement: the planned text must encode the net intent for every pair touched
+  // (a pending add followed by a requested remove nets to "absent").
+  const net = new Map<string, SubscriptionChange>();
+  for (const change of planned.applied) net.set(`${change.pack}\u0000${change.repo}`, change);
+  for (const change of net.values()) {
+    const repos = planned.sets.get(change.pack) ?? [];
+    const present = repos.includes(change.repo);
+    if (present !== (change.op === "add")) {
+      return yield* new SyncRefused({
+        message: `${source}: the planned subscriptions.json does not reflect ${change.op} ${change.repo} for ${change.pack}; refusing to write`,
+        status: null,
+      });
     }
-    // Second measurement: the planned text must encode the net intent for every pair touched
-    // (a pending add followed by a requested remove nets to "absent").
-    const net = new Map<string, SubscriptionChange>();
-    for (const change of planned.applied) net.set(`${change.pack}\u0000${change.repo}`, change);
-    for (const change of net.values()) {
-      const repos = planned.sets.get(change.pack) ?? [];
-      const present = repos.includes(change.repo);
-      if (present !== (change.op === "add")) {
-        return yield* new SyncRefused({
-          message: `${source}: the planned subscriptions.json does not reflect ${change.op} ${change.repo} for ${change.pack}; refusing to write`,
-          status: null,
-        });
-      }
-    }
-    return { text: planned.text, changes: planned.applied };
-  });
+  }
+  return { text: planned.text, changes: planned.applied };
+});
 
-const commitFile = (
+const commitFile = Effect.fnUntraced(function* (
   github: GitHubService,
   repo: RepositoryRef,
   baseTree: string,
   parent: string,
   text: string,
   changes: ReadonlyArray<SubscriptionChange>,
-): Effect.Effect<string, GitHubError> =>
-  Effect.gen(function* () {
-    const tree = yield* github.createTree(repo, baseTree, [
-      { path: SUBSCRIPTIONS_PATH, content: text },
-    ]);
-    return yield* github.createCommit(repo, {
-      message: `${COMMIT_SUBJECT}\n\n${changes.map((c) => `- ${c.op} ${c.repo} (${c.pack})`).join("\n")}`,
-      tree,
-      parents: [parent],
-    });
+): Effect.fn.Return<string, GitHubError> {
+  const tree = yield* github.createTree(repo, baseTree, [
+    { path: SUBSCRIPTIONS_PATH, content: text },
+  ]);
+  return yield* github.createCommit(repo, {
+    message: `${COMMIT_SUBJECT}\n\n${changes.map((c) => `- ${c.op} ${c.repo} (${c.pack})`).join("\n")}`,
+    tree,
+    parents: [parent],
   });
+});
 
-export const subscribe = (
+export const subscribe = Effect.fn("subscribe.subscribe")(function* (
   options: SubscribeOptions,
-): Effect.Effect<SubscribeResult, SyncRefused | SyncFailed | GitHubError, GitHub> =>
-  Effect.gen(function* () {
-    const github = yield* GitHub;
-    const parsed = parseRepositorySpec(options.source);
-    if (parsed === null || parsed.ref !== null) {
-      return yield* new SyncRefused({
-        message: `source must be owner/repo, got \`${options.source}\``,
-        status: null,
-      });
-    }
-    const repo = parsed.repo;
-    const source = repositoryName(repo);
-    const refuse = (message: string) =>
-      new SyncRefused({ message: `${source}: ${message}`, status: null });
-    // After the base is measured, a GitHub failure is a `SyncFailed` (status null: no pack status
-    // is involved here), so a caller can tell "could not measure" from "could not deliver".
-    const failed = (error: GitHubError) => new SyncFailed({ error, status: null });
+): Effect.fn.Return<SubscribeResult, SyncRefused | SyncFailed | GitHubError, GitHub> {
+  const github = yield* GitHub;
+  const parsed = parseRepositorySpec(options.source);
+  if (parsed === null || parsed.ref !== null) {
+    return yield* new SyncRefused({
+      message: `source must be owner/repo, got \`${options.source}\``,
+      status: null,
+    });
+  }
+  const repo = parsed.repo;
+  const source = repositoryName(repo);
+  const refuse = (message: string) =>
+    new SyncRefused({ message: `${source}: ${message}`, status: null });
+  // After the base is measured, a GitHub failure is a `SyncFailed` (status null: no pack status
+  // is involved here), so a caller can tell "could not measure" from "could not deliver".
+  const failed = (error: GitHubError) => new SyncFailed({ error, status: null });
 
-    const info = yield* github.getRepository(repo);
-    const base = options.base ?? info.defaultBranch;
-    const baseSha = yield* github.getRef(repo, `heads/${base}`);
-    if (baseSha === null) return yield* refuse(`branch \`${base}\` does not exist`);
-    const baseFile = yield* readFileAt(github, repo, baseSha);
+  const info = yield* github.getRepository(repo);
+  const base = options.base ?? info.defaultBranch;
+  const baseSha = yield* github.getRef(repo, `heads/${base}`);
+  if (baseSha === null) return yield* refuse(`branch \`${base}\` does not exist`);
+  const baseFile = yield* readFileAt(github, repo, baseSha);
 
-    if (options.mode === "direct-commit") {
-      const planned = yield* plan(baseFile.text, [], options.changes, source);
-      if (sameSubscriptions(baseFile.text, planned.text)) return { kind: "nothing-to-do", source };
-      if (options.dryRun)
-        return { kind: "planned", source, text: planned.text, changes: planned.changes, base };
-      const write = Effect.gen(function* () {
-        // First try on the measured head; on a head that moved, plan once more on top of the new
-        // head (the file may have changed there) and try once; a second 422 is a refusal (D25).
-        let head = baseSha;
-        let file = baseFile;
-        let current = planned;
-        for (let attempt = 0; ; attempt++) {
-          const commit = yield* commitFile(
-            github,
-            repo,
-            file.tree,
-            head,
-            current.text,
-            current.changes,
-          ).pipe(Effect.mapError(failed));
-          const moved = yield* github
-            .setRef(repo, `heads/${base}`, commit, { create: false, force: false })
-            .pipe(
-              Effect.map(() => false),
-              Effect.catch((error) =>
-                error.status === 422 ? Effect.succeed(true) : Effect.fail(failed(error)),
-              ),
-            );
-          if (!moved)
-            return {
-              kind: "committed" as const,
-              source,
-              text: current.text,
-              changes: current.changes,
-              base,
-              commit,
-            };
-          if (attempt >= 1) {
-            return yield* refuse(
-              `branch \`${base}\` moved twice while writing subscriptions.json; retry`,
-            );
-          }
-          const newHead = yield* github.getRef(repo, `heads/${base}`).pipe(Effect.mapError(failed));
-          if (newHead === null)
-            return yield* refuse(`branch \`${base}\` disappeared while writing`);
-          head = newHead;
-          file = yield* readFileAt(github, repo, head).pipe(Effect.mapError(failed));
-          current = yield* plan(file.text, [], options.changes, source);
-          if (sameSubscriptions(file.text, current.text)) {
-            // Someone else landed the same change meanwhile.
-            return { kind: "nothing-to-do" as const, source };
-          }
-        }
-      });
-      return yield* options.writeLock ? options.writeLock.withPermits(1)(write) : write;
-    }
-
-    // pull-request mode: the pending set lives on the tool-owned branch.
-    const tipSha = yield* github.getRef(repo, `heads/${SUBSCRIPTIONS_BRANCH}`);
-    let pending: ReadonlyArray<SubscriptionChange> = [];
-    let tipText: string | null = null;
-    if (tipSha !== null) {
-      const tip = yield* github.getCommit(repo, tipSha);
-      if (!isRulecheckCommit(tip.message)) {
-        return yield* refuse(
-          `branch \`${SUBSCRIPTIONS_BRANCH}\` exists but its tip commit (${tipSha.slice(0, 7)}) was not written by rulecheck; delete or rename the branch first`,
-        );
-      }
-      tipText = (yield* readFileAt(github, repo, tipSha)).text;
-      const diff = subscriptionDiff(baseFile.text, tipText);
-      if (diff === null)
-        return yield* refuse(
-          `subscriptions.json on \`${SUBSCRIPTIONS_BRANCH}\` is not the expected object shape`,
-        );
-      pending = diff;
-    }
-    const planned = yield* plan(baseFile.text, pending, options.changes, source);
-    const open = yield* github.listOpenPullRequests(repo, `${repo.owner}:${SUBSCRIPTIONS_BRANCH}`);
-    const pullRequest = open[0];
-    if (sameSubscriptions(baseFile.text, planned.text)) {
-      if (pullRequest !== undefined) {
-        return yield* refuse(
-          `the requested state equals \`${base}\` while pull request #${pullRequest.number} (${pullRequest.url}) is open with pending changes; close it to drop them`,
-        );
-      }
-      return { kind: "nothing-to-do", source };
-    }
-    if (tipSha !== null && pullRequest !== undefined && sameSubscriptions(tipText, planned.text)) {
-      return {
-        kind: "up-to-date",
-        source,
-        text: planned.text,
-        changes: planned.changes,
-        base,
-        commit: tipSha,
-        pullRequest,
-      };
-    }
+  if (options.mode === "direct-commit") {
+    const planned = yield* plan(baseFile.text, [], options.changes, source);
+    if (sameSubscriptions(baseFile.text, planned.text)) return { kind: "nothing-to-do", source };
     if (options.dryRun)
       return { kind: "planned", source, text: planned.text, changes: planned.changes, base };
-
-    const text = subscriptionPullRequestText(planned.changes, options.runUrl ?? null);
     const write = Effect.gen(function* () {
-      const commit = yield* commitFile(
-        github,
-        repo,
-        baseFile.tree,
-        baseSha,
-        planned.text,
-        planned.changes,
-      );
-      yield* github.setRef(repo, `heads/${SUBSCRIPTIONS_BRANCH}`, commit, {
-        create: tipSha === null,
-      });
-      const result = pullRequest
-        ? yield* github.updatePullRequest(repo, pullRequest.number, text)
-        : yield* github.createPullRequest(repo, { ...text, head: SUBSCRIPTIONS_BRANCH, base });
-      return {
-        kind: pullRequest ? ("updated" as const) : ("opened" as const),
-        source,
-        text: planned.text,
-        changes: planned.changes,
-        base,
-        commit,
-        pullRequest: result,
-      };
-    }).pipe(Effect.mapError(failed));
+      // First try on the measured head; on a head that moved, plan once more on top of the new
+      // head (the file may have changed there) and try once; a second 422 is a refusal (D25).
+      let head = baseSha;
+      let file = baseFile;
+      let current = planned;
+      for (let attempt = 0; ; attempt++) {
+        const commit = yield* commitFile(
+          github,
+          repo,
+          file.tree,
+          head,
+          current.text,
+          current.changes,
+        ).pipe(Effect.mapError(failed));
+        const moved = yield* github
+          .setRef(repo, `heads/${base}`, commit, { create: false, force: false })
+          .pipe(
+            Effect.map(() => false),
+            Effect.catch((error) =>
+              error.status === 422 ? Effect.succeed(true) : Effect.fail(failed(error)),
+            ),
+          );
+        if (!moved)
+          return {
+            kind: "committed" as const,
+            source,
+            text: current.text,
+            changes: current.changes,
+            base,
+            commit,
+          };
+        if (attempt >= 1) {
+          return yield* refuse(
+            `branch \`${base}\` moved twice while writing subscriptions.json; retry`,
+          );
+        }
+        const newHead = yield* github.getRef(repo, `heads/${base}`).pipe(Effect.mapError(failed));
+        if (newHead === null) return yield* refuse(`branch \`${base}\` disappeared while writing`);
+        head = newHead;
+        file = yield* readFileAt(github, repo, head).pipe(Effect.mapError(failed));
+        current = yield* plan(file.text, [], options.changes, source);
+        if (sameSubscriptions(file.text, current.text)) {
+          // Someone else landed the same change meanwhile.
+          return { kind: "nothing-to-do" as const, source };
+        }
+      }
+    });
     return yield* options.writeLock ? options.writeLock.withPermits(1)(write) : write;
-  });
+  }
+
+  // pull-request mode: the pending set lives on the tool-owned branch.
+  const tipSha = yield* github.getRef(repo, `heads/${SUBSCRIPTIONS_BRANCH}`);
+  let pending: ReadonlyArray<SubscriptionChange> = [];
+  let tipText: string | null = null;
+  if (tipSha !== null) {
+    const tip = yield* github.getCommit(repo, tipSha);
+    if (!isRulecheckCommit(tip.message)) {
+      return yield* refuse(
+        `branch \`${SUBSCRIPTIONS_BRANCH}\` exists but its tip commit (${tipSha.slice(0, 7)}) was not written by rulecheck; delete or rename the branch first`,
+      );
+    }
+    tipText = (yield* readFileAt(github, repo, tipSha)).text;
+    const diff = subscriptionDiff(baseFile.text, tipText);
+    if (diff === null)
+      return yield* refuse(
+        `subscriptions.json on \`${SUBSCRIPTIONS_BRANCH}\` is not the expected object shape`,
+      );
+    pending = diff;
+  }
+  const planned = yield* plan(baseFile.text, pending, options.changes, source);
+  const open = yield* github.listOpenPullRequests(repo, `${repo.owner}:${SUBSCRIPTIONS_BRANCH}`);
+  const pullRequest = open[0];
+  if (sameSubscriptions(baseFile.text, planned.text)) {
+    if (pullRequest !== undefined) {
+      return yield* refuse(
+        `the requested state equals \`${base}\` while pull request #${pullRequest.number} (${pullRequest.url}) is open with pending changes; close it to drop them`,
+      );
+    }
+    return { kind: "nothing-to-do", source };
+  }
+  if (tipSha !== null && pullRequest !== undefined && sameSubscriptions(tipText, planned.text)) {
+    return {
+      kind: "up-to-date",
+      source,
+      text: planned.text,
+      changes: planned.changes,
+      base,
+      commit: tipSha,
+      pullRequest,
+    };
+  }
+  if (options.dryRun)
+    return { kind: "planned", source, text: planned.text, changes: planned.changes, base };
+
+  const text = subscriptionPullRequestText(planned.changes, options.runUrl ?? null);
+  const write = Effect.gen(function* () {
+    const commit = yield* commitFile(
+      github,
+      repo,
+      baseFile.tree,
+      baseSha,
+      planned.text,
+      planned.changes,
+    );
+    yield* github.setRef(repo, `heads/${SUBSCRIPTIONS_BRANCH}`, commit, {
+      create: tipSha === null,
+    });
+    const result = pullRequest
+      ? yield* github.updatePullRequest(repo, pullRequest.number, text)
+      : yield* github.createPullRequest(repo, { ...text, head: SUBSCRIPTIONS_BRANCH, base });
+    return {
+      kind: pullRequest ? ("updated" as const) : ("opened" as const),
+      source,
+      text: planned.text,
+      changes: planned.changes,
+      base,
+      commit,
+      pullRequest: result,
+    };
+  }).pipe(Effect.mapError(failed));
+  return yield* options.writeLock ? options.writeLock.withPermits(1)(write) : write;
+});

@@ -140,18 +140,17 @@ interface Measurement {
 }
 
 /** Resolve `--packs`, pick the pack, and run the target path once. */
-export const sync = (
+export const sync = Effect.fn("sync.sync")(function* (
   options: SyncOptions,
-): Effect.Effect<
+): Effect.fn.Return<
   SyncResult,
   SyncRefused | SyncFailed | PackSourceError | GitHubError | PlatformError,
   GitHub | FileSystem.FileSystem | Path.Path
-> =>
-  Effect.gen(function* () {
-    const loaded = yield* resolvePacks(options.packs);
-    const pack = yield* selectPack(loaded, options.pack);
-    return yield* syncTarget(options, loaded, pack);
-  });
+> {
+  const loaded = yield* resolvePacks(options.packs);
+  const pack = yield* selectPack(loaded, options.pack);
+  return yield* syncTarget(options, loaded, pack);
+});
 
 export const selectPack = (loaded: LoadedPacks, id: string): Effect.Effect<Pack, SyncRefused> => {
   const pack = loaded.packs.find((p) => p.id === id);
@@ -167,57 +166,56 @@ export const selectPack = (loaded: LoadedPacks, id: string): Effect.Effect<Pack,
  * One repository, one pack, packs already loaded. Measures the base branch first, so a block that
  * has merged reads `current` before any tool-owned branch or pull request is looked at.
  */
-export const syncTarget = (
+export const syncTarget = Effect.fn("sync.syncTarget")(function* (
   options: SyncTargetOptions,
   loaded: LoadedPacks,
   pack: Pack,
-): Effect.Effect<
+): Effect.fn.Return<
   SyncResult,
   SyncRefused | SyncFailed | GitHubError | PlatformError,
   GitHub | FileSystem.FileSystem | Path.Path
-> =>
-  Effect.gen(function* () {
-    const github = yield* GitHub;
-    const parsed = parseRepositorySpec(options.repo);
-    if (parsed === null || parsed.ref !== null) {
-      return yield* new SyncRefused({
-        message: `target must be owner/repo, got \`${options.repo}\``,
-        status: null,
-      });
-    }
-    const target = parsed.repo;
-    const name = repositoryName(target);
+> {
+  const github = yield* GitHub;
+  const parsed = parseRepositorySpec(options.repo);
+  if (parsed === null || parsed.ref !== null) {
+    return yield* new SyncRefused({
+      message: `target must be owner/repo, got \`${options.repo}\``,
+      status: null,
+    });
+  }
+  const target = parsed.repo;
+  const name = repositoryName(target);
 
-    const base = options.base ?? (yield* github.getRepository(target)).defaultBranch;
-    const baseSha = yield* github.getRef(target, `heads/${base}`);
-    if (baseSha === null) {
-      return yield* new SyncRefused({
-        message: `branch \`${base}\` not found in ${name}`,
-        status: null,
-      });
-    }
+  const base = options.base ?? (yield* github.getRepository(target)).defaultBranch;
+  const baseSha = yield* github.getRef(target, `heads/${base}`);
+  if (baseSha === null) {
+    return yield* new SyncRefused({
+      message: `branch \`${base}\` not found in ${name}`,
+      status: null,
+    });
+  }
 
-    const mount = mountPath(target);
-    const snapshot = yield* repositorySnapshot(github, target, baseSha, mount);
-    const before = yield* measure(snapshot, mount, name, loaded, pack);
-    const context: Target = {
-      github,
-      options,
-      loaded,
-      pack,
-      target,
-      name,
-      base,
-      baseSha,
-      snapshot,
-      mount,
-      before,
-    };
-    return yield* deliver(context).pipe(
-      // The status is known from here on; a GitHub failure keeps it for the `sync --all` row.
-      Effect.catchTag("GitHubError", (error) => new SyncFailed({ error, status: before.entry })),
-    );
-  });
+  const mount = mountPath(target);
+  const snapshot = yield* repositorySnapshot(github, target, baseSha, mount);
+  const before = yield* measure(snapshot, mount, name, loaded, pack);
+  const context: Target = {
+    github,
+    options,
+    loaded,
+    pack,
+    target,
+    name,
+    base,
+    baseSha,
+    snapshot,
+    mount,
+    before,
+  };
+  return yield* deliver(context).pipe(
+    // The status is known from here on; a GitHub failure keeps it for the `sync --all` row.
+    Effect.catchTag("GitHubError", (error) => new SyncFailed({ error, status: before.entry })),
+  );
+});
 
 /** One target after its base branch was measured. */
 interface Target {
@@ -235,189 +233,186 @@ interface Target {
 }
 
 /** Decide, plan, measure again, and write (or report what would be written) for a measured target. */
-const deliver = (
+const deliver = Effect.fnUntraced(function* (
   context: Target,
-): Effect.Effect<SyncResult, SyncRefused | GitHubError | PlatformError, Path.Path> =>
-  Effect.gen(function* () {
-    const { github, options, loaded, pack, target, name, base, baseSha, snapshot, mount, before } =
-      context;
-    // Every refusal from here on names the measured status, so a `sync --all` row shows it.
-    const refuse = (message: string) => new SyncRefused({ message, status: before.entry });
+): Effect.fn.Return<SyncResult, SyncRefused | GitHubError | PlatformError, Path.Path> {
+  const { github, options, loaded, pack, target, name, base, baseSha, snapshot, mount, before } =
+    context;
+  // Every refusal from here on names the measured status, so a `sync --all` row shows it.
+  const refuse = (message: string) => new SyncRefused({ message, status: before.entry });
 
-    switch (before.entry.status) {
-      case "current":
-        return { kind: "nothing-to-do", repo: name, status: before.entry };
-      case "not-subscribed":
-        return yield* refuse(
-          `${name} is not subscribed to \`${pack.id}\`; add it to subscriptions.json in ${loaded.source} first`,
-        );
-      case "modified":
-        return yield* refuse(
-          `${name} ${statusLocation(before.entry)}: block \`${pack.id}\` was edited in place (${before.entry.message}); a human must reconcile it`,
-        );
-      case "blocked":
-        return yield* refuse(`${name} ${statusLocation(before.entry)}: ${before.entry.message}`);
-      case "eligible":
-      case "outdated":
-        break;
-    }
-
-    const plan = planSync({
-      shape: before.repo.shape,
-      files: before.repo.files,
-      contents: before.contents,
-      blocks: before.repo.blocks,
-      status: before.entry,
-      pack,
-      packOrder: loaded.packs.map((p) => p.id),
-    });
-    if ("reason" in plan) return yield* refuse(`${name}: ${plan.reason}`);
-
-    const after = yield* measure(
-      withChanges(snapshot, mount, plan.changes),
-      mount,
-      name,
-      loaded,
-      pack,
-    );
-    if (after.entry.status !== "current") {
+  switch (before.entry.status) {
+    case "current":
+      return { kind: "nothing-to-do", repo: name, status: before.entry };
+    case "not-subscribed":
       return yield* refuse(
-        `${name}: the planned ${plan.blockFile} would read as ${after.entry.status} (${after.entry.message ?? "no detail"}); refusing to write`,
+        `${name} is not subscribed to \`${pack.id}\`; add it to subscriptions.json in ${loaded.source} first`,
       );
-    }
-    // D15: the planner already asserted this on its changes; assert it again on the planned tree
-    // as scanned, so the promise holds for what is written, not for what was intended.
-    for (const path of ROOT_PAIR) {
-      const drift = foreignRegionDrift(
-        path,
-        before.contents.get(path) ?? null,
-        after.contents.get(path) ?? null,
-      );
-      if (drift !== null) return yield* refuse(`${name}: ${drift}; refusing to write`);
-    }
-    const introduced = newFindings(
-      before.repo.findings,
-      after.repo.findings,
-      movesRootPairContent(plan),
-    );
-    if (introduced.length > 0) {
-      const lines = introduced.map((f) => `  ${f.file}:${f.line}  ${f.message}`);
+    case "modified":
       return yield* refuse(
-        `${name}: pack \`${pack.id}\` would introduce rot in this repository:\n${lines.join("\n")}`,
+        `${name} ${statusLocation(before.entry)}: block \`${pack.id}\` was edited in place (${before.entry.message}); a human must reconcile it`,
       );
-    }
+    case "blocked":
+      return yield* refuse(`${name} ${statusLocation(before.entry)}: ${before.entry.message}`);
+    case "eligible":
+    case "outdated":
+      break;
+  }
 
-    const branch = branchFor(pack.id);
-    const existing = yield* github.getRef(target, `heads/${branch}`);
-    if (existing !== null) {
-      const tip = yield* github.getCommit(target, existing);
-      if (!isRulecheckCommit(tip.message)) {
-        return yield* refuse(
-          `${name}: branch \`${branch}\` exists but its tip commit (${existing.slice(0, 7)}) was not written by rulecheck; delete or rename the branch first`,
-        );
-      }
-      // Idempotence (D14): the branch tip already holds every planned path as planned and its
-      // pull request is open, so a rerun has nothing to deliver. A closed pull request or a stale
-      // tip falls through to the rewrite.
-      if (yield* treeMatchesPlan(github, target, tip.tree, plan)) {
-        const open = yield* github.listOpenPullRequests(target, `${target.owner}:${branch}`);
-        const pullRequest = open[0];
-        if (pullRequest) {
-          return {
-            kind: "up-to-date",
-            repo: name,
-            status: before.entry,
-            plan,
-            base,
-            branch,
-            commit: existing,
-            pullRequest,
-          };
-        }
-      }
-    }
-
-    if (options.dryRun) {
-      return { kind: "planned", repo: name, status: before.entry, plan, base, branch };
-    }
-
-    const writing = write(github, target, {
-      baseSha,
-      base,
-      branch,
-      branchExists: existing !== null,
-      plan,
-      pack,
-      status: before.entry,
-      runUrl: options.runUrl ?? null,
-    });
-    const gated = options.writeLock ? options.writeLock.withPermits(1)(writing) : writing;
-    const { created, ...written } = yield* gated;
-    return {
-      kind: created ? "opened" : "updated",
-      repo: name,
-      status: before.entry,
-      plan,
-      base,
-      branch,
-      ...written,
-    };
+  const plan = planSync({
+    shape: before.repo.shape,
+    files: before.repo.files,
+    contents: before.contents,
+    blocks: before.repo.blocks,
+    status: before.entry,
+    pack,
+    packOrder: loaded.packs.map((p) => p.id),
   });
+  if ("reason" in plan) return yield* refuse(`${name}: ${plan.reason}`);
+
+  const after = yield* measure(
+    withChanges(snapshot, mount, plan.changes),
+    mount,
+    name,
+    loaded,
+    pack,
+  );
+  if (after.entry.status !== "current") {
+    return yield* refuse(
+      `${name}: the planned ${plan.blockFile} would read as ${after.entry.status} (${after.entry.message ?? "no detail"}); refusing to write`,
+    );
+  }
+  // D15: the planner already asserted this on its changes; assert it again on the planned tree
+  // as scanned, so the promise holds for what is written, not for what was intended.
+  for (const path of ROOT_PAIR) {
+    const drift = foreignRegionDrift(
+      path,
+      before.contents.get(path) ?? null,
+      after.contents.get(path) ?? null,
+    );
+    if (drift !== null) return yield* refuse(`${name}: ${drift}; refusing to write`);
+  }
+  const introduced = newFindings(
+    before.repo.findings,
+    after.repo.findings,
+    movesRootPairContent(plan),
+  );
+  if (introduced.length > 0) {
+    const lines = introduced.map((f) => `  ${f.file}:${f.line}  ${f.message}`);
+    return yield* refuse(
+      `${name}: pack \`${pack.id}\` would introduce rot in this repository:\n${lines.join("\n")}`,
+    );
+  }
+
+  const branch = branchFor(pack.id);
+  const existing = yield* github.getRef(target, `heads/${branch}`);
+  if (existing !== null) {
+    const tip = yield* github.getCommit(target, existing);
+    if (!isRulecheckCommit(tip.message)) {
+      return yield* refuse(
+        `${name}: branch \`${branch}\` exists but its tip commit (${existing.slice(0, 7)}) was not written by rulecheck; delete or rename the branch first`,
+      );
+    }
+    // Idempotence (D14): the branch tip already holds every planned path as planned and its
+    // pull request is open, so a rerun has nothing to deliver. A closed pull request or a stale
+    // tip falls through to the rewrite.
+    if (yield* treeMatchesPlan(github, target, tip.tree, plan)) {
+      const open = yield* github.listOpenPullRequests(target, `${target.owner}:${branch}`);
+      const pullRequest = open[0];
+      if (pullRequest) {
+        return {
+          kind: "up-to-date",
+          repo: name,
+          status: before.entry,
+          plan,
+          base,
+          branch,
+          commit: existing,
+          pullRequest,
+        };
+      }
+    }
+  }
+
+  if (options.dryRun) {
+    return { kind: "planned", repo: name, status: before.entry, plan, base, branch };
+  }
+
+  const writing = write(github, target, {
+    baseSha,
+    base,
+    branch,
+    branchExists: existing !== null,
+    plan,
+    pack,
+    status: before.entry,
+    runUrl: options.runUrl ?? null,
+  });
+  const gated = options.writeLock ? options.writeLock.withPermits(1)(writing) : writing;
+  const { created, ...written } = yield* gated;
+  return {
+    kind: created ? "opened" : "updated",
+    repo: name,
+    status: before.entry,
+    plan,
+    base,
+    branch,
+    ...written,
+  };
+});
 
 /** Whether every planned path reads in `treeSha` exactly as the plan would write it. */
-const treeMatchesPlan = (
+const treeMatchesPlan = Effect.fnUntraced(function* (
   github: GitHubService,
   target: RepositoryRef,
   treeSha: string,
   plan: SyncPlan,
-): Effect.Effect<boolean, GitHubError> =>
-  Effect.gen(function* () {
-    const tree = yield* github.getTree(target, treeSha);
-    if (tree.truncated) return false;
-    const decoder = new TextDecoder();
-    for (const change of plan.changes) {
-      const entry = tree.entries.find((e) => e.type === "blob" && e.path === change.path);
-      if (change.after === null) {
-        if (entry !== undefined) return false;
-        continue;
-      }
-      if (entry === undefined) return false;
-      const content = decoder.decode(yield* github.getBlob(target, entry.sha));
-      if (content !== change.after) return false;
+): Effect.fn.Return<boolean, GitHubError> {
+  const tree = yield* github.getTree(target, treeSha);
+  if (tree.truncated) return false;
+  const decoder = new TextDecoder();
+  for (const change of plan.changes) {
+    const entry = tree.entries.find((e) => e.type === "blob" && e.path === change.path);
+    if (change.after === null) {
+      if (entry !== undefined) return false;
+      continue;
     }
-    return true;
-  });
+    if (entry === undefined) return false;
+    const content = decoder.decode(yield* github.getBlob(target, entry.sha));
+    if (content !== change.after) return false;
+  }
+  return true;
+});
 
 /** Run the read-only scan over a snapshot and pick out the target's row for the pack. */
-const measure = (
+const measure = Effect.fnUntraced(function* (
   snapshot: Snapshot,
   mount: string,
   name: string,
   loaded: LoadedPacks,
   pack: Pack,
-): Effect.Effect<Measurement, SyncRefused | PlatformError, Path.Path> =>
-  Effect.gen(function* () {
-    const fs = snapshotFileSystem(snapshot);
-    const report = yield* scan("/", { packs: loaded, home: null }).pipe(
-      Effect.provideService(FileSystem.FileSystem, fs),
-    );
-    const repo = report.repos.find((r) => r.root === mount);
-    const entry = report.distribution?.entries.find(
-      (e) => e.pack === pack.id && e.repo === repo?.name,
-    );
-    if (!repo || !entry) {
-      return yield* new SyncRefused({
-        message: `${name}: could not measure the repository tree`,
-        status: null,
-      });
-    }
-    const contents = new Map<string, string>();
-    for (const file of repo.files) {
-      if (!ROOT_PAIR.includes(file.relativePath)) continue;
-      contents.set(file.relativePath, yield* fs.readFileString(file.path));
-    }
-    return { repo, entry, contents };
-  });
+): Effect.fn.Return<Measurement, SyncRefused | PlatformError, Path.Path> {
+  const fs = snapshotFileSystem(snapshot);
+  const report = yield* scan("/", { packs: loaded, home: null }).pipe(
+    Effect.provideService(FileSystem.FileSystem, fs),
+  );
+  const repo = report.repos.find((r) => r.root === mount);
+  const entry = report.distribution?.entries.find(
+    (e) => e.pack === pack.id && e.repo === repo?.name,
+  );
+  if (!repo || !entry) {
+    return yield* new SyncRefused({
+      message: `${name}: could not measure the repository tree`,
+      status: null,
+    });
+  }
+  const contents = new Map<string, string>();
+  for (const file of repo.files) {
+    if (!ROOT_PAIR.includes(file.relativePath)) continue;
+    contents.set(file.relativePath, yield* fs.readFileString(file.path));
+  }
+  return { repo, entry, contents };
+});
 
 /**
  * Whether the plan carries existing text from one root-pair file into another (`claude-only`,
@@ -466,31 +461,30 @@ interface WriteInput {
 }
 
 /** The only function in rulecheck that issues GitHub writes. Every check has run by now. */
-const write = (
+const write = Effect.fnUntraced(function* (
   github: GitHubService,
   target: RepositoryRef,
   input: WriteInput,
-): Effect.Effect<{ commit: string; pullRequest: PullRequest; created: boolean }, GitHubError> =>
-  Effect.gen(function* () {
-    const { baseSha, base, branch, plan, pack, status, runUrl } = input;
-    const text = pullRequestText(plan, pack, status, runUrl);
-    const baseCommit = yield* github.getCommit(target, baseSha);
-    const tree = yield* github.createTree(
-      target,
-      baseCommit.tree,
-      plan.changes.map((change) => ({ path: change.path, content: change.after })),
-    );
-    const commit = yield* github.createCommit(target, {
-      message: `${text.title}\n\n${plan.actions.map((a) => `- ${a}`).join("\n")}`,
-      tree,
-      parents: [baseSha],
-    });
-    yield* github.setRef(target, `heads/${branch}`, commit, { create: !input.branchExists });
-
-    const open = yield* github.listOpenPullRequests(target, `${target.owner}:${branch}`);
-    const current = open[0];
-    const pullRequest = current
-      ? yield* github.updatePullRequest(target, current.number, text)
-      : yield* github.createPullRequest(target, { ...text, head: branch, base });
-    return { commit, pullRequest, created: current === undefined };
+): Effect.fn.Return<{ commit: string; pullRequest: PullRequest; created: boolean }, GitHubError> {
+  const { baseSha, base, branch, plan, pack, status, runUrl } = input;
+  const text = pullRequestText(plan, pack, status, runUrl);
+  const baseCommit = yield* github.getCommit(target, baseSha);
+  const tree = yield* github.createTree(
+    target,
+    baseCommit.tree,
+    plan.changes.map((change) => ({ path: change.path, content: change.after })),
+  );
+  const commit = yield* github.createCommit(target, {
+    message: `${text.title}\n\n${plan.actions.map((a) => `- ${a}`).join("\n")}`,
+    tree,
+    parents: [baseSha],
   });
+  yield* github.setRef(target, `heads/${branch}`, commit, { create: !input.branchExists });
+
+  const open = yield* github.listOpenPullRequests(target, `${target.owner}:${branch}`);
+  const current = open[0];
+  const pullRequest = current
+    ? yield* github.updatePullRequest(target, current.number, text)
+    : yield* github.createPullRequest(target, { ...text, head: branch, base });
+  return { commit, pullRequest, created: current === undefined };
+});

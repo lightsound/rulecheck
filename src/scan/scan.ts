@@ -1,4 +1,4 @@
-import { Effect, FileSystem, Path } from "effect";
+import { Clock, Effect, FileSystem, Path } from "effect";
 import type { PlatformError } from "effect/PlatformError";
 import { findForeignMarkers, parseBlocks } from "../domain/block.ts";
 import { classifyNormalization, classifyShape, estimateBudget } from "../domain/classify.ts";
@@ -40,63 +40,60 @@ export interface ScanOptions {
 }
 
 /** Scan `root` and produce a full report. Never writes to disk. */
-export const scan = (
+export const scan = Effect.fn("scan.scan")(function* (
   root: string,
   options: ScanOptions = {},
-): Effect.Effect<ScanReport, PlatformError, FileSystem.FileSystem | Path.Path> =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const resolvedRoot = path.resolve(root);
+): Effect.fn.Return<ScanReport, PlatformError, FileSystem.FileSystem | Path.Path> {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const resolvedRoot = path.resolve(root);
 
-    const discovered = yield* walk(resolvedRoot, {
-      maxDepth: options.maxDepth ?? 12,
-      includeNested: options.includeNested ?? false,
-    });
-
-    const repos = yield* Effect.forEach(
-      discovered.repos,
-      (repo) => analyzeRepo(repo, resolvedRoot, fs, path),
-      { concurrency: 8 },
-    );
-
-    const personal: PersonalLayer | null =
-      options.home === null || options.home === undefined
-        ? null
-        : yield* scanPersonal(options.home);
-
-    let distribution: PackDistribution | null = null;
-    if (options.packs) {
-      const loaded =
-        typeof options.packs === "string"
-          ? yield* loadPacks(fs, path, path.resolve(options.packs))
-          : options.packs;
-      distribution = distribute(
-        loaded.source,
-        repos,
-        loaded.packs,
-        loaded.warnings,
-        personal?.files ?? [],
-      );
-    }
-
-    return assembleScanReport({
-      root: resolvedRoot,
-      scannedAt: new Date().toISOString(),
-      repos,
-      excludedNested: discovered.excludedNested.map(
-        (nested): ExcludedNestedRepo => ({
-          root: nested.root,
-          name: displayName(nested.root, resolvedRoot),
-          parent: displayName(nested.parent, resolvedRoot),
-          kind: nested.kind,
-        }),
-      ),
-      personal,
-      distribution,
-      minDuplicateLines: options.minDuplicateLines ?? DEFAULT_MIN_DUPLICATE_LINES,
-    });
+  const discovered = yield* walk(resolvedRoot, {
+    maxDepth: options.maxDepth ?? 12,
+    includeNested: options.includeNested ?? false,
   });
+
+  const repos = yield* Effect.forEach(
+    discovered.repos,
+    (repo) => analyzeRepo(repo, resolvedRoot, fs, path),
+    { concurrency: 8 },
+  );
+
+  const personal: PersonalLayer | null =
+    options.home === null || options.home === undefined ? null : yield* scanPersonal(options.home);
+
+  let distribution: PackDistribution | null = null;
+  if (options.packs) {
+    const loaded =
+      typeof options.packs === "string"
+        ? yield* loadPacks(fs, path, path.resolve(options.packs))
+        : options.packs;
+    distribution = distribute(
+      loaded.source,
+      repos,
+      loaded.packs,
+      loaded.warnings,
+      personal?.files ?? [],
+    );
+  }
+
+  return assembleScanReport({
+    root: resolvedRoot,
+    scannedAt: new Date(yield* Clock.currentTimeMillis).toISOString(),
+    repos,
+    excludedNested: discovered.excludedNested.map(
+      (nested): ExcludedNestedRepo => ({
+        root: nested.root,
+        name: displayName(nested.root, resolvedRoot),
+        parent: displayName(nested.parent, resolvedRoot),
+        kind: nested.kind,
+      }),
+    ),
+    personal,
+    distribution,
+    minDuplicateLines: options.minDuplicateLines ?? DEFAULT_MIN_DUPLICATE_LINES,
+  });
+});
 
 const ROOT_PAIR = new Set(["AGENTS.md", "CLAUDE.md", ".claude/CLAUDE.md"]);
 
@@ -128,37 +125,36 @@ function detectBlocks(analyzed: ReadonlyArray<AnalyzedFile>): {
   return { blocks, blockIssues, foreignRegions };
 }
 
-const analyzeRepo = (
+const analyzeRepo = Effect.fnUntraced(function* (
   repo: DiscoveredRepo,
   scanRoot: string,
   fs: FileSystem.FileSystem,
   path: Path.Path,
-): Effect.Effect<RepoReport> =>
-  Effect.gen(function* () {
-    const analyzed = yield* Effect.forEach(repo.files, (file) => analyzeFile(fs, file), {
-      concurrency: 4,
-    });
-    const files = analyzed.map((a) => a.file);
-    const contents = new Map(analyzed.map((a) => [a.file.relativePath, a.content] as const));
-    const findings = yield* verifyReferences(fs, path, repo.root, repo.packageJsonPaths, analyzed);
-    const { blocks, blockIssues, foreignRegions } = detectBlocks(analyzed);
-    const skills = yield* inventorySkills(fs, path, repo);
-
-    const shape = classifyShape(files);
-    return {
-      root: repo.root,
-      name: displayName(repo.root, scanRoot),
-      shape,
-      normalization: normalizationOf(shape, files, contents),
-      files,
-      budget: estimateBudget(files, contents),
-      findings,
-      blocks,
-      blockIssues,
-      foreignRegions,
-      skills,
-    } satisfies RepoReport;
+): Effect.fn.Return<RepoReport> {
+  const analyzed = yield* Effect.forEach(repo.files, (file) => analyzeFile(fs, file), {
+    concurrency: 4,
   });
+  const files = analyzed.map((a) => a.file);
+  const contents = new Map(analyzed.map((a) => [a.file.relativePath, a.content] as const));
+  const findings = yield* verifyReferences(fs, path, repo.root, repo.packageJsonPaths, analyzed);
+  const { blocks, blockIssues, foreignRegions } = detectBlocks(analyzed);
+  const skills = yield* inventorySkills(fs, path, repo);
+
+  const shape = classifyShape(files);
+  return {
+    root: repo.root,
+    name: displayName(repo.root, scanRoot),
+    shape,
+    normalization: normalizationOf(shape, files, contents),
+    files,
+    budget: estimateBudget(files, contents),
+    findings,
+    blocks,
+    blockIssues,
+    foreignRegions,
+    skills,
+  } satisfies RepoReport;
+});
 
 /** What a sync would do to the root pair; `both-full` reads the root files' content (D12). */
 function normalizationOf(

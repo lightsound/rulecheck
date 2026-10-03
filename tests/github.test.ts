@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { BunServices } from "@effect/platform-bun";
 import { Effect, FileSystem, Layer, Path } from "effect";
 import { hashBlockBody } from "../src/domain/block.ts";
@@ -10,7 +13,7 @@ import {
   textEntry,
   withChanges,
 } from "../src/github/fs.ts";
-import { type GhResult, ghTransport } from "../src/github/gh.ts";
+import { bunGhRunner, type GhResult, ghTransport } from "../src/github/gh.ts";
 import { makeGitHub } from "../src/github/transport.ts";
 import { renderSync } from "../src/report/sync.ts";
 import { resolvePacks } from "../src/scan/packs.ts";
@@ -709,13 +712,18 @@ async function revOf(github: ReturnType<typeof fakeGitHub>): Promise<string> {
 describe("makeGitHub over ghTransport", () => {
   function runner(responses: Record<string, GhResult | ((stdin: string | null) => GhResult)>) {
     const seen: Array<{ args: ReadonlyArray<string>; stdin: string | null }> = [];
-    const run = async (args: ReadonlyArray<string>, stdin: string | null): Promise<GhResult> => {
-      seen.push({ args, stdin });
-      const path = args[args.indexOf("Accept: application/vnd.github+json") + 1] ?? "";
-      const response = responses[path];
-      if (response === undefined) return { exitCode: 1, stdout: "", stderr: `no fake for ${path}` };
-      return typeof response === "function" ? response(stdin) : response;
-    };
+    const run = (args: ReadonlyArray<string>, stdin: string | null) =>
+      Effect.tryPromise({
+        try: async (): Promise<GhResult> => {
+          seen.push({ args, stdin });
+          const path = args[args.indexOf("Accept: application/vnd.github+json") + 1] ?? "";
+          const response = responses[path];
+          if (response === undefined)
+            return { exitCode: 1, stdout: "", stderr: `no fake for ${path}` };
+          return typeof response === "function" ? response(stdin) : response;
+        },
+        catch: (cause) => cause,
+      });
     return { run, seen };
   }
   const repo = { owner: "acme", name: "r" };
@@ -831,14 +839,31 @@ describe("makeGitHub over ghTransport", () => {
   });
 
   test("a missing gh binary is a GitHubError, not a crash", async () => {
-    const gh = makeGitHub(
-      ghTransport(async () => {
-        throw new Error("ENOENT");
-      }),
-    );
+    const gh = makeGitHub(ghTransport(() => Effect.fail(new Error("ENOENT"))));
     const failure = await Effect.runPromise(gh.getRepository(repo).pipe(Effect.flip));
     expect(failure.message).toContain("install the GitHub CLI");
     expect(failure.operation).toBe("getRepository");
+  });
+
+  test("an interrupted wait kills the spawned gh", async () => {
+    // `bunGhRunner` owns the only child process in the codebase: a wait that ends early —
+    // here a timeout — must kill it rather than leave it running.
+    const dir = await mkdtemp(join(tmpdir(), "rulecheck-gh-shim-"));
+    await writeFile(join(dir, "gh"), "#!/bin/sh\nexec sleep 31337\n", { mode: 0o755 });
+    const path = process.env.PATH;
+    process.env.PATH = `${dir}:${path}`;
+    try {
+      const exit = await Effect.runPromiseExit(
+        bunGhRunner(["api", "/zen"], null).pipe(Effect.timeout("100 millis")),
+      );
+      expect(exit._tag).toBe("Failure");
+      // The killed child takes a moment to be reaped.
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(Bun.spawnSync(["pgrep", "-f", "sleep 31337"]).stdout.toString().trim()).toBe("");
+    } finally {
+      process.env.PATH = path;
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
 

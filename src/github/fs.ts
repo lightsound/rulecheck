@@ -42,26 +42,25 @@ export function mountPath(repo: RepositoryRef): string {
 export const MAX_TREE_LISTINGS = 200;
 
 /** Fetch the tree of `sha` and lay it out under `mount`. */
-export const repositorySnapshot = (
+export const repositorySnapshot = Effect.fn("fs.repositorySnapshot")(function* (
   github: GitHubService,
   repo: RepositoryRef,
   sha: string,
   mount: string = mountPath(repo),
-): Effect.Effect<Snapshot, GitHubError> =>
-  Effect.gen(function* () {
-    const commit = yield* github.getCommit(repo, sha);
-    const entries = yield* listTree(github, repo, commit.tree);
-    const files = new Map<string, SnapshotEntry>();
-    files.set(`${mount}/.git/HEAD`, textEntry(`${sha}\n`));
-    for (const entry of entries) {
-      if (entry.type !== "blob") continue;
-      files.set(
-        `${mount}/${entry.path}`,
-        lazyBlob(github, repo, entry.sha, `${mount}/${entry.path}`),
-      );
-    }
-    return files;
-  });
+): Effect.fn.Return<Snapshot, GitHubError> {
+  const commit = yield* github.getCommit(repo, sha);
+  const entries = yield* listTree(github, repo, commit.tree);
+  const files = new Map<string, SnapshotEntry>();
+  files.set(`${mount}/.git/HEAD`, textEntry(`${sha}\n`));
+  for (const entry of entries) {
+    if (entry.type !== "blob") continue;
+    files.set(
+      `${mount}/${entry.path}`,
+      lazyBlob(github, repo, entry.sha, `${mount}/${entry.path}`),
+    );
+  }
+  return files;
+});
 
 /**
  * A blob that is fetched on first read and remembered: both scan passes and the plan read the
@@ -133,27 +132,26 @@ const listTree = (
     listings += 1;
     return github.getTree(repo, sha, options);
   };
-  const below = (
+  const below = Effect.fnUntraced(function* (
     sha: string,
     dirName: string,
-  ): Effect.Effect<ReadonlyArray<TreeEntry>, GitHubError> =>
-    Effect.gen(function* () {
-      const full = yield* list(sha);
-      if (!full.truncated) return full.entries;
-      const shallow = yield* list(sha, { recursive: false });
-      const entries: TreeEntry[] = [];
-      for (const entry of shallow.entries) {
-        if (entry.type !== "tree") {
-          entries.push(entry);
-          continue;
-        }
-        if (isIgnoredDirectory(dirName, entry.path)) continue;
-        for (const child of yield* below(entry.sha, entry.path)) {
-          entries.push({ ...child, path: `${entry.path}/${child.path}` });
-        }
+  ): Effect.fn.Return<ReadonlyArray<TreeEntry>, GitHubError> {
+    const full = yield* list(sha);
+    if (!full.truncated) return full.entries;
+    const shallow = yield* list(sha, { recursive: false });
+    const entries: TreeEntry[] = [];
+    for (const entry of shallow.entries) {
+      if (entry.type !== "tree") {
+        entries.push(entry);
+        continue;
       }
-      return entries;
-    });
+      if (isIgnoredDirectory(dirName, entry.path)) continue;
+      for (const child of yield* below(entry.sha, entry.path)) {
+        entries.push({ ...child, path: `${entry.path}/${child.path}` });
+      }
+    }
+    return entries;
+  });
   return below(treeSha, repo.name);
 };
 

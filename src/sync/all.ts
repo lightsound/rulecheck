@@ -73,34 +73,33 @@ export interface SyncAllResult {
 /** Targets are read in parallel up to this many at a time; writes are serialized (D14). */
 const CONCURRENCY = 3;
 
-export const syncAll = (
+export const syncAll = Effect.fn("all.syncAll")(function* (
   options: SyncAllOptions,
-): Effect.Effect<
+): Effect.fn.Return<
   SyncAllResult,
   SyncRefused | SyncFailed | PackSourceError | GitHubError | PlatformError,
   GitHub | FileSystem.FileSystem | Path.Path
-> =>
-  Effect.gen(function* () {
-    const loaded = yield* resolvePacks(options.packs);
-    const packs = options.pack === null ? loaded.packs : [yield* selectPack(loaded, options.pack)];
-    const writeLock = yield* Semaphore.make(1);
-    const rows = yield* Effect.forEach(
-      targetsOf(packs),
-      ({ repo, pack }) =>
-        runTarget(
-          { repo, dryRun: options.dryRun, runUrl: options.runUrl ?? null, writeLock },
-          loaded,
-          pack,
-        ).pipe(Effect.map((outcome) => ({ target: { repo, pack: pack.id }, outcome }))),
-      { concurrency: CONCURRENCY },
-    );
-    return {
-      source: loaded.source,
-      dryRun: options.dryRun,
-      rows,
-      failed: rows.filter((row) => row.outcome.kind === "failed").length,
-    };
-  });
+> {
+  const loaded = yield* resolvePacks(options.packs);
+  const packs = options.pack === null ? loaded.packs : [yield* selectPack(loaded, options.pack)];
+  const writeLock = yield* Semaphore.make(1);
+  const rows = yield* Effect.forEach(
+    targetsOf(packs),
+    ({ repo, pack }) =>
+      runTarget(
+        { repo, dryRun: options.dryRun, runUrl: options.runUrl ?? null, writeLock },
+        loaded,
+        pack,
+      ).pipe(Effect.map((outcome) => ({ target: { repo, pack: pack.id }, outcome }))),
+    { concurrency: CONCURRENCY },
+  );
+  return {
+    source: loaded.source,
+    dryRun: options.dryRun,
+    rows,
+    failed: rows.filter((row) => row.outcome.kind === "failed").length,
+  };
+});
 
 /** Subscribers in `subscriptions.json` order, pack by pack; the same repository under two packs is two targets (D10). */
 function targetsOf(packs: ReadonlyArray<Pack>): Array<{ repo: string; pack: Pack }> {
