@@ -1,4 +1,4 @@
-import { Effect, Schema } from "effect";
+import { Clock, Effect, Schema } from "effect";
 import { GitHubError } from "./client.ts";
 import { type FetchTransportOptions, fetchTransport } from "./fetch.ts";
 import { errorMessageOf, JsonUnknown, retryAfterOf, type Transport } from "./transport.ts";
@@ -51,7 +51,10 @@ export interface InstallationTokenOptions extends Omit<FetchTransportOptions, "t
    * opaque to this module either way.
    */
   readonly mintHeaders?: Readonly<Record<string, string>>;
-  /** Clock in milliseconds since the epoch; default `Date.now`. Injected by tests. */
+  /**
+   * Clock in milliseconds since the epoch; default the ambient `Clock` service (`Date.now`
+   * equivalent). Injected by tests that need deterministic expiry.
+   */
   readonly now?: () => number;
 }
 
@@ -76,7 +79,8 @@ const PKCS8_BLOCK = /-----BEGIN PRIVATE KEY-----([\s\S]*?)-----END PRIVATE KEY--
 export function installationToken(
   options: InstallationTokenOptions,
 ): Effect.Effect<string, GitHubError> {
-  const now = options.now ?? Date.now;
+  const now: Effect.Effect<number> =
+    options.now === undefined ? Clock.currentTimeMillis : Effect.sync(options.now);
   const operation = "installationToken";
   let key: CryptoKey | null = null;
   let cached: { readonly token: string; readonly expiresAt: number } | null = null;
@@ -96,7 +100,7 @@ export function installationToken(
   // The JWT is the mint's bearer token, signed per request so a retry after a long secondary-limit
   // wait presents a fresh one.
   const jwt = Effect.flatMap(signingKey, (signing) =>
-    appJwt(String(options.appId), signing, now()),
+    Effect.flatMap(now, (nowMs) => appJwt(String(options.appId), signing, nowMs)),
   );
   const {
     appId: _appId,
@@ -122,7 +126,7 @@ export function installationToken(
       ...(mintHeaders === undefined ? {} : { headers: mintHeaders }),
     });
     if (response.status >= 400) {
-      const retryAfter = retryAfterOf(response.headers);
+      const retryAfter = retryAfterOf(response.headers, Math.floor((yield* now) / 1000));
       return yield* new GitHubError({
         operation,
         status: response.status,
@@ -164,8 +168,8 @@ export function installationToken(
     return data.token;
   });
 
-  return Effect.suspend(() =>
-    cached !== null && now() < cached.expiresAt - REFRESH_MARGIN_MS
+  return Effect.flatMap(now, (nowMs) =>
+    cached !== null && nowMs < cached.expiresAt - REFRESH_MARGIN_MS
       ? Effect.succeed(cached.token)
       : mint,
   );
