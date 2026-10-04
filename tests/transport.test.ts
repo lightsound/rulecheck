@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { BunServices } from "@effect/platform-bun";
-import { Effect, Layer } from "effect";
+import { Clock, Effect, Layer } from "effect";
 import { hashBlockBody } from "../src/domain/block.ts";
 import { GitHub, GitHubError, type GitHubService } from "../src/github/client.ts";
 import { fetchTransport, secondaryLimitDelay } from "../src/github/fetch.ts";
@@ -232,6 +232,35 @@ describe("fetchTransport", () => {
     expect(seenLimits).toEqual([
       { limit: 5000, remaining: 0, reset: now + 1800, resource: "core" },
     ]);
+  });
+
+  test("retryAfter is computed from the ambient Clock, not Date.now", async () => {
+    const fixedNow = Date.parse("2026-10-04T12:00:00Z");
+    const clock: Clock.Clock = {
+      currentTimeMillisUnsafe: () => fixedNow,
+      currentTimeMillis: Effect.succeed(fixedNow),
+      monotonicTimeNanosUnsafe: () => 0n,
+      monotonicTimeNanos: Effect.succeed(0n),
+      currentTimeNanosUnsafe: () => 0n,
+      currentTimeNanos: Effect.succeed(0n),
+      sleep: () => Effect.void,
+    };
+    const github = makeGitHub({
+      request: () =>
+        Effect.succeed({
+          status: 429,
+          headers: {
+            "x-ratelimit-limit": "5000",
+            "x-ratelimit-remaining": "0",
+            "x-ratelimit-reset": String(Math.floor(fixedNow / 1000) + 300),
+          },
+          body: "",
+        }),
+    });
+    const failure = await runP(
+      Effect.flip(github.getRepository(repo)).pipe(Effect.provideService(Clock.Clock, clock)),
+    );
+    expect(failure).toMatchObject({ operation: "getRepository", status: 429, retryAfter: 300 });
   });
 
   test("quota helpers", () => {

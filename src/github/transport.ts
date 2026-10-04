@@ -1,4 +1,4 @@
-import { Effect, Schema } from "effect";
+import { Clock, Effect, Schema } from "effect";
 import {
   GitHubError,
   type GitHubService,
@@ -115,12 +115,14 @@ export function makeGitHub(transport: Transport): GitHubService {
       ),
       Effect.flatMap((response) => {
         if (response.status >= 400) {
-          const retryAfter = retryAfterOf(response.headers);
-          return new GitHubError({
-            operation,
-            status: response.status,
-            message: errorMessageOf(response.body) ?? `HTTP ${response.status}`,
-            ...(retryAfter === null ? {} : { retryAfter }),
+          return Effect.flatMap(Clock.currentTimeMillis, (millis) => {
+            const retryAfter = retryAfterOf(response.headers, Math.floor(millis / 1000));
+            return new GitHubError({
+              operation,
+              status: response.status,
+              message: errorMessageOf(response.body) ?? `HTTP ${response.status}`,
+              ...(retryAfter === null ? {} : { retryAfter }),
+            });
           });
         }
         if (response.body.trim().length === 0) return Effect.succeed(null);
