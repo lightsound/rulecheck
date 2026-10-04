@@ -87,7 +87,7 @@ the pinned sha; the others follow the same ranges rulecheck uses.
   Consequence: pin `effect` in the App to the identical exact version, and after every bump run
   `bun pm ls | grep effect` and confirm a single copy.
 - The App imports only what runs on workerd. **Never import** `src/main.ts`, `src/cli.ts`, or
-  `src/github/gh.ts` (`Bun.spawn`). `node:crypto` (`createHash`) and `Buffer` in the reusable
+  `src/github/gh.ts` (the `ChildProcessSpawner` process spawn). `node:crypto` (`createHash`) and `Buffer` in the reusable
   code need `nodejs_compat` on the Worker; `js-tiktoken` is pure JavaScript.
 - Modules the App needs, and the `exports` subpaths rulecheck must expose for them:
 

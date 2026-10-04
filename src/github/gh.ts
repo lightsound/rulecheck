@@ -1,4 +1,6 @@
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Stream } from "effect";
+import { ChildProcess } from "effect/process";
+import { ChildProcessSpawner } from "effect/process/ChildProcessSpawner";
 import { GitHub, GitHubError } from "./client.ts";
 import {
   errorMessageOf,
@@ -10,10 +12,10 @@ import {
 
 /**
  * The GitHub CLI as a `Transport`: every request is one `gh api` call, so authentication, hosts,
- * and tokens stay with `gh auth` and rulecheck never holds a credential. `gh` is spawned with
- * this process's environment, so a `GH_TOKEN` variable (the form GitHub Actions uses, D23)
- * authenticates it without any `gh auth login` state. This is the one module that spawns a
- * process; the hosted App never imports it (D26).
+ * and tokens stay with `gh auth` and rulecheck never holds a credential. `gh` is spawned through
+ * the `ChildProcessSpawner` service with this process's environment, so a `GH_TOKEN` variable
+ * (the form GitHub Actions uses, D23) authenticates it without any `gh auth login` state. This
+ * is the one module that spawns a process; the hosted App never imports it (D26).
  */
 
 export interface GhResult {
@@ -32,35 +34,42 @@ export type GhRunner = (
   stdin: string | null,
 ) => Effect.Effect<GhResult, unknown>;
 
-export const bunGhRunner: GhRunner = (args, stdin) =>
-  Effect.try({
-    try: () =>
-      Bun.spawn(["gh", ...args], {
-        stdin: stdin === null ? "ignore" : new TextEncoder().encode(stdin),
-        stdout: "pipe",
-        stderr: "pipe",
+/**
+ * The `gh` runner over the `ChildProcessSpawner` service: `spawn` is scoped, so an early end to
+ * the wait — an interruption, or a failed sibling read — closes the scope and terminates the
+ * process group (the platform spawner kills the group, not just the child). Feed this a
+ * `BunServices.layer` (or `BunChildProcessSpawner.layer`) at the edge.
+ */
+export const spawnerGhRunner =
+  (spawner: ChildProcessSpawner["Service"]): GhRunner =>
+  (args, stdin) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const handle = yield* spawner.spawn(
+          ChildProcess.make("gh", args, {
+            stdin: stdin === null ? "ignore" : Stream.make(new TextEncoder().encode(stdin)),
+          }),
+        );
+        const { stdout, stderr, exitCode } = yield* Effect.all(
+          {
+            stdout: Stream.mkString(Stream.decodeText(handle.stdout)),
+            stderr: Stream.mkString(Stream.decodeText(handle.stderr)),
+            exitCode: handle.exitCode,
+          },
+          { concurrency: "unbounded" },
+        );
+        return { exitCode, stdout, stderr };
       }),
-    catch: (cause) => cause,
-  }).pipe(
-    Effect.flatMap((proc) =>
-      Effect.all(
-        [
-          Effect.tryPromise({ try: () => new Response(proc.stdout).text(), catch: (c) => c }),
-          Effect.tryPromise({ try: () => new Response(proc.stderr).text(), catch: (c) => c }),
-          Effect.tryPromise({ try: () => proc.exited, catch: (c) => c }),
-        ],
-        { concurrency: "unbounded" },
-      ).pipe(
-        Effect.map(([stdout, stderr, exitCode]) => ({ exitCode, stdout, stderr })),
-        // A wait that ends early — interrupted or failed on one branch — would otherwise abandon
-        // the spawned `gh`. `kill` on an already-exited process is a no-op.
-        Effect.ensuring(Effect.sync(() => proc.kill())),
-      ),
-    ),
-  );
+    );
 
-export const layerGh = (run: GhRunner = bunGhRunner): Layer.Layer<GitHub> =>
-  Layer.succeed(GitHub, makeGitHub(ghTransport(run)));
+/**
+ * `GitHub` over `gh api` on the `ChildProcessSpawner` service; the layer carries that
+ * requirement, so provide it a platform layer (`BunServices.layer`) at composition.
+ */
+export const layerGh: Layer.Layer<GitHub, never, ChildProcessSpawner> = Layer.effect(
+  GitHub,
+  Effect.map(ChildProcessSpawner, (spawner) => makeGitHub(ghTransport(spawnerGhRunner(spawner)))),
+);
 
 /**
  * `gh api` hides the response line and headers, so a successful call is reported as `200` with
@@ -68,7 +77,7 @@ export const layerGh = (run: GhRunner = bunGhRunner): Layer.Layer<GitHub> =>
  * stderr. When `gh` printed the API's JSON error body on stdout that body is passed through;
  * otherwise the stderr line becomes the body's `message`, so the client maps both the same way.
  */
-export const ghTransport = (run: GhRunner = bunGhRunner): Transport => ({
+export const ghTransport = (run: GhRunner): Transport => ({
   request: Effect.fn("gh.request")(function* ({
     method,
     path,

@@ -27,8 +27,8 @@ App design (section 4, jobs and rate limits) and the CLI as it runs today.
 - **Code to run.** Everything in `src/domain/`, `src/scan/`, `src/sync/sync.ts`, `src/github/fs.ts`
   and `src/report/` unchanged. Node APIs used: `node:crypto` `createHash` (four files), `Buffer`;
   `js-tiktoken` is pure JavaScript with a few MB of rank tables. The GitHub client becomes
-  `fetch`-only (`fetchTransport`); `Bun.spawn` stays in the CLI's `gh` runner and is never
-  imported by the server. Effect v4, exact-pinned (`4.0.0`;
+  `fetch`-only (`fetchTransport`); process spawning stays in the CLI's `gh` runner (through the
+  `ChildProcessSpawner` service) and is never imported by the server. Effect v4, exact-pinned (`4.0.0`;
   [announcement](https://effect.website/blog/releases/effect/40)).
 - **Jobs.** Three message kinds (`scan-installation`, `scan-repository`, `sync-target`), each
   idempotent by key, each a few seconds of CPU and up to tens of seconds of wall time waiting on
@@ -165,7 +165,7 @@ Why Cloudflare wins the default: it is the only stack where the two things the A
 right, one writer per installation and idempotent at-least-once jobs, are platform primitives
 (a Durable Object and a Queue) rather than code the App carries; every primitive it needs is GA;
 its bill is flat at the target scale; and the reusable code already runs in that runtime with
-one seam (`Bun.spawn`) the design isolates anyway. Vercel offers the smoothest developer loop
+one seam (the `gh` process spawn) the design isolates anyway. Vercel offers the smoothest developer loop
 and the most conventional runtime but no lock primitive and a queue still in beta, with a
 second vendor for the database. Prisma is the most interesting of the three for this codebase
 (Bun and Effect v4 are its own foundation) and is not ready: Compute went GA three weeks ago,

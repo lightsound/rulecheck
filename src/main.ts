@@ -8,4 +8,10 @@ import { layerGh } from "./github/gh.ts";
 
 const program = Command.run(rulecheck, { version: pkg.version });
 
-BunRuntime.runMain(program.pipe(Effect.provide(Layer.mergeAll(BunServices.layer, layerGh()))));
+BunRuntime.runMain(
+  program.pipe(
+    Effect.provide(
+      Layer.mergeAll(BunServices.layer, layerGh.pipe(Layer.provide(BunServices.layer))),
+    ),
+  ),
+);

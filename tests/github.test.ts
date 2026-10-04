@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BunServices } from "@effect/platform-bun";
 import { Effect, FileSystem, Layer, Path } from "effect";
+import { ChildProcessSpawner } from "effect/process/ChildProcessSpawner";
 import { hashBlockBody } from "../src/domain/block.ts";
 import { type GitHub, GitHubError, parseRepositorySpec } from "../src/github/client.ts";
 import {
@@ -13,7 +14,7 @@ import {
   textEntry,
   withChanges,
 } from "../src/github/fs.ts";
-import { bunGhRunner, type GhResult, ghTransport } from "../src/github/gh.ts";
+import { type GhResult, ghTransport, spawnerGhRunner } from "../src/github/gh.ts";
 import { makeGitHub } from "../src/github/transport.ts";
 import { renderSync } from "../src/report/sync.ts";
 import { resolvePacks } from "../src/scan/packs.ts";
@@ -846,7 +847,7 @@ describe("makeGitHub over ghTransport", () => {
   });
 
   test("an interrupted wait kills the spawned gh", async () => {
-    // `bunGhRunner` owns the only child process in the codebase: a wait that ends early —
+    // `spawnerGhRunner` owns the only child process in the codebase: a wait that ends early —
     // here a timeout — must kill it rather than leave it running.
     const dir = await mkdtemp(join(tmpdir(), "rulecheck-gh-shim-"));
     await writeFile(join(dir, "gh"), "#!/bin/sh\nexec sleep 31337\n", { mode: 0o755 });
@@ -854,7 +855,10 @@ describe("makeGitHub over ghTransport", () => {
     process.env.PATH = `${dir}:${path}`;
     try {
       const exit = await Effect.runPromiseExit(
-        bunGhRunner(["api", "/zen"], null).pipe(Effect.timeout("100 millis")),
+        Effect.gen(function* () {
+          const spawner = yield* ChildProcessSpawner;
+          return yield* spawnerGhRunner(spawner)(["api", "/zen"], null);
+        }).pipe(Effect.provide(BunServices.layer), Effect.timeout("100 millis")),
       );
       expect(exit._tag).toBe("Failure");
       // The killed child takes a moment to be reaped.
