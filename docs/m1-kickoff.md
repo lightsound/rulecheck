@@ -87,7 +87,7 @@ the pinned sha; the others follow the same ranges rulecheck uses.
   Consequence: pin `effect` in the App to the identical exact version, and after every bump run
   `bun pm ls | grep effect` and confirm a single copy.
 - The App imports only what runs on workerd. **Never import** `src/main.ts`, `src/cli.ts`, or
-  `src/github/gh.ts` (`Bun.spawn`). `node:crypto` (`createHash`) and `Buffer` in the reusable
+  `src/github/gh.ts` (the `ChildProcessSpawner` process spawn). `node:crypto` (`createHash`) and `Buffer` in the reusable
   code need `nodejs_compat` on the Worker; `js-tiktoken` is pure JavaScript.
 - Modules the App needs, and the `exports` subpaths rulecheck must expose for them:
 
@@ -127,7 +127,7 @@ holds the new coverage next to the unchanged `tests/github.test.ts`.
 
 - Split `makeGh` into `makeGitHub(transport)` (shared response mapping: `treeEntry`,
   `pullRequest`, `parseError`) plus a `Transport` interface (`request(method, path, body) →
-  { status, json }`); keep `ghTransport(run)` for the CLI (`Bun.spawn` only in `bunGhRunner`);
+  { status, json }`); keep `ghTransport(run)` for the CLI (`ChildProcessSpawner` only in `spawnerGhRunner`);
   add `fetchTransport({ baseUrl, token })` where `token` is an `Effect<string>`.
 - `installationToken(appId, privateKey, installationId)`: RS256 JWT with `crypto.subtle`,
   `POST /app/installations/{id}/access_tokens`, cached until five minutes before `expires_at`;

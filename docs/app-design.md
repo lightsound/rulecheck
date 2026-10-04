@@ -415,7 +415,8 @@ tree, not the earlier sketch):
 own entry that provides `Path`, the snapshot `FileSystem` per job, and `GitHub` over
 `fetchTransport`. `node:crypto` (`createHash` in `block.ts`, `pack.ts`, `skills.ts`,
 `analyze.ts`) and `Buffer` run on workerd with `nodejs_compat`; `js-tiktoken` is pure JS. The
-one true Bun dependency in the reusable code is `Bun.spawn`, and item 1 isolates it.
+one process spawn in the reusable code is the `gh` runner (`spawnerGhRunner` on the
+`ChildProcessSpawner` service), and item 1 isolates it.
 
 ### Data model
 
@@ -531,7 +532,7 @@ babysit.
 
 | Concern | Cloudflare Workers + Queues + Durable Objects (chosen) | Fly.io, one Bun container | Vercel functions |
 | --- | --- | --- | --- |
-| Reuse of `src/*` | Everything except `Bun.spawn`, via the transport split; `@effect/platform-bun` is not loaded. Effect v4 on workerd is a known-good stack: the owner runs it in other projects, and Alchemy (below) is itself an Effect program | Everything as is, including `all.ts` and the `Semaphore`; the only change is the fetch transport | As Workers, but no queue or lock primitive of its own |
+| Reuse of `src/*` | Everything except the `gh` process spawn (`spawnerGhRunner`), via the transport split; `@effect/platform-bun` is not loaded. Effect v4 on workerd is a known-good stack: the owner runs it in other projects, and Alchemy (below) is itself an Effect program | Everything as is, including `all.ts` and the `Semaphore`; the only change is the fetch transport | As Workers, but no queue or lock primitive of its own |
 | Job model | Queues (at-least-once, retries, `delaySeconds`), Durable Object per installation as the write lock and run coordinator, Cron Triggers for the daily runs. 15 min wall clock per consumer invocation, CPU up to 5 min (configured); one `sync-target` is seconds of CPU | An in-process Effect queue, or pg-boss on the database; a restart mid-run loses in-flight work unless persisted | Needs a third service (Inngest, Upstash QStash) for queues and retries |
 | Cold path latency | Webhook to first API call under 50 ms; a full scan of 200 repositories is bounded by GitHub, not compute | Same order; always-on | Same, cold starts on the function |
 | Runtime | workerd is not Bun: no `Bun.*`, `node:` via `nodejs_compat`, 128 MB memory per isolate (`js-tiktoken` ranks fit); tests keep running under `bun test` | Bun, the runtime rulecheck is developed with | Node runtime; Bun runtime experimental |
