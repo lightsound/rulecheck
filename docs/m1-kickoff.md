@@ -127,7 +127,7 @@ holds the new coverage next to the unchanged `tests/github.test.ts`.
 
 - Split `makeGh` into `makeGitHub(transport)` (shared response mapping: `treeEntry`,
   `pullRequest`, `parseError`) plus a `Transport` interface (`request(method, path, body) →
-  { status, json }`); keep `ghTransport(run)` for the CLI (`Bun.spawn` only in `bunGhRunner`);
+  { status, json }`); keep `ghTransport(run)` for the CLI (`ChildProcessSpawner` only in `spawnerGhRunner`);
   add `fetchTransport({ baseUrl, token })` where `token` is an `Effect<string>`.
 - `installationToken(appId, privateKey, installationId)`: RS256 JWT with `crypto.subtle`,
   `POST /app/installations/{id}/access_tokens`, cached until five minutes before `expires_at`;
