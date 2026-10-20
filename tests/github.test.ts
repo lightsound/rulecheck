@@ -38,6 +38,12 @@ function block(source: string, body: string, rev = "aaaaaaa") {
   return `<!-- agent-rules:begin source=${source} rev=${rev} hash=${hashBlockBody(body)} -->\n${body}\n<!-- agent-rules:end -->`;
 }
 
+const PROSE_CLAUDE = [
+  "<!-- stripe-projects-cli managed:claude-md:start -->",
+  "look at AGENTS.md for your instructions",
+  "<!-- stripe-projects-cli managed:claude-md:end -->",
+].join("\n");
+
 const PACK_REPO: FakeRepoInput = {
   files: {
     "packs/base/AGENTS.md": `${BODY}\n`,
@@ -54,6 +60,9 @@ const PACK_REPO: FakeRepoInput = {
         "acme/foreign",
         "acme/regions",
         "acme/cobracket",
+        "acme/prose",
+        "acme/symlink",
+        "acme/prose-legacy",
         "acme/outdated",
         "acme/modified",
         "acme/ordered",
@@ -103,6 +112,15 @@ const TARGETS: Record<string, FakeRepoInput> = {
   "acme/regions": { files: { "AGENTS.md": COBRACKET, "CLAUDE.md": "@AGENTS.md\n" } },
   // The real pair: CLAUDE.md is 420 lines, three regions, `@AGENTS.md` inside the second (D16).
   "acme/cobracket": { files: { "AGENTS.md": COBRACKET, "CLAUDE.md": COBRACKET_CLAUDE } },
+  // A prose pointer inside another tool's region, as `stripe-projects-cli` writes it: Claude Code
+  // loads nothing through it, and the region is not the sync's to rewrite.
+  "acme/prose": { files: { "AGENTS.md": "# P\n", "CLAUDE.md": `${PROSE_CLAUDE}\n` } },
+  // Synced before D33: the block landed in AGENTS.md, CLAUDE.md still points in prose.
+  "acme/prose-legacy": {
+    files: { "AGENTS.md": `# P\n\n${block("base", OLD_BODY)}\n`, "CLAUDE.md": "See AGENTS.md.\n" },
+  },
+  // A symbolic link `CLAUDE.md -> AGENTS.md` reads as the bare target path through the API.
+  "acme/symlink": { files: { "AGENTS.md": "# L\n", "CLAUDE.md": "AGENTS.md" } },
   "acme/outdated": {
     files: {
       "AGENTS.md": `# O\n\n${block("base", OLD_BODY)}\n\n## Own\n`,
@@ -276,7 +294,7 @@ describe("resolvePacks", () => {
     const loaded = await run(resolvePacks("acme/agent-rules"));
     expect(loaded.source).toBe(`acme/agent-rules@${(sha ?? "").slice(0, 7)}`);
     expect(loaded.packs.map((p) => `${p.id}:${p.rev === sha}:${p.subscribers.length}`)).toEqual([
-      "base:true:12",
+      "base:true:15",
       "frontend:true:1",
       "rotten:true:3",
     ]);
@@ -581,6 +599,39 @@ describe("sync", () => {
     github.moveRef("acme/cobracket", "heads/main", "heads/agent-rules/base");
     github.calls.length = 0;
     expect((await runSync({ repo: "acme/cobracket" })).kind).toBe("nothing-to-do");
+  });
+
+  test("agents-prose: the import is appended after the region, the pair measures as loading AGENTS.md", async () => {
+    const { github, runSync } = world();
+    const dry = await runSync({ repo: "acme/prose", dryRun: true });
+    expect(dry.kind).toBe("planned");
+    if (dry.kind !== "planned") return;
+    expect(dry.status.message).toBe(
+      "insert block into AGENTS.md, add `@AGENTS.md` to CLAUDE.md; 1 foreign region stays untouched",
+    );
+    const result = await runSync({ repo: "acme/prose" });
+    expect(result.kind).toBe("opened");
+    expect(github.fileAt("acme/prose", "heads/agent-rules/base", "CLAUDE.md")).toBe(
+      `${PROSE_CLAUDE}\n\n@AGENTS.md\n`,
+    );
+    expect(github.pulls("acme/prose")[0]?.body).toContain(
+      "- append `@AGENTS.md` to CLAUDE.md, which points at AGENTS.md only in prose (its text stays as it is)",
+    );
+    github.moveRef("acme/prose", "heads/main", "heads/agent-rules/base");
+    expect((await runSync({ repo: "acme/prose" })).kind).toBe("nothing-to-do");
+
+    // A pair synced before D33 is repaired by the next update of its block.
+    const legacy = await runSync({ repo: "acme/prose-legacy" });
+    expect(legacy.kind).toBe("opened");
+    expect(github.fileAt("acme/prose-legacy", "heads/agent-rules/base", "CLAUDE.md")).toBe(
+      "See AGENTS.md.\n\n@AGENTS.md\n",
+    );
+
+    // A symbolic link already loads AGENTS.md: only AGENTS.md is written, the link stays.
+    const linked = await runSync({ repo: "acme/symlink", dryRun: true });
+    expect(linked.kind).toBe("planned");
+    if (linked.kind !== "planned") return;
+    expect(linked.plan.changes.map((c) => c.path)).toEqual(["AGENTS.md"]);
   });
 
   test("refuses: not subscribed, foreign marker, modified block", async () => {

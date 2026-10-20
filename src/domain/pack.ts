@@ -118,6 +118,9 @@ function isRootPairFile(relativePath: string): boolean {
   return relativePath === "AGENTS.md" || ROOT_CLAUDE.has(relativePath);
 }
 
+/** D33: what a sync on an `agents-prose` pair does to CLAUDE.md, on insertion and on update. */
+const APPEND_IMPORT = "add `@AGENTS.md` to CLAUDE.md";
+
 /** D16: why an `agents-imported` pair is written like a canonical one. */
 export const IMPORTED_NOTE = "CLAUDE.md already imports AGENTS.md; left untouched";
 
@@ -138,6 +141,8 @@ export function describeNormalization(normalization: Normalization, claude: stri
   switch (normalization) {
     case "keep":
       return "insert block into AGENTS.md";
+    case "add-import":
+      return `insert block into AGENTS.md, ${APPEND_IMPORT}`;
     case "add-wrapper":
       return "insert block into AGENTS.md, add CLAUDE.md wrapper";
     case "create":
@@ -192,7 +197,11 @@ export function classifyPackStatus(repo: RepoForDistribution, pack: Pack): PackS
         message: `${pending}; it sits in ${block.file}, which the sync leaves untouched because it imports AGENTS.md (D16); move the block into AGENTS.md`,
       };
     }
-    const issue = repo.blockIssues.find((i) => i.file === block.file);
+    // D33: on an `agents-prose` pair the update also appends the import to CLAUDE.md.
+    const appends = repo.shape === "agents-prose";
+    const issue = repo.blockIssues.find(
+      (i) => i.file === block.file || (appends && i.file === "CLAUDE.md"),
+    );
     if (issue) {
       return {
         ...base,
@@ -219,7 +228,11 @@ export function classifyPackStatus(repo: RepoForDistribution, pack: Pack): PackS
       ...base,
       ...at,
       status: "outdated",
-      message: withRegions(revChange(block, pack), regionsIn(repo, block.file)),
+      message: withRegions(
+        appends ? `${revChange(block, pack)}; ${APPEND_IMPORT}` : revChange(block, pack),
+        regionsIn(repo, block.file) +
+          (appends && block.file !== "CLAUDE.md" ? regionsIn(repo, "CLAUDE.md") : 0),
+      ),
     };
   }
 
@@ -228,7 +241,8 @@ export function classifyPackStatus(repo: RepoForDistribution, pack: Pack): PackS
   }
 
   // Files the sync would rewrite: only AGENTS.md when the pair is already canonical (strictly, or
-  // by import, D16), else both (a `both-full` pair is normalized in the same commit, D12).
+  // by import, D16), else both (a `both-full` pair is normalized in the same commit, D12; an
+  // `agents-prose` CLAUDE.md gets the import line appended).
   const touched = LEAVES_CLAUDE_ALONE.has(repo.shape)
     ? new Set(["AGENTS.md"])
     : new Set(["AGENTS.md", ...ROOT_CLAUDE]);
@@ -243,10 +257,14 @@ export function classifyPackStatus(repo: RepoForDistribution, pack: Pack): PackS
     };
   }
 
-  // A region stays in the file it is in (D15). Only a content AGENTS.md that the plan keeps in
-  // place may carry one; a file the plan moves, merges, drops, or replaces with the wrapper may not.
+  // A region stays in the file it is in (D15). Only a file the plan keeps in place may carry one:
+  // a content AGENTS.md, or the CLAUDE.md an `add-import` only appends to; a file the plan moves,
+  // merges, drops, or replaces with the wrapper may not.
   const kept = KEEPS_AGENTS_IN_PLACE.has(repo.shape) ? "AGENTS.md" : null;
-  const region = repo.foreignRegions.find((r) => touched.has(r.file) && r.file !== kept);
+  const appended = repo.shape === "agents-prose" ? "CLAUDE.md" : null;
+  const region = repo.foreignRegions.find(
+    (r) => touched.has(r.file) && r.file !== kept && r.file !== appended,
+  );
   if (region) {
     return {
       ...base,
@@ -262,7 +280,10 @@ export function classifyPackStatus(repo: RepoForDistribution, pack: Pack): PackS
     status: "eligible",
     file: contentFile(repo),
     line: null,
-    message: withRegions(eligibleAction(repo), kept ? regionsIn(repo, kept) : 0),
+    message: withRegions(
+      eligibleAction(repo),
+      (kept ? regionsIn(repo, kept) : 0) + (appended ? regionsIn(repo, appended) : 0),
+    ),
   };
 }
 
@@ -281,6 +302,7 @@ export function classifyIfSubscribed(repo: RepoForDistribution, pack: Pack): Pac
 const KEEPS_AGENTS_IN_PLACE: ReadonlySet<CanonicalShape> = new Set([
   "agents-canonical",
   "agents-imported",
+  "agents-prose",
   "agents-only",
   "both-full",
 ]);

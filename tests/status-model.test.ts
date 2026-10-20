@@ -20,6 +20,7 @@ const GLOSSARY = readFileSync(new URL("../docs/status-model.md", import.meta.url
 
 const NORMALIZATIONS = {
   keep: 0,
+  "add-import": 0,
   "add-wrapper": 0,
   create: 0,
   move: 0,

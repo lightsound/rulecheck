@@ -3,8 +3,8 @@ import { Effect, type FileSystem } from "effect";
 import {
   detectWrapperTarget,
   importsAgentsMd,
+  loadsWrapperTarget,
   parseFrontmatter,
-  usesClaudeImport,
 } from "../domain/classify.ts";
 import { countTokens } from "../domain/tokens.ts";
 import type { FileKind, InstructionFile } from "../domain/types.ts";
@@ -39,7 +39,7 @@ export const analyzeFile = Effect.fn("analyze.analyzeFile")(function* (
     tokens: countTokens(content),
     contentHash: createHash("sha256").update(trimmed).digest("hex"),
     wrapperTarget,
-    wrapperUsesImport: wrapperTarget !== null && usesClaudeImport(content, wrapperTarget),
+    wrapperUsesImport: wrapperTarget !== null && loadsWrapperTarget(content, wrapperTarget),
     // Only the root CLAUDE.md: Claude Code resolves a relative import against the importing
     // file's directory, so `@AGENTS.md` in `.claude/CLAUDE.md` points at `.claude/AGENTS.md`.
     importsAgentsMd: input.relativePath === "CLAUDE.md" && importsAgentsMd(content),

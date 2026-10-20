@@ -10,6 +10,7 @@ import {
 import { diffStats, unifiedDiff } from "../src/domain/diff.ts";
 import { packFromFiles } from "../src/domain/pack.ts";
 import {
+  appendImport,
   MERGED_HEADING,
   mergeClaudeContent,
   planSync,
@@ -157,6 +158,87 @@ describe("planSync", () => {
       reason:
         "CLAUDE.md imports AGENTS.md and is left untouched (D16), but the plan would write it; refusing to plan",
     });
+  });
+
+  test("agents-prose: appends the import to CLAUDE.md, every byte of its text stays", () => {
+    const p = plan(
+      input("agents-prose", {
+        "AGENTS.md": "# P\n",
+        "CLAUDE.md": "See AGENTS.md for the rules.\n",
+      }),
+    );
+    expect(p.changes).toEqual([
+      { path: "AGENTS.md", before: "# P\n", after: `# P\n\n${BLOCK}\n` },
+      {
+        path: "CLAUDE.md",
+        before: "See AGENTS.md for the rules.\n",
+        after: "See AGENTS.md for the rules.\n\n@AGENTS.md\n",
+      },
+    ]);
+    expect(p.actions).toEqual([
+      "insert block `base` into AGENTS.md",
+      "append `@AGENTS.md` to CLAUDE.md, which points at AGENTS.md only in prose (its text stays as it is)",
+    ]);
+    // Another tool's region keeps its bytes: the line goes after it (D15).
+    const region = [
+      "<!-- stripe-projects-cli managed:claude-md:start -->",
+      "look at AGENTS.md for your instructions",
+      "<!-- stripe-projects-cli managed:claude-md:end -->",
+    ].join("\n");
+    const q = plan(input("agents-prose", { "AGENTS.md": "# P\n", "CLAUDE.md": region }));
+    expect(q.changes[1]?.after).toBe(`${region}\n\n@AGENTS.md\n`);
+    // The import line is only appended where Claude Code would parse it.
+    expect(
+      planSync(
+        input("agents-prose", {
+          "AGENTS.md": "# P\n",
+          "CLAUDE.md": "See AGENTS.md.\n\n```\nunterminated\n",
+        }),
+      ),
+    ).toEqual({
+      reason:
+        "CLAUDE.md ends inside a code fence or an HTML comment, where an appended `@AGENTS.md` line would not load; close it before syncing",
+    });
+    expect(planSync(input("agents-prose", { "AGENTS.md": "# P\n" }))).toEqual({
+      reason: "root files do not match shape `agents-prose`; rescan the repository",
+    });
+  });
+
+  test("agents-prose, outdated: the update appends the import too, so a pair synced before D33 is repaired", () => {
+    const oldBlock = `<!-- agent-rules:begin source=base rev=old hash=${hashBlockBody(OLD_BODY)} -->\n${OLD_BODY}\n<!-- agent-rules:end -->`;
+    const agents = `# P\n\n${oldBlock}\n`;
+    const p = plan(
+      input(
+        "agents-prose",
+        { "AGENTS.md": agents, "CLAUDE.md": "See AGENTS.md.\n" },
+        { status: status("outdated") },
+      ),
+    );
+    expect(p.changes).toEqual([
+      { path: "AGENTS.md", before: agents, after: `# P\n\n${BLOCK}\n` },
+      { path: "CLAUDE.md", before: "See AGENTS.md.\n", after: "See AGENTS.md.\n\n@AGENTS.md\n" },
+    ]);
+    expect(p.actions).toEqual([
+      "update block `base` in AGENTS.md",
+      "append `@AGENTS.md` to CLAUDE.md, which points at AGENTS.md only in prose (its text stays as it is)",
+    ]);
+    // Other shapes still update the block alone (D10).
+    const q = plan(
+      input(
+        "agents-canonical",
+        { "AGENTS.md": agents, "CLAUDE.md": "@AGENTS.md\n" },
+        { status: status("outdated") },
+      ),
+    );
+    expect(q.changes.map((c) => c.path)).toEqual(["AGENTS.md"]);
+  });
+
+  test("appendImport keeps the file's line ending and at most one blank line before the import", () => {
+    expect(appendImport("See AGENTS.md")).toBe("See AGENTS.md\n\n@AGENTS.md\n");
+    expect(appendImport("See AGENTS.md\n\n")).toBe("See AGENTS.md\n\n@AGENTS.md\n");
+    expect(appendImport("# T\r\nSee AGENTS.md\r\n")).toBe(
+      "# T\r\nSee AGENTS.md\r\n\r\n@AGENTS.md\r\n",
+    );
   });
 
   test("claude-only: moves CLAUDE.md content into AGENTS.md and leaves the wrapper behind", () => {

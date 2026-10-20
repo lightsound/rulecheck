@@ -16,6 +16,8 @@ export const SHAPE_NOTE: Record<CanonicalShape, string | null> = {
   "agents-canonical": null,
   "agents-imported":
     "CLAUDE.md imports AGENTS.md and carries content of its own; not the strict one-line wrapper (Claude Code loads both), a sync leaves it untouched",
+  // The prose-wrapper note printed under every such repository already says what to do.
+  "agents-prose": null,
   "claude-canonical": "Cursor and Codex read AGENTS.md; consider making it the canonical file",
   "agents-only": "Claude Code does not read AGENTS.md; add a CLAUDE.md wrapper (`@AGENTS.md`)",
   "claude-only": "Codex and most non-Cursor tools do not read CLAUDE.md",
