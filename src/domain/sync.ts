@@ -107,11 +107,39 @@ function planUpdate(input: SyncPlanInput, rendered: string): SyncPlan | SyncRefu
   }
   const lines = before.split("\n");
   lines.splice(block.line - 1, block.endLine - block.line + 1, ...rendered.split("\n"));
+  const updated: FileChange = { path: block.file, before, after: lines.join("\n") };
+  const actions = [`update block \`${input.pack.id}\` in ${block.file}`];
+  if (input.shape !== "agents-prose") {
+    return { changes: [updated], actions, blockFile: block.file, blockLine: block.line };
+  }
+  // D33: a pair synced before the shape existed carries the block but loads nothing in Claude
+  // Code; the update is the write that can repair it, so it appends the import too.
+  const claudeBefore = block.file === "CLAUDE.md" ? updated.after : input.contents.get("CLAUDE.md");
+  if (claudeBefore === undefined || claudeBefore === null) return unexpected(input.shape);
+  const appended = appendImportChange(claudeBefore);
+  if ("reason" in appended) return appended;
+  const changes =
+    block.file === "CLAUDE.md"
+      ? [{ ...updated, after: appended.after }]
+      : [updated, { path: "CLAUDE.md", before: claudeBefore, after: appended.after }];
   return {
-    changes: [{ path: block.file, before, after: lines.join("\n") }],
-    actions: [`update block \`${input.pack.id}\` in ${block.file}`],
+    changes,
+    actions: [...actions, APPEND_IMPORT_ACTION],
     blockFile: block.file,
     blockLine: block.line,
+  };
+}
+
+const APPEND_IMPORT_ACTION =
+  "append `@AGENTS.md` to CLAUDE.md, which points at AGENTS.md only in prose (its text stays as it is)";
+
+/** The CLAUDE.md an `add-import` writes, or a refusal when the appended line would not load. */
+function appendImportChange(claude: string): { readonly after: string } | SyncRefusal {
+  const after = appendImport(claude);
+  if (importsAgentsMd(after)) return { after };
+  return {
+    reason:
+      "CLAUDE.md ends inside a code fence or an HTML comment, where an appended `@AGENTS.md` line would not load; close it before syncing",
   };
 }
 
@@ -176,23 +204,15 @@ function planInsert(input: SyncPlanInput, rendered: string): SyncPlan | SyncRefu
       const before = input.contents.get("AGENTS.md");
       const claudeBefore = input.contents.get("CLAUDE.md");
       if (before === undefined || claudeBefore === undefined) return unexpected(input.shape);
-      const claudeAfter = appendImport(claudeBefore);
-      if (!importsAgentsMd(claudeAfter)) {
-        return {
-          reason:
-            "CLAUDE.md ends inside a code fence or an HTML comment, where an appended `@AGENTS.md` line would not load; close it before syncing",
-        };
-      }
+      const appended = appendImportChange(claudeBefore);
+      if ("reason" in appended) return appended;
       const inserted = insertBlock(before, rendered, input);
       return {
         changes: [
           { path: "AGENTS.md", before, after: inserted.content },
-          { path: "CLAUDE.md", before: claudeBefore, after: claudeAfter },
+          { path: "CLAUDE.md", before: claudeBefore, after: appended.after },
         ],
-        actions: [
-          `insert block \`${input.pack.id}\` into AGENTS.md`,
-          "append `@AGENTS.md` to CLAUDE.md, which points at AGENTS.md only in prose (its text stays as it is)",
-        ],
+        actions: [`insert block \`${input.pack.id}\` into AGENTS.md`, APPEND_IMPORT_ACTION],
         blockFile: "AGENTS.md",
         blockLine: inserted.line,
       };

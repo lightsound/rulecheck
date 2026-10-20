@@ -62,6 +62,7 @@ const PACK_REPO: FakeRepoInput = {
         "acme/cobracket",
         "acme/prose",
         "acme/symlink",
+        "acme/prose-legacy",
         "acme/outdated",
         "acme/modified",
         "acme/ordered",
@@ -114,6 +115,10 @@ const TARGETS: Record<string, FakeRepoInput> = {
   // A prose pointer inside another tool's region, as `stripe-projects-cli` writes it: Claude Code
   // loads nothing through it, and the region is not the sync's to rewrite.
   "acme/prose": { files: { "AGENTS.md": "# P\n", "CLAUDE.md": `${PROSE_CLAUDE}\n` } },
+  // Synced before D33: the block landed in AGENTS.md, CLAUDE.md still points in prose.
+  "acme/prose-legacy": {
+    files: { "AGENTS.md": `# P\n\n${block("base", OLD_BODY)}\n`, "CLAUDE.md": "See AGENTS.md.\n" },
+  },
   // A symbolic link `CLAUDE.md -> AGENTS.md` reads as the bare target path through the API.
   "acme/symlink": { files: { "AGENTS.md": "# L\n", "CLAUDE.md": "AGENTS.md" } },
   "acme/outdated": {
@@ -289,7 +294,7 @@ describe("resolvePacks", () => {
     const loaded = await run(resolvePacks("acme/agent-rules"));
     expect(loaded.source).toBe(`acme/agent-rules@${(sha ?? "").slice(0, 7)}`);
     expect(loaded.packs.map((p) => `${p.id}:${p.rev === sha}:${p.subscribers.length}`)).toEqual([
-      "base:true:14",
+      "base:true:15",
       "frontend:true:1",
       "rotten:true:3",
     ]);
@@ -614,6 +619,13 @@ describe("sync", () => {
     );
     github.moveRef("acme/prose", "heads/main", "heads/agent-rules/base");
     expect((await runSync({ repo: "acme/prose" })).kind).toBe("nothing-to-do");
+
+    // A pair synced before D33 is repaired by the next update of its block.
+    const legacy = await runSync({ repo: "acme/prose-legacy" });
+    expect(legacy.kind).toBe("opened");
+    expect(github.fileAt("acme/prose-legacy", "heads/agent-rules/base", "CLAUDE.md")).toBe(
+      "See AGENTS.md.\n\n@AGENTS.md\n",
+    );
 
     // A symbolic link already loads AGENTS.md: only AGENTS.md is written, the link stays.
     const linked = await runSync({ repo: "acme/symlink", dryRun: true });

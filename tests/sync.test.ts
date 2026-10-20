@@ -204,6 +204,35 @@ describe("planSync", () => {
     });
   });
 
+  test("agents-prose, outdated: the update appends the import too, so a pair synced before D33 is repaired", () => {
+    const oldBlock = `<!-- agent-rules:begin source=base rev=old hash=${hashBlockBody(OLD_BODY)} -->\n${OLD_BODY}\n<!-- agent-rules:end -->`;
+    const agents = `# P\n\n${oldBlock}\n`;
+    const p = plan(
+      input(
+        "agents-prose",
+        { "AGENTS.md": agents, "CLAUDE.md": "See AGENTS.md.\n" },
+        { status: status("outdated") },
+      ),
+    );
+    expect(p.changes).toEqual([
+      { path: "AGENTS.md", before: agents, after: `# P\n\n${BLOCK}\n` },
+      { path: "CLAUDE.md", before: "See AGENTS.md.\n", after: "See AGENTS.md.\n\n@AGENTS.md\n" },
+    ]);
+    expect(p.actions).toEqual([
+      "update block `base` in AGENTS.md",
+      "append `@AGENTS.md` to CLAUDE.md, which points at AGENTS.md only in prose (its text stays as it is)",
+    ]);
+    // Other shapes still update the block alone (D10).
+    const q = plan(
+      input(
+        "agents-canonical",
+        { "AGENTS.md": agents, "CLAUDE.md": "@AGENTS.md\n" },
+        { status: status("outdated") },
+      ),
+    );
+    expect(q.changes.map((c) => c.path)).toEqual(["AGENTS.md"]);
+  });
+
   test("appendImport keeps the file's line ending and at most one blank line before the import", () => {
     expect(appendImport("See AGENTS.md")).toBe("See AGENTS.md\n\n@AGENTS.md\n");
     expect(appendImport("See AGENTS.md\n\n")).toBe("See AGENTS.md\n\n@AGENTS.md\n");

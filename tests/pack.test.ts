@@ -432,6 +432,25 @@ describe("classifyPackStatus", () => {
       message:
         "insert block into AGENTS.md, add `@AGENTS.md` to CLAUDE.md; 2 foreign regions stay untouched",
     });
+    // An outdated block on such a pair is updated and the import appended in the same write.
+    const outdated = repo("acme/canonical", "agents-prose", {
+      blocks: [block("base", "old body")],
+      foreignRegions: [claudeRegion],
+    });
+    expect(classifyPackStatus(outdated, base)).toMatchObject({
+      status: "outdated",
+      message:
+        "rev 2222222 -> 1111111; add `@AGENTS.md` to CLAUDE.md; 1 foreign region stays untouched",
+    });
+    expect(
+      classifyPackStatus(
+        {
+          ...outdated,
+          blockIssues: [{ kind: "foreign-marker", file: "CLAUDE.md", line: 1, message: "m" }],
+        },
+        base,
+      ),
+    ).toMatchObject({ status: "blocked", file: "CLAUDE.md", line: 1 });
     // An unpaired marker could leave the appended line inside another tool's open region.
     const marked = repo("acme/canonical", "agents-prose", {
       blockIssues: [{ kind: "foreign-marker", file: "CLAUDE.md", line: 1, message: "m" }],

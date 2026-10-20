@@ -66,7 +66,8 @@ What a sync does to the root pair besides inserting or updating the block. Type
 `Normalization`; decided by `classifyNormalization` from the shape and, for `both-full`, the
 files' content. Every repository has exactly one (`scan --json` `repos[].normalization`), also
 when no pack is involved; it is executed only by a sync whose status is `eligible`. An `outdated`
-block is replaced in place and normalizes nothing (D10).
+block is replaced in place and normalizes nothing (D10), except on an `agents-prose` pair, whose
+update also applies `add-import` (D33).
 
 The label is the sentence the `eligible` row prints (`describeNormalization`; `CLAUDE.md` stands
 for whichever root Claude file the pair has). The plan's actions and the pull request body use
@@ -75,7 +76,7 @@ the same verbs.
 | Identifier | Label (eligible-row message) | Definition | From shape | Decision |
 | --- | --- | --- | --- | --- |
 | `keep` | `insert block into AGENTS.md` | The pair already loads `AGENTS.md`; only `AGENTS.md` changes. For `agents-imported` the message adds `(CLAUDE.md already imports AGENTS.md; left untouched)`. | `agents-canonical`, `agents-imported` | D10, D16 |
-| `add-import` | ``insert block into AGENTS.md, add `@AGENTS.md` to CLAUDE.md`` | An `@AGENTS.md` line is appended to `CLAUDE.md` after a blank line; every byte before it stays, so the pointer's words and any region another tool owns are kept. Refused when the file ends inside a code fence or an HTML comment, where the line would not load. | `agents-prose` | D33 |
+| `add-import` | ``insert block into AGENTS.md, add `@AGENTS.md` to CLAUDE.md`` | An `@AGENTS.md` line is appended to `CLAUDE.md` after a blank line; every byte before it stays, so the pointer's words and any region another tool owns are kept. Refused when the file ends inside a code fence or an HTML comment, where the line would not load. Also applied by the update of an `outdated` block on such a pair; a `current` block there stays `current` until the pack changes. | `agents-prose` | D33 |
 | `add-wrapper` | `insert block into AGENTS.md, add CLAUDE.md wrapper` | The `CLAUDE.md` wrapper (`@AGENTS.md`) is created next to the existing `AGENTS.md`. | `agents-only` | D10 |
 | `create` | `create AGENTS.md with the block and a CLAUDE.md wrapper` | Both files are created; `AGENTS.md` holds only the block. | `none` | D10 |
 | `move` | `move CLAUDE.md content to AGENTS.md, add CLAUDE.md wrapper, insert block` | The content of `CLAUDE.md` becomes `AGENTS.md` (overwriting a pointer `AGENTS.md` if there is one); `CLAUDE.md` becomes the wrapper; a `.claude/CLAUDE.md` is removed and a root wrapper created. | `claude-only`, `claude-canonical` | D10 |
@@ -95,7 +96,7 @@ row carries `file:line` where it applies.
 | `eligible` | `eligible` | Subscribed, no block, and nothing stops the write; the message names the normalization the sync will apply. | `not-subscribed` on subscription; `blocked` when the marker problem is fixed; any block state when the block is removed | `current` when the sync's pull request merges; `blocked` when a marker problem appears in a file the sync would write; `not-subscribed` on unsubscription | D6, D12 |
 | `blocked` | `blocked` | A write is pending (an insertion for a subscriber, or an update of an outdated block) and a human must act first: the file the sync would write carries a malformed `agent-rules` marker, an unpaired, nested, or file-level foreign marker, or a region the change would move or drop; or the outdated block sits inside a region or in an `agents-imported` `CLAUDE.md`. The message names the pending write. | `eligible` or `outdated` when the obstacle appears | `eligible` or `outdated` when it is removed; `current` / `modified` never block (no write is pending) | D9, D15, D16 |
 | `current` | `current` | Block present, body untouched, `hash=` equals the pack's current body hash. Comparison is by hash, not `rev`. | `eligible` / `outdated` when the sync's pull request merges; `not-subscribed` when a block is placed by hand | `outdated` when the pack body changes; `modified` when a human edits the body; `eligible` / `not-subscribed` when the block is removed | D6, D9 |
-| `outdated` | `outdated` | Block present, body untouched, but the pack's body hash has moved on; an update is pending. | `current` when the pack body changes; `blocked` when the obstacle is removed | `current` when the update pull request merges; `blocked` when an obstacle appears; `modified` when a human edits the body | D6, D9 |
+| `outdated` | `outdated` | Block present, body untouched, but the pack's body hash has moved on; an update is pending. On an `agents-prose` pair the message adds ``add `@AGENTS.md` to CLAUDE.md``: the update appends the import too (D33). | `current` when the pack body changes; `blocked` when the obstacle is removed | `current` when the update pull request merges; `blocked` when an obstacle appears; `modified` when a human edits the body | D6, D9 |
 | `modified` | `modified` | Block present but its body no longer matches the `hash=` it carries: a human edited it. The sync never overwrites it. | `current` / `outdated` on a human edit | `current` / `outdated` when a human restores the body or re-places the block; `eligible` / `not-subscribed` when the block is removed | D9, D10 |
 
 A sync does not change the status by itself: opening a pull request leaves the default branch,

@@ -291,8 +291,10 @@ const deliver = Effect.fnUntraced(function* (
       `${name}: the planned ${plan.blockFile} would read as ${after.entry.status} (${after.entry.message ?? "no detail"}); refusing to write`,
     );
   }
-  // D2: a normalized pair must load AGENTS.md in Claude Code; an outdated block normalizes nothing.
-  if (before.entry.status === "eligible" && !LOADS_AGENTS.has(after.repo.shape)) {
+  // D2: a normalized pair must load AGENTS.md in Claude Code. An outdated block normalizes
+  // nothing, except on an `agents-prose` pair, whose update appends the import (D33).
+  const normalizes = before.entry.status === "eligible" || before.repo.shape === "agents-prose";
+  if (normalizes && !LOADS_AGENTS.has(after.repo.shape)) {
     return yield* refuse(
       `${name}: the planned root pair would read as ${after.repo.shape}, which does not load AGENTS.md in Claude Code; refusing to write`,
     );

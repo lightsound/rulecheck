@@ -1270,9 +1270,16 @@ touch (D15).
   planner refuses when the appended line would not load (the file ends inside a code fence or a
   multi-line HTML comment). After the merge the pair reads `agents-canonical` (a pointer of up
   to three lines plus the import) or `agents-imported`.
-- Every `eligible` sync must now end in a pair that loads `AGENTS.md`: the measure-after step
-  refuses a planned tree whose shape is not `agents-canonical` or `agents-imported`. This was
-  true of every normalization before; now it is checked.
+- Pairs synced before this entry already carry the block in `AGENTS.md` next to a prose
+  `CLAUDE.md`. On such a pair the update of an `outdated` block appends the import in the same
+  commit (the `outdated` message says ``add `@AGENTS.md` to CLAUDE.md``, and an unpaired marker
+  in `CLAUDE.md` blocks the update). Every pack edit makes every subscriber `outdated`, so the
+  next pack change repairs them. A `current` block stays `current` until then: a pack status
+  describes the block, and the shape (`agents-prose`, with the prose note) says the rest.
+- Every `eligible` sync, and every update on an `agents-prose` pair, must end in a pair that
+  loads `AGENTS.md`: the measure-after step refuses a planned tree whose shape is not
+  `agents-canonical` or `agents-imported`. This was true of every normalization before; now it is
+  checked.
 - Only the root `CLAUDE.md`. A `.claude/CLAUDE.md` wrapper keeps its old reading (D16: a
   relative import there resolves against `.claude/`, so appending `@AGENTS.md` would point at
   the wrong file).
@@ -1294,6 +1301,7 @@ lossless normalizations, `add-import` and D12's `merge`.
 | Where the import goes | appended after a blank line, file's own line ending | first line (shifts every finding's line, and would precede a leading region); inside the pointer's paragraph | 2 |
 | A symbolic link `CLAUDE.md -> AGENTS.md` | loads: the bare path counts in `wrapperUsesImport` | a new `--json` field; let the sync replace the link with the `@AGENTS.md` file (churn in repositories that work) | 2 |
 | `.claude/CLAUDE.md` pointers | unchanged | `agents-prose` with `@../AGENTS.md` (a second import form every reader must learn); `both-full` (merges the pointer text) | 2 |
+| A pair synced before D33 (block in `AGENTS.md`, prose `CLAUDE.md`) | the update of an `outdated` block appends the import too; `current` waits for the next pack change | leave it to the scan note (raised in review: the repositories that motivated the fix stay unrepaired); a new pack status or `current` demoted to `outdated` (a pack status describes the block, not the pair); a normalization-only write with no pack change (a second kind of sync write, D10) | 2 |
 | Guarding the end state | measure-after refuses an `eligible` plan whose planned shape does not load AGENTS.md | planner check only (the scan of the planned tree is the reader that must agree, D10) | 1 |
 | Rot comparison for an append-only change | an append moves nothing, so the pair is not merged into one file for findings | count any rewrite of the second root file as moving content (excuses rot that did not move) | 1 |
 | Advice under the repository | `SHAPE_NOTE` null for `agents-prose`; the existing prose-wrapper note says it | a new note (two lines saying one thing; RuleFleet mirrors the HTML notes line by line) | 1 |

@@ -118,6 +118,9 @@ function isRootPairFile(relativePath: string): boolean {
   return relativePath === "AGENTS.md" || ROOT_CLAUDE.has(relativePath);
 }
 
+/** D33: what a sync on an `agents-prose` pair does to CLAUDE.md, on insertion and on update. */
+const APPEND_IMPORT = "add `@AGENTS.md` to CLAUDE.md";
+
 /** D16: why an `agents-imported` pair is written like a canonical one. */
 export const IMPORTED_NOTE = "CLAUDE.md already imports AGENTS.md; left untouched";
 
@@ -139,7 +142,7 @@ export function describeNormalization(normalization: Normalization, claude: stri
     case "keep":
       return "insert block into AGENTS.md";
     case "add-import":
-      return `insert block into AGENTS.md, add \`@AGENTS.md\` to ${claude}`;
+      return `insert block into AGENTS.md, ${APPEND_IMPORT}`;
     case "add-wrapper":
       return "insert block into AGENTS.md, add CLAUDE.md wrapper";
     case "create":
@@ -194,7 +197,11 @@ export function classifyPackStatus(repo: RepoForDistribution, pack: Pack): PackS
         message: `${pending}; it sits in ${block.file}, which the sync leaves untouched because it imports AGENTS.md (D16); move the block into AGENTS.md`,
       };
     }
-    const issue = repo.blockIssues.find((i) => i.file === block.file);
+    // D33: on an `agents-prose` pair the update also appends the import to CLAUDE.md.
+    const appends = repo.shape === "agents-prose";
+    const issue = repo.blockIssues.find(
+      (i) => i.file === block.file || (appends && i.file === "CLAUDE.md"),
+    );
     if (issue) {
       return {
         ...base,
@@ -221,7 +228,11 @@ export function classifyPackStatus(repo: RepoForDistribution, pack: Pack): PackS
       ...base,
       ...at,
       status: "outdated",
-      message: withRegions(revChange(block, pack), regionsIn(repo, block.file)),
+      message: withRegions(
+        appends ? `${revChange(block, pack)}; ${APPEND_IMPORT}` : revChange(block, pack),
+        regionsIn(repo, block.file) +
+          (appends && block.file !== "CLAUDE.md" ? regionsIn(repo, "CLAUDE.md") : 0),
+      ),
     };
   }
 
