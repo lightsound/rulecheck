@@ -1235,6 +1235,74 @@ writer only moves them; nothing about a subscription is stored anywhere else by 
 App caches what it can read from the branch (`pack_sources.pending_*`, kickoff §5) and refreshes
 that cache from webhooks, never the other way round.
 
+## 2026-10-20 D33: A `CLAUDE.md` that points at `AGENTS.md` only in prose is its own shape; the sync appends the import
+
+D2 says a prose pointer ("see AGENTS.md") loads nothing, and the reader knew it: a short
+`CLAUDE.md` that mentions only `AGENTS.md` had `wrapperUsesImport: false`, and `scan` printed
+"points at AGENTS.md in prose; use `@AGENTS.md`". But `classifyShape` looked only at the
+mention, so the pair read `agents-canonical`, whose normalization `keep` says "the pair already
+loads AGENTS.md". The sync then inserted the block into `AGENTS.md` and left `CLAUDE.md` alone:
+the pull request merged, the row read `current`, and Claude Code still never saw the pack. Two
+more gaps sat next to it. A pointer titled `# CLAUDE.md` (what `/init` writes) mentions both
+names, so it was not a wrapper at all: `both-full`, and D12 would have merged "Follow the
+instructions in AGENTS.md" into `AGENTS.md` itself. And `stripe-projects-cli` writes exactly such
+a pointer inside its own region of `CLAUDE.md` (`tests/block.test.ts`), which no rewrite may
+touch (D15).
+
+**Decision.**
+
+- A shape names what each tool loads, not what the text intends. `agents-canonical` now needs a
+  `CLAUDE.md` wrapper that loads `AGENTS.md`: an `@AGENTS.md` import (`usesClaudeImport`, inline
+  included, as the memory docs show) or a symbolic link, which reads as the bare path
+  `AGENTS.md` through the API (`loadsWrapperTarget`; `wrapperUsesImport` carries it, so the
+  "(prose)" marker no longer shows on a link).
+- **`agents-prose`** (new shape, `AGENTS.md via prose pointer`): the root `CLAUDE.md` is a wrapper
+  pointing at `AGENTS.md` that loads nothing. The wrapper test is unchanged (at most four
+  non-empty lines after stripping HTML comments, mentioning only the other file) except that a
+  file naming both is no longer ambiguous when only its headings name the second one: a title
+  such as `# CLAUDE.md` names the file itself. A file with rules of its own beyond four lines
+  stays `both-full` and D12 merges it, as before.
+- **`add-import`** (new normalization, `insert block into AGENTS.md, add `@AGENTS.md` to
+  CLAUDE.md`): the sync appends one `@AGENTS.md` line to `CLAUDE.md` after a blank line, in the
+  file's own line ending. Every byte before it stays: the pointer's words, and any region
+  another tool owns (so a region in that `CLAUDE.md` does not block, as for `AGENTS.md`, while
+  a malformed or unpaired marker there still does, since the line could land inside it). The
+  planner refuses when the appended line would not load (the file ends inside a code fence or a
+  multi-line HTML comment). After the merge the pair reads `agents-canonical` (a pointer of up
+  to three lines plus the import) or `agents-imported`.
+- Every `eligible` sync must now end in a pair that loads `AGENTS.md`: the measure-after step
+  refuses a planned tree whose shape is not `agents-canonical` or `agents-imported`. This was
+  true of every normalization before; now it is checked.
+- Only the root `CLAUDE.md`. A `.claude/CLAUDE.md` wrapper keeps its old reading (D16: a
+  relative import there resolves against `.claude/`, so appending `@AGENTS.md` would point at
+  the wrong file).
+- `schemaVersion` stays 1: `agents-prose` and `add-import` are new values, and the narrower
+  `agents-canonical` moves repositories between existing values the way D16 and D24 did.
+
+**Principle.** The sync adds what makes a tool load the canonical file and never removes words
+it cannot prove redundant (D1, D12). Appending the import is lossless whatever the pointer
+says, so it dissolves the question that would otherwise need a grammar of pointer sentences
+("See", "Follow the instructions in", "を参照してください", …): whether the words carry a rule
+of their own no longer decides whether text is lost. The wrapper test only chooses between two
+lossless normalizations, `add-import` and D12's `merge`.
+
+| Decision | Chosen | Alternatives considered | Settled in round |
+| --- | --- | --- | --- |
+| Shape of a prose pointer | new shape `agents-prose` with one normalization | stay `agents-canonical` with a content-dependent normalization (breaks "one normalization per shape" and "`keep` = already loads"); fold into `both-full` and extend D12's `drop` (the label "both have content" and "repeats AGENTS.md" misdescribe a pointer; a region in it would block) | 2 |
+| Normalization | `add-import`: append `@AGENTS.md`, keep every byte | replace `CLAUDE.md` with `@AGENTS.md` (drops words on a guess; rewrites another tool's region); D12 `merge` (copies "see AGENTS.md" into AGENTS.md; blocked by a region); `keep` (the status quo: Claude Code never loads AGENTS.md); rewrite the mention into an inline `@AGENTS.md` (depends on how Claude Code parses `@AGENTS.md.` next to punctuation, unverified) | 3 |
+| What counts as a pointer | the existing wrapper test, plus "headings that name the file itself are not a second mention" | a closed grammar of pointer sentences in English and Japanese (brittle, and only needed when the normalization can lose text); any file that mentions AGENTS.md (misreads content files); ignore headings in the four-line count too (more content files misread as pointers) | 3 |
+| Where the import goes | appended after a blank line, file's own line ending | first line (shifts every finding's line, and would precede a leading region); inside the pointer's paragraph | 2 |
+| A symbolic link `CLAUDE.md -> AGENTS.md` | loads: the bare path counts in `wrapperUsesImport` | a new `--json` field; let the sync replace the link with the `@AGENTS.md` file (churn in repositories that work) | 2 |
+| `.claude/CLAUDE.md` pointers | unchanged | `agents-prose` with `@../AGENTS.md` (a second import form every reader must learn); `both-full` (merges the pointer text) | 2 |
+| Guarding the end state | measure-after refuses an `eligible` plan whose planned shape does not load AGENTS.md | planner check only (the scan of the planned tree is the reader that must agree, D10) | 1 |
+| Rot comparison for an append-only change | an append moves nothing, so the pair is not merged into one file for findings | count any rewrite of the second root file as moving content (excuses rot that did not move) | 1 |
+| Advice under the repository | `SHAPE_NOTE` null for `agents-prose`; the existing prose-wrapper note says it | a new note (two lines saying one thing; RuleFleet mirrors the HTML notes line by line) | 1 |
+| `--json` version | stays 1 | bump to 2 (no field renamed or removed) | 1 |
+| A file that ends inside a fence or comment | planner refuses with the reason | close the fence for the user (authoring) | 1 |
+
+Consequence for D12: its wrapper threshold paragraph still holds for wrappers that load
+`AGENTS.md`; a prose wrapper is no longer `agents-canonical` but `agents-prose`.
+
 ## Recording rule
 
 Add an entry here whenever a decision changes what rulecheck writes, what it reports, or which
