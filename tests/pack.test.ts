@@ -115,6 +115,8 @@ function normalizationOf(
     case "agents-canonical":
     case "agents-imported":
       return "keep";
+    case "agents-prose":
+      return "add-import";
     case "agents-only":
       return "add-wrapper";
     case "none":
@@ -405,6 +407,39 @@ describe("classifyPackStatus", () => {
     expect(classifyPackStatus(outdated, base)).toMatchObject({
       status: "outdated",
       message: "rev 2222222 -> 1111111; 2 foreign regions stay untouched",
+    });
+  });
+
+  test("agents-prose: the import is appended to CLAUDE.md, so its regions stay and its markers block", () => {
+    const claudeRegion = {
+      ...REGION,
+      file: "CLAUDE.md",
+      name: "stripe-projects-cli managed:claude-md",
+      line: 1,
+      endLine: 3,
+    };
+    expect(
+      classifyPackStatus(
+        repo("acme/canonical", "agents-prose", { foreignRegions: [claudeRegion, REGION] }),
+        base,
+      ),
+    ).toEqual({
+      repo: "acme/canonical",
+      pack: "base",
+      status: "eligible",
+      file: "AGENTS.md",
+      line: null,
+      message:
+        "insert block into AGENTS.md, add `@AGENTS.md` to CLAUDE.md; 2 foreign regions stay untouched",
+    });
+    // An unpaired marker could leave the appended line inside another tool's open region.
+    const marked = repo("acme/canonical", "agents-prose", {
+      blockIssues: [{ kind: "foreign-marker", file: "CLAUDE.md", line: 1, message: "m" }],
+    });
+    expect(classifyPackStatus(marked, base)).toMatchObject({
+      status: "blocked",
+      file: "CLAUDE.md",
+      line: 1,
     });
   });
 

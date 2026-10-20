@@ -16,6 +16,7 @@ import type { SyncOutcome } from "../sync/all.ts";
 export const SHAPE_LABEL: Record<CanonicalShape, string> = {
   "agents-canonical": "AGENTS.md canonical",
   "agents-imported": "AGENTS.md via @import",
+  "agents-prose": "AGENTS.md via prose pointer",
   "claude-canonical": "CLAUDE.md canonical",
   "agents-only": "AGENTS.md only",
   "claude-only": "CLAUDE.md only",

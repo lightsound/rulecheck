@@ -75,6 +75,7 @@ export function summarize(repos: ReadonlyArray<RepoReport>): ScanTotals {
   const shapes: Record<CanonicalShape, number> = {
     "agents-canonical": 0,
     "agents-imported": 0,
+    "agents-prose": 0,
     "claude-canonical": 0,
     "agents-only": 0,
     "claude-only": 0,

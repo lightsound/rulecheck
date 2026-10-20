@@ -39,12 +39,16 @@ branch on GitHub. When the two disagree, `sync --all --dry-run` is right (D14).
 How a repository arranges its root `AGENTS.md` / `CLAUDE.md` pair (`CLAUDE.md` or
 `.claude/CLAUDE.md`). Type `CanonicalShape`; decided by `classifyShape` from the files present
 and whether each is a pointer to the other (a wrapper: at most four short lines mentioning only
-the other file) or, for `agents-imported`, carries an `@AGENTS.md` import line (D16).
+the other file, where a heading that names the file itself does not count as a mention) and, for
+a `CLAUDE.md` wrapper, whether Claude Code loads `AGENTS.md` through it (an `@AGENTS.md` import or
+a symbolic link, which reads as the bare path) or it points in prose only (D33); or, for
+`agents-imported`, carries an `@AGENTS.md` import line (D16).
 
 | Identifier | Label | Definition | Normalization a sync applies | Decision |
 | --- | --- | --- | --- | --- |
-| `agents-canonical` | `AGENTS.md canonical` | `AGENTS.md` carries the content; `CLAUDE.md` is a wrapper pointing at it. The target shape of every sync. | `keep` | D2 |
+| `agents-canonical` | `AGENTS.md canonical` | `AGENTS.md` carries the content; `CLAUDE.md` is a wrapper that loads it (an `@AGENTS.md` import or a symbolic link). The target shape of every sync. | `keep` | D2, D33 |
 | `agents-imported` | `AGENTS.md via @import` | Both files carry content and the root `CLAUDE.md` holds a line that is exactly `@AGENTS.md`, outside fenced code and multi-line comments. Canonical in effect; `CLAUDE.md` is never written. | `keep` | D16 |
+| `agents-prose` | `AGENTS.md via prose pointer` | `AGENTS.md` carries the content; the root `CLAUDE.md` is a wrapper that points at it in words only ("See AGENTS.md", "AGENTS.md を参照してください"), so Claude Code does not load `AGENTS.md`. | `add-import` | D33 |
 | `claude-canonical` | `CLAUDE.md canonical` | `CLAUDE.md` carries the content; `AGENTS.md` is a wrapper pointing at it. | `move` | D6 |
 | `agents-only` | `AGENTS.md only` | Only `AGENTS.md` exists at the root. | `add-wrapper` | D6 |
 | `claude-only` | `CLAUDE.md only` | Only `CLAUDE.md` (or `.claude/CLAUDE.md`) exists at the root. | `move` | D6 |
@@ -52,8 +56,9 @@ the other file) or, for `agents-imported`, carries an `@AGENTS.md` import line (
 | `none` | `none` | Neither file exists at the root. | `create` | D6 |
 
 Transitions: a shape changes when the root pair changes. A merged sync pull request moves every
-shape to `agents-canonical`, except `agents-imported`, which it leaves as it is. A human can
-move a repository between any two shapes.
+shape to `agents-canonical`, except `agents-imported`, which it leaves as it is, and
+`agents-prose`, which it moves to `agents-canonical` (a pointer of up to three lines plus the
+import) or `agents-imported` (a longer one). A human can move a repository between any two shapes.
 
 ## Normalization
 
@@ -70,6 +75,7 @@ the same verbs.
 | Identifier | Label (eligible-row message) | Definition | From shape | Decision |
 | --- | --- | --- | --- | --- |
 | `keep` | `insert block into AGENTS.md` | The pair already loads `AGENTS.md`; only `AGENTS.md` changes. For `agents-imported` the message adds `(CLAUDE.md already imports AGENTS.md; left untouched)`. | `agents-canonical`, `agents-imported` | D10, D16 |
+| `add-import` | ``insert block into AGENTS.md, add `@AGENTS.md` to CLAUDE.md`` | An `@AGENTS.md` line is appended to `CLAUDE.md` after a blank line; every byte before it stays, so the pointer's words and any region another tool owns are kept. Refused when the file ends inside a code fence or an HTML comment, where the line would not load. | `agents-prose` | D33 |
 | `add-wrapper` | `insert block into AGENTS.md, add CLAUDE.md wrapper` | The `CLAUDE.md` wrapper (`@AGENTS.md`) is created next to the existing `AGENTS.md`. | `agents-only` | D10 |
 | `create` | `create AGENTS.md with the block and a CLAUDE.md wrapper` | Both files are created; `AGENTS.md` holds only the block. | `none` | D10 |
 | `move` | `move CLAUDE.md content to AGENTS.md, add CLAUDE.md wrapper, insert block` | The content of `CLAUDE.md` becomes `AGENTS.md` (overwriting a pointer `AGENTS.md` if there is one); `CLAUDE.md` becomes the wrapper; a `.claude/CLAUDE.md` is removed and a root wrapper created. | `claude-only`, `claude-canonical` | D10 |

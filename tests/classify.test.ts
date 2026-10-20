@@ -10,6 +10,7 @@ import {
   extractClaudeImports,
   importsAgentsMd,
   isIgnoredDirectory,
+  loadsWrapperTarget,
   parseFrontmatter,
   usesClaudeImport,
 } from "../src/domain/classify.ts";
@@ -85,6 +86,39 @@ describe("detectWrapperTarget", () => {
 
   test("empty file is not a wrapper", () => {
     expect(detectWrapperTarget("")).toBeNull();
+  });
+
+  test("a title heading that names the file itself does not make a pointer ambiguous", () => {
+    const titled = [
+      "# CLAUDE.md",
+      "",
+      "This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.",
+      "",
+      "Follow the instructions in AGENTS.md.",
+    ].join("\n");
+    expect(detectWrapperTarget(titled)).toBe("AGENTS.md");
+    expect(detectWrapperTarget("# CLAUDE.md\n\nAGENTS.md を参照してください。\n")).toBe(
+      "AGENTS.md",
+    );
+    expect(detectWrapperTarget("# AGENTS.md\n\nSee CLAUDE.md.\n")).toBe("CLAUDE.md");
+    // Prose that names both stays ambiguous; so do headings that name both and no prose at all.
+    expect(
+      detectWrapperTarget("# CLAUDE.md\n\nKeep CLAUDE.md and AGENTS.md in step.\n"),
+    ).toBeNull();
+    expect(detectWrapperTarget("# AGENTS.md and CLAUDE.md\n")).toBeNull();
+    // More than four lines is content, title or not.
+    expect(detectWrapperTarget(`${titled}\n- Use Bun.\n- Run tests.\n`)).toBeNull();
+  });
+});
+
+describe("loadsWrapperTarget", () => {
+  test("an import or the bare path a symbolic link reads as loads the target; prose does not", () => {
+    expect(loadsWrapperTarget("@AGENTS.md\n", "AGENTS.md")).toBe(true);
+    expect(loadsWrapperTarget("See @AGENTS.md for the rules\n", "AGENTS.md")).toBe(true);
+    expect(loadsWrapperTarget("AGENTS.md", "AGENTS.md")).toBe(true);
+    expect(loadsWrapperTarget("./AGENTS.md\n", "AGENTS.md")).toBe(true);
+    expect(loadsWrapperTarget("See AGENTS.md.\n", "AGENTS.md")).toBe(false);
+    expect(loadsWrapperTarget("AGENTS.md を参照してください\n", "AGENTS.md")).toBe(false);
   });
 });
 
@@ -220,9 +254,36 @@ describe("classifyShape", () => {
   test("agents canonical", () => {
     const files = [
       file({ relativePath: "AGENTS.md", kind: "agents-md" }),
-      file({ relativePath: "CLAUDE.md", kind: "claude-md", wrapperTarget: "AGENTS.md", lines: 1 }),
+      file({
+        relativePath: "CLAUDE.md",
+        kind: "claude-md",
+        wrapperTarget: "AGENTS.md",
+        wrapperUsesImport: true,
+        lines: 1,
+      }),
     ];
     expect(classifyShape(files)).toBe("agents-canonical");
+  });
+
+  test("a root CLAUDE.md that points at AGENTS.md only in prose loads nothing: agents-prose", () => {
+    const agents = file({ relativePath: "AGENTS.md", kind: "agents-md" });
+    const prose = { kind: "claude-md" as const, wrapperTarget: "AGENTS.md" as const, lines: 1 };
+    expect(classifyShape([agents, file({ relativePath: "CLAUDE.md", ...prose })])).toBe(
+      "agents-prose",
+    );
+    // `.claude/CLAUDE.md` would resolve an appended import against `.claude/`; unchanged.
+    expect(
+      classifyShape([agents, file({ relativePath: ".claude/CLAUDE.md", depth: 1, ...prose })]),
+    ).toBe("agents-canonical");
+    // Two pointers at each other: neither carries the content, as before.
+    const pointer = file({
+      relativePath: "AGENTS.md",
+      kind: "agents-md",
+      wrapperTarget: "CLAUDE.md",
+    });
+    expect(classifyShape([pointer, file({ relativePath: "CLAUDE.md", ...prose })])).toBe(
+      "both-full",
+    );
   });
 
   test("claude canonical via .claude/CLAUDE.md", () => {

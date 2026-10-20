@@ -288,6 +288,7 @@ const REPORT: ScanReport = {
     shapes: {
       "agents-canonical": 1,
       "agents-imported": 0,
+      "agents-prose": 0,
       "claude-canonical": 0,
       "agents-only": 0,
       "claude-only": 0,

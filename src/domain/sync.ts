@@ -172,6 +172,31 @@ function planInsert(input: SyncPlanInput, rendered: string): SyncPlan | SyncRefu
         blockLine: inserted.line,
       };
     }
+    case "agents-prose": {
+      const before = input.contents.get("AGENTS.md");
+      const claudeBefore = input.contents.get("CLAUDE.md");
+      if (before === undefined || claudeBefore === undefined) return unexpected(input.shape);
+      const claudeAfter = appendImport(claudeBefore);
+      if (!importsAgentsMd(claudeAfter)) {
+        return {
+          reason:
+            "CLAUDE.md ends inside a code fence or an HTML comment, where an appended `@AGENTS.md` line would not load; close it before syncing",
+        };
+      }
+      const inserted = insertBlock(before, rendered, input);
+      return {
+        changes: [
+          { path: "AGENTS.md", before, after: inserted.content },
+          { path: "CLAUDE.md", before: claudeBefore, after: claudeAfter },
+        ],
+        actions: [
+          `insert block \`${input.pack.id}\` into AGENTS.md`,
+          "append `@AGENTS.md` to CLAUDE.md, which points at AGENTS.md only in prose (its text stays as it is)",
+        ],
+        blockFile: "AGENTS.md",
+        blockLine: inserted.line,
+      };
+    }
     case "claude-only":
     case "claude-canonical": {
       const present = ROOT_CLAUDE.filter(has);
@@ -240,6 +265,16 @@ function planInsert(input: SyncPlanInput, rendered: string): SyncPlan | SyncRefu
       return { changes, actions, blockFile: "AGENTS.md", blockLine: inserted.line };
     }
   }
+}
+
+/**
+ * `claude` with an `@AGENTS.md` line appended after a blank line, in the file's own line ending.
+ * Every byte before it stays, so a region another tool owns is not touched (D15).
+ */
+export function appendImport(claude: string): string {
+  const eol = claude.includes("\r\n") ? "\r\n" : "\n";
+  const separator = claude.endsWith(eol + eol) ? "" : claude.endsWith(eol) ? eol : eol + eol;
+  return `${claude}${separator}@AGENTS.md${eol}`;
 }
 
 /** Heading under which a merged CLAUDE.md lands in AGENTS.md (D12). */

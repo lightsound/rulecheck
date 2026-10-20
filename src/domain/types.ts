@@ -43,8 +43,9 @@ export interface InstructionFile {
   /** Non-null when the file is only a pointer to another instruction file. */
   readonly wrapperTarget: WrapperTarget | null;
   /**
-   * True when the pointer is a Claude Code `@import`, so Claude Code actually loads the target.
-   * A prose pointer ("see AGENTS.md") is not loaded automatically.
+   * True when Claude Code actually loads the target through the pointer: a Claude Code `@import`,
+   * or a symbolic link, whose blob reads as the bare target path. A prose pointer ("see
+   * AGENTS.md") is not loaded automatically.
    */
   readonly wrapperUsesImport: boolean;
   /**
@@ -61,10 +62,13 @@ export interface InstructionFile {
  * How a repository arranges its root-level AGENTS.md / CLAUDE.md pair (glossary in
  * `docs/status-model.md`).
  *
- * - `agents-canonical` AGENTS.md carries the content, CLAUDE.md is a wrapper pointing at it
+ * - `agents-canonical` AGENTS.md carries the content, CLAUDE.md is a wrapper that loads it (an
+ *                      `@AGENTS.md` import or a symbolic link)
  * - `agents-imported`  AGENTS.md carries the content, CLAUDE.md imports it with an `@AGENTS.md`
  *                      line but also carries content of its own (D16); functionally canonical,
  *                      the sync leaves CLAUDE.md as it is
+ * - `agents-prose`     AGENTS.md carries the content, the root CLAUDE.md is a wrapper that points
+ *                      at it in prose only ("see AGENTS.md"), so Claude Code does not load it
  * - `claude-canonical` CLAUDE.md carries the content, AGENTS.md is a wrapper pointing at it
  * - `agents-only`      only AGENTS.md exists (Claude Code will not read it)
  * - `claude-only`      only CLAUDE.md exists (Codex and most non-Cursor tools will not read it)
@@ -75,6 +79,7 @@ export interface InstructionFile {
 export type CanonicalShape =
   | "agents-canonical"
   | "agents-imported"
+  | "agents-prose"
   | "claude-canonical"
   | "agents-only"
   | "claude-only"
@@ -87,6 +92,7 @@ export type CanonicalShape =
  *
  * - `keep`        the pair already loads AGENTS.md (`agents-canonical`, `agents-imported`);
  *                 only AGENTS.md changes
+ * - `add-import`  `agents-prose`: an `@AGENTS.md` line is appended to CLAUDE.md; its text stays
  * - `add-wrapper` `agents-only`: the CLAUDE.md wrapper is created
  * - `create`      `none`: AGENTS.md with the block and the CLAUDE.md wrapper are created
  * - `move`        `claude-only`, `claude-canonical`: CLAUDE.md's content moves into AGENTS.md
@@ -97,7 +103,14 @@ export type CanonicalShape =
  *                 AGENTS.md under `## Merged from CLAUDE.md` before any managed block, then
  *                 CLAUDE.md becomes the wrapper (D12)
  */
-export type Normalization = "keep" | "add-wrapper" | "create" | "move" | "drop" | "merge";
+export type Normalization =
+  | "keep"
+  | "add-import"
+  | "add-wrapper"
+  | "create"
+  | "move"
+  | "drop"
+  | "merge";
 
 export interface ContextBudget {
   /** Approximate tokens Cursor loads for every conversation at the repo root. */

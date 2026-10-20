@@ -77,6 +77,18 @@ export function usesClaudeImport(content: string, target: WrapperTarget): boolea
 }
 
 /**
+ * True when Claude Code loads `target` through `content`: an `@` import, or the bare target path,
+ * which is what a symbolic link (`CLAUDE.md -> AGENTS.md`) reads as through the GitHub API.
+ * A regular file holding only the path reads the same; it is taken for the link.
+ */
+export function loadsWrapperTarget(content: string, target: WrapperTarget): boolean {
+  const bare = new RegExp(`^(?:\\./)?${target.replace(".", "\\.")}$`);
+  return usesClaudeImport(content, target) || bare.test(content.trim());
+}
+
+const HEADING = /^#{1,6}(?:\s|$)/;
+
+/**
  * Decide whether the content is merely a pointer to another instruction file.
  *
  * A wrapper is at most a few non-empty lines (after stripping HTML comments)
@@ -84,6 +96,9 @@ export function usesClaudeImport(content: string, target: WrapperTarget): boolea
  *
  *   `@AGENTS.md`
  *   `look at AGENTS.md for your instructions`
+ *
+ * A file that mentions both names is ambiguous unless only its headings name the second one: a
+ * title such as `# CLAUDE.md` names the file itself, not the file it points at.
  */
 export function detectWrapperTarget(content: string): WrapperTarget | null {
   const lines = content
@@ -94,12 +109,20 @@ export function detectWrapperTarget(content: string): WrapperTarget | null {
 
   if (lines.length === 0 || lines.length > MAX_WRAPPER_LINES) return null;
 
+  const target = mentionedTarget(lines);
+  if (target !== "both") return target;
+  const inProse = mentionedTarget(lines.filter((line) => !HEADING.test(line)));
+  // Mentions both or neither outside headings: ambiguous, treat as real content.
+  return inProse === "both" ? null : inProse;
+}
+
+function mentionedTarget(lines: ReadonlyArray<string>): WrapperTarget | "both" | null {
   const text = lines.join(" ");
   const mentionsAgents = /\bAGENTS\.md\b/.test(text);
   const mentionsClaude = /\bCLAUDE\.md\b/.test(text);
-  if (mentionsAgents && !mentionsClaude) return "AGENTS.md";
-  if (mentionsClaude && !mentionsAgents) return "CLAUDE.md";
-  // Mentions both or neither: ambiguous, treat as real content.
+  if (mentionsAgents && mentionsClaude) return "both";
+  if (mentionsAgents) return "AGENTS.md";
+  if (mentionsClaude) return "CLAUDE.md";
   return null;
 }
 
@@ -202,7 +225,14 @@ export function classifyShape(files: ReadonlyArray<InstructionFile>): CanonicalS
 
   const claudeIsWrapper = claude.wrapperTarget === "AGENTS.md";
   const agentsIsWrapper = agents.wrapperTarget === "CLAUDE.md";
-  if (claudeIsWrapper && !agentsIsWrapper) return "agents-canonical";
+  if (claudeIsWrapper && !agentsIsWrapper) {
+    // A prose pointer states the intent but loads nothing (D2); only the root CLAUDE.md gets the
+    // shape whose sync adds the import, since a relative import in `.claude/CLAUDE.md` would
+    // resolve against `.claude/`.
+    return claude.relativePath === "CLAUDE.md" && !claude.wrapperUsesImport
+      ? "agents-prose"
+      : "agents-canonical";
+  }
   if (agentsIsWrapper && !claudeIsWrapper) return "claude-canonical";
   // D16: Claude Code loads AGENTS.md through the import line wherever it sits in CLAUDE.md, so
   // the pair is canonical in effect; the text around the line is CLAUDE.md's own and stays there.
@@ -317,6 +347,8 @@ export function classifyNormalization(
     case "agents-canonical":
     case "agents-imported":
       return "keep";
+    case "agents-prose":
+      return "add-import";
     case "agents-only":
       return "add-wrapper";
     case "none":

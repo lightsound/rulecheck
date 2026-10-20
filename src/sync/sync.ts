@@ -15,7 +15,13 @@ import type { PlatformError } from "effect/PlatformError";
 import { foreignRegionDrift } from "../domain/block.ts";
 import { statusLocation } from "../domain/pack.ts";
 import { isRulecheckCommit, planSync, pullRequestText, type SyncPlan } from "../domain/sync.ts";
-import type { Finding, Pack, PackStatusEntry, RepoReport } from "../domain/types.ts";
+import type {
+  CanonicalShape,
+  Finding,
+  Pack,
+  PackStatusEntry,
+  RepoReport,
+} from "../domain/types.ts";
 import {
   GitHub,
   type GitHubError,
@@ -132,6 +138,9 @@ export class SyncFailed extends Data.TaggedError("SyncFailed")<{
 export const branchFor = (pack: string): string => `agent-rules/${pack}`;
 
 const ROOT_PAIR = ["AGENTS.md", "CLAUDE.md", ".claude/CLAUDE.md"];
+
+/** Shapes in which Claude Code loads AGENTS.md: the end state of every normalization. */
+const LOADS_AGENTS: ReadonlySet<CanonicalShape> = new Set(["agents-canonical", "agents-imported"]);
 
 interface Measurement {
   readonly repo: RepoReport;
@@ -282,6 +291,12 @@ const deliver = Effect.fnUntraced(function* (
       `${name}: the planned ${plan.blockFile} would read as ${after.entry.status} (${after.entry.message ?? "no detail"}); refusing to write`,
     );
   }
+  // D2: a normalized pair must load AGENTS.md in Claude Code; an outdated block normalizes nothing.
+  if (before.entry.status === "eligible" && !LOADS_AGENTS.has(after.repo.shape)) {
+    return yield* refuse(
+      `${name}: the planned root pair would read as ${after.repo.shape}, which does not load AGENTS.md in Claude Code; refusing to write`,
+    );
+  }
   // D15: the planner already asserted this on its changes; assert it again on the planned tree
   // as scanned, so the promise holds for what is written, not for what was intended.
   for (const path of ROOT_PAIR) {
@@ -418,12 +433,16 @@ const measure = Effect.fnUntraced(function* (
  * Whether the plan carries existing text from one root-pair file into another (`claude-only`,
  * `claude-canonical`, `both-full`): some root-pair file other than the one receiving the block
  * had content before and is rewritten or removed. A block update or a plain insert touches one
- * content file, and a wrapper created from nothing carries no text.
+ * content file, a wrapper created from nothing carries no text, and an import line appended to a
+ * prose pointer (`agents-prose`) keeps every byte where it was.
  */
 function movesRootPairContent(plan: SyncPlan): boolean {
   return plan.changes.some(
     (change) =>
-      change.path !== plan.blockFile && ROOT_PAIR.includes(change.path) && change.before !== null,
+      change.path !== plan.blockFile &&
+      ROOT_PAIR.includes(change.path) &&
+      change.before !== null &&
+      !(change.after?.startsWith(change.before) ?? false),
   );
 }
 

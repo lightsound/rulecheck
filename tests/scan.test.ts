@@ -529,6 +529,7 @@ describe("scan: canonical by import (D16)", () => {
           "",
           "<!-- convex-ai-start -->",
           "Convex.",
+          "Use the Convex MCP server.",
           "<!-- convex-ai-end -->",
           "",
         ].join("\n"),
@@ -561,6 +562,67 @@ describe("scan: canonical by import (D16)", () => {
       expect(
         fenced.repos[0]?.files.find((f) => f.relativePath === "CLAUDE.md")?.importsAgentsMd,
       ).toBe(false);
+    } finally {
+      await rm(tree, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("scan: prose pointers", () => {
+  test("a CLAUDE.md that points at AGENTS.md only in words is agents-prose; content that mentions it is not", async () => {
+    const tree = await mkdtemp(join(tmpdir(), "rulecheck-prose-"));
+    try {
+      const pointers: Record<string, string> = {
+        "acme/see": "See AGENTS.md.\n",
+        "acme/titled": [
+          "# CLAUDE.md",
+          "",
+          "This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.",
+          "",
+          "Follow the instructions in [AGENTS.md](./AGENTS.md).",
+          "",
+        ].join("\n"),
+        "acme/japanese": "# CLAUDE.md\n\nAGENTS.md の指示に従ってください。\n",
+      };
+      const others: Record<string, string> = {
+        // Rules of its own next to the mention: D12 merges it, as before.
+        "acme/content": [
+          "# CLAUDE.md",
+          "",
+          "- Use Bun.",
+          "- Run `bun test` before committing.",
+          "- Never push to main.",
+          "- See AGENTS.md for the rest.",
+          "",
+        ].join("\n"),
+        "acme/import": "See @AGENTS.md for the rules.\n",
+        "acme/symlink": "AGENTS.md",
+      };
+      for (const [name, claude] of Object.entries({ ...pointers, ...others })) {
+        await mkdir(join(tree, `github.com/${name}`, ".git"), { recursive: true });
+        await put(`github.com/${name}/AGENTS.md`, "# Agents\n\n- Use Bun.\n", tree);
+        await put(`github.com/${name}/CLAUDE.md`, claude, tree);
+      }
+      const report = await run(scan(tree));
+      const shape = (name: string) => report.repos.find((r) => r.name === name);
+      for (const name of Object.keys(pointers)) {
+        expect(shape(name)?.shape).toBe("agents-prose");
+        expect(shape(name)?.normalization).toBe("add-import");
+        // Claude Code loads CLAUDE.md alone.
+        expect(shape(name)?.budget.claudeCode).toBe(
+          shape(name)?.files.find((f) => f.relativePath === "CLAUDE.md")?.tokens,
+        );
+      }
+      expect(shape("acme/content")).toMatchObject({ shape: "both-full", normalization: "merge" });
+      expect(shape("acme/import")?.shape).toBe("agents-canonical");
+      expect(shape("acme/symlink")?.shape).toBe("agents-canonical");
+      expect(report.totals.shapes["agents-prose"]).toBe(3);
+
+      const text = renderText(report);
+      expect(text).toContain("AGENTS.md via prose pointer");
+      expect(text).toContain(
+        "! CLAUDE.md points at AGENTS.md in prose; use `@AGENTS.md` so Claude Code loads it automatically",
+      );
     } finally {
       await rm(tree, { recursive: true, force: true });
     }

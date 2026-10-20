@@ -138,6 +138,8 @@ export function describeNormalization(normalization: Normalization, claude: stri
   switch (normalization) {
     case "keep":
       return "insert block into AGENTS.md";
+    case "add-import":
+      return `insert block into AGENTS.md, add \`@AGENTS.md\` to ${claude}`;
     case "add-wrapper":
       return "insert block into AGENTS.md, add CLAUDE.md wrapper";
     case "create":
@@ -228,7 +230,8 @@ export function classifyPackStatus(repo: RepoForDistribution, pack: Pack): PackS
   }
 
   // Files the sync would rewrite: only AGENTS.md when the pair is already canonical (strictly, or
-  // by import, D16), else both (a `both-full` pair is normalized in the same commit, D12).
+  // by import, D16), else both (a `both-full` pair is normalized in the same commit, D12; an
+  // `agents-prose` CLAUDE.md gets the import line appended).
   const touched = LEAVES_CLAUDE_ALONE.has(repo.shape)
     ? new Set(["AGENTS.md"])
     : new Set(["AGENTS.md", ...ROOT_CLAUDE]);
@@ -243,10 +246,14 @@ export function classifyPackStatus(repo: RepoForDistribution, pack: Pack): PackS
     };
   }
 
-  // A region stays in the file it is in (D15). Only a content AGENTS.md that the plan keeps in
-  // place may carry one; a file the plan moves, merges, drops, or replaces with the wrapper may not.
+  // A region stays in the file it is in (D15). Only a file the plan keeps in place may carry one:
+  // a content AGENTS.md, or the CLAUDE.md an `add-import` only appends to; a file the plan moves,
+  // merges, drops, or replaces with the wrapper may not.
   const kept = KEEPS_AGENTS_IN_PLACE.has(repo.shape) ? "AGENTS.md" : null;
-  const region = repo.foreignRegions.find((r) => touched.has(r.file) && r.file !== kept);
+  const appended = repo.shape === "agents-prose" ? "CLAUDE.md" : null;
+  const region = repo.foreignRegions.find(
+    (r) => touched.has(r.file) && r.file !== kept && r.file !== appended,
+  );
   if (region) {
     return {
       ...base,
@@ -262,7 +269,10 @@ export function classifyPackStatus(repo: RepoForDistribution, pack: Pack): PackS
     status: "eligible",
     file: contentFile(repo),
     line: null,
-    message: withRegions(eligibleAction(repo), kept ? regionsIn(repo, kept) : 0),
+    message: withRegions(
+      eligibleAction(repo),
+      (kept ? regionsIn(repo, kept) : 0) + (appended ? regionsIn(repo, appended) : 0),
+    ),
   };
 }
 
@@ -281,6 +291,7 @@ export function classifyIfSubscribed(repo: RepoForDistribution, pack: Pack): Pac
 const KEEPS_AGENTS_IN_PLACE: ReadonlySet<CanonicalShape> = new Set([
   "agents-canonical",
   "agents-imported",
+  "agents-prose",
   "agents-only",
   "both-full",
 ]);
