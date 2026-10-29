@@ -1311,6 +1311,35 @@ lossless normalizations, `add-import` and D12's `merge`.
 Consequence for D12: its wrapper threshold paragraph still holds for wrappers that load
 `AGENTS.md`; a prose wrapper is no longer `agents-canonical` but `agents-prose`.
 
+## 2026-10-29 D34: License moves from MIT to FSL-1.1-MIT; rulecheck merges into the RuleFleet repository
+
+From the commit that carries this entry, rulecheck is licensed under FSL-1.1-MIT, the same
+terms as RuleFleet. Everything up to and including `f8691ce` stays MIT: that commit is tagged
+`mit-final`, the MIT grant for it is irrevocable, and RuleFleet's production pin already
+points at exactly that commit.
+
+Reason: RuleFleet is to be sold as a hosted service, and the engine is where the product's
+value sits; the App is a view and a runner over it. Leaving the engine MIT while the shell
+was FSL protected the thin layer and gave away the thick one. Closing first keeps the future
+open: the copyright holder can relicense later versions back to MIT at any time (an open-core
+split, per package, after the merge), while code already released under MIT can never be
+taken back. Under FSL each version converts to MIT two years after it is made available, so
+while this repository stays public the protection in practice covers the newest two years of
+work. That is accepted as a deliberate trade-off; making the repository private remains
+available if stronger protection is ever needed.
+
+The two repositories merge as a separate step, after this change has settled: rulecheck moves
+into the rulefleet repository as `packages/rulecheck`, history preserved, and this repository
+is then archived. agent-rules does not move; it is data, not code.
+
+One consequence is recorded rather than discovered later: the design documents and history
+already published here, this file included, stay public after the archive. That is accepted.
+From this entry on, strategy documents (an M3 kickoff, pricing notes, and the like) are not
+added to this repository; until the merge they live in the private rulefleet repository.
+
+While the code is closed, outside contributions are not accepted without a CLA, so the option
+to relicense to MIT later stays exercisable by one signature.
+
 ## Recording rule
 
 Add an entry here whenever a decision changes what rulecheck writes, what it reports, or which
