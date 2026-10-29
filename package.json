@@ -2,7 +2,7 @@
   "name": "rulecheck",
   "version": "0.0.1",
   "description": "Health check for AI coding agent instruction files (AGENTS.md, CLAUDE.md, .cursor/rules) across many repositories",
-  "license": "MIT",
+  "license": "FSL-1.1-MIT",
   "type": "module",
   "private": true,
   "bin": {
